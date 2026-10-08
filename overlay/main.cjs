@@ -840,12 +840,12 @@ let relayDeepLinkDrain = null;
 let pendingRelayReader = null;
 
 function acknowledgeRelayDeepLink(parsed, status = "opened") {
-  if (!parsed?.handoffId) return;
+  if (!parsed?.handoffId) return Promise.resolve();
   const callback = new URL("/open/relay/ack", parsed.ackOrigin || webBase());
   callback.searchParams.set("handoff", parsed.handoffId);
   callback.searchParams.set("host", parsed.host);
   callback.searchParams.set("status", status);
-  shell.openExternal(callback.toString()).catch((error) =>
+  return shell.openExternal(callback.toString()).catch((error) =>
     console.error("[overlay] Relay handoff ACK failed:", error && error.message));
 }
 
@@ -879,14 +879,15 @@ async function openRelayDeepLink(parsed) {
     if (!Array.isArray(chat?.items) || !chat.items.some((item) => item?.relayId === parsed.messageId)) {
       throw new Error("Relay message is unavailable to this account.");
     }
-    acknowledgeRelayDeepLink(parsed, "accepted");
+    // One answer to the browser, and before the pill comes forward: every ACK
+    // opens a browser tab, so a late one would land on top of the open Relay.
+    await acknowledgeRelayDeepLink(parsed);
     await pushInbox(true);
     pendingRelayReader = { messageId: parsed.messageId, chatId, ...(parsed.host === "conductor" ? { app: "conductor" } : {}) };
     requestExternalReopen(randomUUID());
     // Hot Pills receive this immediately. Cold Pills keep it until the renderer
     // explicitly confirms that its openReader listener is installed.
     deliverPendingRelayReader();
-    acknowledgeRelayDeepLink(parsed);
     return;
   }
   const fetched = await new RelayClient().fetchRelay(parsed.messageId);
@@ -6186,6 +6187,19 @@ function appSurfaceInset() {
   const full = cardSize.w >= appSurface.workArea.width - 1 && cardSize.h >= appSurface.workArea.height - 1;
   return full ? { top: 0, right: 0 } : appSurface.inset;
 }
+// The full app fills its screen edge to edge, below the menu bar only. The
+// work area also leaves out the Dock, and that strip stays reserved even in
+// a full-screen Space where the Dock is hidden: the app ended short and the
+// app behind it showed through underneath (David, 2026-10-08). A visible Dock
+// draws over the bottom edge, as it does over any full-size app.
+function appSurfaceArea(display) {
+  const b = display.bounds, wa = display.workArea;
+  const top = Math.max(b.y, wa.y);
+  return { x: b.x, y: top, width: b.width, height: b.y + b.height - top };
+}
+function appSurfaceMessage() {
+  return { ...appSurface.inset, width: appSurface.workArea.width, height: appSurface.workArea.height };
+}
 function enterAppSurface() {
   if (appSurface || !win || win.isDestroyed()) return appSurface;
   let restore;
@@ -6196,7 +6210,7 @@ function enterAppSurface() {
   let display = null;
   try { display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()); } catch {}
   display = display || screen.getDisplayMatching(restore) || screen.getPrimaryDisplay();
-  const wa = display.workArea;
+  const wa = appSurfaceArea(display);
   const onThisScreen = restore.x >= wa.x && restore.x + restore.width <= wa.x + wa.width
     && restore.y >= wa.y && restore.y < wa.y + wa.height;
   appSurface = {
@@ -6217,7 +6231,7 @@ function enterAppSurface() {
   });
   try { win.setAlwaysOnTop(false); } catch {}
   overlayElevated = false;
-  try { win.webContents.send("relay:surfaceInset", appSurface.inset); } catch {}
+  try { win.webContents.send("relay:surfaceInset", appSurfaceMessage()); } catch {}
   try { win.setBounds(appSurface.workArea, false); } catch {}
   // The app you expanded is the app in front.
   try { win.moveTop(); win.focus(); } catch {}
@@ -6246,9 +6260,13 @@ function appSurfaceRefit() {
     try { display = screen.getDisplayMatching(appSurface.workArea) || screen.getPrimaryDisplay(); } catch {}
   }
   if (display) {
-    const wa = display.workArea;
+    const area = appSurfaceArea(display);
+    const changed = ["x", "y", "width", "height"].some((key) => area[key] !== appSurface.workArea[key]);
     appSurface.displayId = display.id;
-    appSurface.workArea = { x: wa.x, y: wa.y, width: wa.width, height: wa.height };
+    appSurface.workArea = area;
+    if (changed && win && !win.isDestroyed()) {
+      try { win.webContents.send("relay:surfaceInset", appSurfaceMessage()); } catch {}
+    }
   }
   return appSurface.workArea;
 }

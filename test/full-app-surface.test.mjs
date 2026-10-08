@@ -24,8 +24,8 @@ function harness() {
   };
   const app = { dock: { show: () => { calls.push(["dock", "show"]); return Promise.resolve(); }, hide: () => calls.push(["dock", "hide"]), setIcon: () => {} }, focus: () => calls.push(["appFocus"]) };
   const displays = [
-    { id: 1, workArea: { x: 0, y: 33, width: 1512, height: 894 } },
-    { id: 2, workArea: { x: 1512, y: 0, width: 2560, height: 1415 } },
+    { id: 1, bounds: { x: 0, y: 0, width: 1512, height: 982 }, workArea: { x: 0, y: 33, width: 1512, height: 894 } },
+    { id: 2, bounds: { x: 1512, y: 0, width: 2560, height: 1440 }, workArea: { x: 1512, y: 25, width: 2560, height: 1415 } },
   ];
   const pointer = { x: 1400, y: 60 };
   const on = (p) => displays.find((d) => p.x >= d.workArea.x && p.x < d.workArea.x + d.workArea.width) || displays[0];
@@ -72,21 +72,21 @@ function harness() {
 test("Expand grows the pill's surface to the screen and makes Relay an ordinary app", () => {
   const { calls, bounds, api } = harness();
   assert.equal(api.size(344, 524), null, "the small card never touches the surface");
-  api.size(1512, 894);
-  assert.deepEqual(bounds, { x: 0, y: 33, width: 1512, height: 894 }, "the surface is the work area");
-  assert.deepEqual(api.max(), { w: 1512, h: 894 });
+  api.size(1512, 949);
+  assert.deepEqual(bounds, { x: 0, y: 33, width: 1512, height: 949 }, "the surface is the whole screen below the menu bar, the Dock's strip included");
+  assert.deepEqual(api.max(), { w: 1512, h: 949 });
   assert.ok(calls.some((c) => c[0] === "alwaysOnTop" && c[1] === false), "not floating above other apps");
   assert.equal(api.elevated(), false);
   assert.ok(calls.some((c) => c[0] === "dock" && c[1] === "show"), "in the Dock and Cmd+Tab");
   assert.ok(calls.some((c) => c[0] === "focus"), "the app you expanded is in front");
   const inset = calls.find((c) => c[0] === "send" && c[1] === "relay:surfaceInset");
-  assert.deepEqual(inset[2], { top: 8, right: 8 }, "the small card's place inside the grown surface");
+  assert.deepEqual(inset[2], { top: 8, right: 8, width: 1512, height: 949 }, "the small card's place inside the grown surface, and the area it fills");
   assert.deepEqual(api.inset(), { top: 0, right: 0 }, "the full card fills the surface");
 });
 
 test("Collapse returns the pill to exactly where it was, on top, and hands the screen back", () => {
   const { calls, bounds, api } = harness();
-  api.size(1512, 894);
+  api.size(1512, 949);
   api.front("work.relay.application"); // the full app is the app in front
   api.size(344, 524, false);
   assert.equal(api.active(), true, "the surface waits for the fold to settle");
@@ -101,7 +101,7 @@ test("Collapse returns the pill to exactly where it was, on top, and hands the s
 
 test("Collapse never yanks focus from an app the person already switched to", () => {
   const { calls, api } = harness();
-  api.size(1512, 894);
+  api.size(1512, 949);
   api.front("com.google.Chrome");
   api.size(344, 524, true);
   assert.equal(calls.some((c) => c[0] === "execFile"), false);
@@ -120,19 +120,20 @@ test("the full app opens on the screen under the pointer, and a pill elsewhere g
   const { calls, bounds, pointer, api } = harness();
   pointer.x = 2000; pointer.y = 400; // looking at the second screen
   api.size(2560, 1415);
-  assert.deepEqual(bounds, { x: 1512, y: 0, width: 2560, height: 1415 });
+  assert.deepEqual(bounds, { x: 1512, y: 25, width: 2560, height: 1415 });
   const inset = calls.find((c) => c[0] === "send" && c[1] === "relay:surfaceInset");
-  assert.deepEqual(inset[2], { top: 0, right: 0 });
+  assert.deepEqual(inset[2], { top: 0, right: 0, width: 2560, height: 1415 });
   api.size(344, 524, true);
   assert.deepEqual(bounds, { x: 604, y: 41, width: 900, height: 800 }, "Collapse puts the pill back on its own screen");
 });
 
 test("a screen that changes under the full app refits it, and an unplugged one hands it to another", () => {
   const { displays, api } = harness();
-  api.size(1512, 894);
-  displays[0].workArea = { x: 0, y: 33, width: 1512, height: 830 }; // the Dock appeared
-  assert.deepEqual(api.refit(), { x: 0, y: 33, width: 1512, height: 830 });
+  api.size(1512, 949);
+  displays[0].bounds = { x: 0, y: 0, width: 1728, height: 1117 }; // a new resolution
+  displays[0].workArea = { x: 0, y: 33, width: 1728, height: 1030 };
+  assert.deepEqual(api.refit(), { x: 0, y: 33, width: 1728, height: 1084 });
   displays.splice(0, 1); // unplugged
   const moved = api.refit();
-  assert.deepEqual(moved, { x: 1512, y: 0, width: 2560, height: 1415 });
+  assert.deepEqual(moved, { x: 1512, y: 25, width: 2560, height: 1415 });
 });

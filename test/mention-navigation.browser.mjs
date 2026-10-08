@@ -126,7 +126,9 @@ try {
   await openRoomWithMentions(['relay_m30']);
   await page.waitForFunction(()=>activeMentionVisit?.ids.includes('relay_m30') && activeMentionVisit.visited.has('relay_m30'));
   assert.equal(await page.locator('.th-mention-jump').isVisible(),false);
-  await page.evaluate(()=>{ roomScrollElement().scrollTop=0; });
+  // The reader scrolls: a wheel first (a just-opened room holds its newest
+  // message until someone actually scrolls), then the distance.
+  await page.evaluate(()=>{ roomScrollElement().dispatchEvent(new WheelEvent('wheel',{bubbles:true,deltaY:-40})); roomScrollElement().scrollTop=0; });
   await page.waitForFunction(()=>mentionRowPlacement('relay_m30')==='below');
   assert.equal(await page.locator('.th-mention-jump').isVisible(),false);
   // A mention a screen above is offered, points up, and is retired the moment
@@ -136,7 +138,7 @@ try {
   assert.match(await page.locator('.th-mention-jump').innerText(),/↑/);
   // Entry pins the room to its newest message first; the reader scrolls after that.
   await page.waitForFunction(()=>!threadEntryFollowToken() && mentionRowPlacement('relay_m3')==='above');
-  await page.evaluate(()=>{ document.querySelector('[data-msg="relay_m3"]').scrollIntoView({block:'center'}); });
+  await page.evaluate(()=>{ roomScrollElement().dispatchEvent(new WheelEvent('wheel',{bubbles:true,deltaY:-40})); document.querySelector('[data-msg="relay_m3"]').scrollIntoView({block:'center'}); });
   await page.waitForFunction(()=>document.querySelector('.th-mention-jump')?.classList.contains('hidden'));
   assert.equal(await page.evaluate(()=>mentionRowPlacement('relay_m3')),'visible');
   assert.deepEqual(errors,[]);

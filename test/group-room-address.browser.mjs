@@ -81,6 +81,13 @@ try {
   ));
   assert.deepEqual(bannerRecipient, { groupId: "grp_granular" }, "the banner answers the group, not one member");
 
+  // The room's info sheet belongs to the room: leaving it closes the sheet.
+  await page.evaluate(() => openGroupInfo());
+  await page.waitForFunction(() => !document.getElementById("groupInfoBackdrop").classList.contains("hidden"));
+  await page.locator('.tab[data-view="contacts"]').click();
+  await page.waitForFunction(() => activeView === "contacts");
+  assert.equal(await page.evaluate(() => document.getElementById("groupInfoBackdrop").classList.contains("hidden")), true, "the sheet does not float over the list");
+
   assert.deepEqual(errors, []);
   console.log("group room address: ok");
 } finally {

@@ -4727,13 +4727,21 @@
   // Dev-gated (fullAppExpand): everyone else keeps the two-thirds card, never
   // wider or taller than the screen that holds it, which never grows the
   // native surface.
+  let surfaceFullSize = null; // the full app's exact area, from main, while it is on screen
   function wideSize() {
     const aw = Number(window.screen?.availWidth) || WIDE.w;
     const ah = Number(window.screen?.availHeight) || WIDE.h;
     if (payload.features?.fullAppExpand !== true) {
       return { w: Math.max(READER.w, Math.min(WIDE.w, aw - 48)), h: Math.max(EXPANDED.h, Math.min(WIDE.h, ah - 48)) };
     }
-    return { w: Math.max(READER.w, Math.round(aw)), h: Math.max(EXPANDED.h, Math.round(ah)) };
+    // The whole screen below the menu bar, Dock strip included (main sends
+    // the exact area once the surface has grown; until then the screen's
+    // height less the menu bar, exact on the main display).
+    if (surfaceFullSize) return { ...surfaceFullSize };
+    const sh = Number(window.screen?.height) || ah;
+    const sw = Number(window.screen?.width) || aw;
+    const menu = Math.max(0, Math.min(sh - ah, Number(window.screen?.availTop) || 0));
+    return { w: Math.max(READER.w, Math.round(sw)), h: Math.max(EXPANDED.h, Math.round(sh - menu)) };
   }
   // The frame the open card wears: the app expanded, else the reader's page,
   // else the small card.
@@ -9329,6 +9337,7 @@
   function openSlackMembers(room) {
     if (!room?.chatId) return;
     slackMembersRoomId = String(room.chatId);
+    groupInfoBackdropEl.dataset.room = String(threadDetailId || "");
     slackInvitePreviewFor = "";
     slackInviteError = "";
     slackInviteNeedsConnect = false;
@@ -13078,7 +13087,12 @@
       const target = event.target;
       const typing = target && (target.matches?.("input, textarea, select") || target.isContentEditable);
       if (!typing && ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) roomEntryStick = null;
-    } else if (event.type !== "pointerdown" || event.target === roomScrollElement()) {
+    } else if (event.type !== "pointerdown" || event.target === roomScrollElement()
+      || !event.target?.closest?.(".th-composer-dock")) {
+      // Any press in the conversation (a message, its menu, a link, a
+      // selection) is the person engaging with what is on screen; holding
+      // the room at its newest message would scroll that away and close an
+      // open menu under them. Pressing in the composer keeps the hold.
       roomEntryStick = null;
     }
     if (!threadEntryFollowToken() && !threadDetailLiveFollow.following) return;
@@ -13127,16 +13141,25 @@
     const viewportTop = roomScrollEl.getBoundingClientRect().top;
     const messages = [...thHistoryEl.querySelectorAll("[data-msg]")];
     const anchor = messages.find((message) => message.getBoundingClientRect().bottom > viewportTop) || null;
+    // A room at its newest message (or still settling there, never scrolled)
+    // comes back at its newest message, whatever loaded meanwhile: a pixel
+    // taken mid-load brought a folded chat back at the top of its history.
+    const gap = roomScrollEl.scrollHeight - roomScrollEl.clientHeight - roomScrollEl.scrollTop;
+    const atNewest = (typeof chatOrder === "function" && chatOrder() === "chat")
+      && (gap <= 2 || (typeof roomEntryStickActive === "function" && roomEntryStickActive())
+        || (typeof threadEntryFollowToken === "function" && Boolean(threadEntryFollowToken())));
     return {
       top: roomScrollEl.scrollTop,
       anchorId: anchor ? anchor.getAttribute("data-msg") : null,
       anchorOffset: anchor ? anchor.getBoundingClientRect().top - viewportTop : 0,
+      ...(atNewest ? { atNewest:true } : {}),
     };
   }
   function restoreRoomScroll(saved) {
     const roomScrollEl = roomScrollElement();
     if (!saved || !roomScrollEl) return;
     roomEntryStick = null; // a saved place wins over landing on the newest
+    if (saved.atNewest) { scrollRoomToNewest(true); return; }
     // Restore the numeric position first as a safe fallback. Then pin the same
     // visible message to the same viewport offset, so a refresh while reading
     // cannot shift the user when older/newer messages changed the room height.
@@ -15697,6 +15720,7 @@
   async function openGroupInfo() {
     const room = threadDetailId ? chatRoomForThread(threadDetailId) : null;
     if (!room || !room.isGroup) return;
+    groupInfoBackdropEl.dataset.room = String(threadDetailId);
     if (slackChannelRoom(room)) { openSlackMembers(room); return; }
     groupInfoBackdropEl.classList.remove("hidden");
     groupInfoDetailEl.innerHTML = `<div class="cv-empty">Loading group info…</div>`;
@@ -24041,7 +24065,11 @@
   }
   window.relay.onSurfaceInset?.((inset) => {
     surfaceInset = { top:Math.max(0, Number(inset.top) || 0), right:Math.max(0, Number(inset.right) || 0) };
+    surfaceFullSize = Number(inset.width) > 0 && Number(inset.height) > 0 ? { w:Math.round(inset.width), h:Math.round(inset.height) } : null;
     paintSurfaceInset();
+    // The card fills the area main grew the surface to.
+    if (surfaceFullSize && appExpanded && wideLayoutActive() && payload.features?.fullAppExpand === true
+      && (Math.abs(W.t - surfaceFullSize.w) > 1 || Math.abs(H.t - surfaceFullSize.h) > 1)) snapSize(surfaceFullSize.w, surfaceFullSize.h);
   });
   // The full app follows its screen: when the screen's usable area changes
   // (the Dock, a resolution change) main refits the window, and the card
@@ -24200,6 +24228,14 @@
     }
   }
   function applyView() {
+    // A room's info sheet belongs to that room: leaving it (a tab, Back,
+    // another chat) closes the sheet, or it floated over the next pane in
+    // the expanded app (2026-10-08).
+    const infoSheet = document.getElementById("groupInfoBackdrop");
+    if (infoSheet && !infoSheet.classList.contains("hidden")
+      && (activeView !== "threads" || String(threadDetailId || "") !== String(infoSheet.dataset.room || threadDetailId || ""))) {
+      closeGroupInfo();
+    }
     // The expanded app first: which pieces are the sidebar decides what the
     // rest of this pass shows and where.
     syncWideDom();

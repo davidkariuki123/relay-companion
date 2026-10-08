@@ -103,6 +103,20 @@ try {
   assert.ok(await gap() > 100, 'a real scroll is the person\'s and is never undone');
   await page.evaluate(() => document.getElementById('lateGrowth')?.remove());
 
+  // Folded while it was still settling at its newest message, a chat comes
+  // back there, not at the pixel it held mid-load.
+  await page.locator('#relaysList .relay-row[data-party="Shane Acton"]').click();
+  await page.waitForFunction(() => threadDetailId === 'room-shane');
+  await page.evaluate(() => { const late = document.createElement('div'); late.id = 'lateGrowth'; late.style.height = '1400px'; document.getElementById('thRows').prepend(late); roomScrollElement().scrollTop = 0; foldToPill(); });
+  await page.waitForFunction(() => collapsed);
+  await page.locator('#lockup .word').click();
+  await page.waitForFunction(() => !collapsed);
+  await settle();
+  assert.ok(await gap() <= 2, `a chat folded while settling came back ${await gap()}px short of its newest message`);
+  await page.evaluate(() => document.getElementById('lateGrowth')?.remove());
+  await page.locator('#relaysList .relay-row[data-party="Sven Wellmann"]').click();
+  await page.waitForFunction(() => threadDetailId === 'room-sven');
+
   // Switching chats beside the list is instant: one click merges the inbox at
   // most twice (before and after it marks the chat read), never once per row.
   for (const party of ['Shane Acton', 'Kiara Moodley', 'Sven Wellmann']) {
