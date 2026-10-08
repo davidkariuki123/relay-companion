@@ -41,3 +41,20 @@ test("after copying for a local AI, the screen shows the steps left to do there"
   assert.match(html, /else \{ localPromptCopiedFor = option\?\.host \|\| ""; onboardingAgentNote = ""; \}/);
   assert.match(html, /stopOnboardingAgentPoll\(\); onboardingAgentNote = ""; localPromptCopiedFor = "";/);
 });
+
+// Fresh Mac VM (2026-10-08): the person stepped away while Google's page was
+// open; the pill came back as "Setup expired. Start setup again." with jargon
+// about one-time approvals, though either sign-in button makes a fresh link.
+test("a sign-in that lapsed before anyone chose an account returns to the first screen", () => {
+  const start = html.indexOf("function expiredSignupStage(");
+  const source = html.slice(start, html.indexOf("\n  }\n", start) + 4);
+  const expiredSignupStage = new Function(`let signupAccount = null; ${source}; return expiredSignupStage;`)();
+  assert.equal(expiredSignupStage(null), "method");
+  assert.equal(expiredSignupStage(undefined), "method");
+  assert.equal(expiredSignupStage({ email: "sam@example.com" }), "expired");
+  assert.doesNotMatch(html, /signupStage = "expired"/, "every expiry goes through expiredSignupStage");
+  const expired = html.slice(html.indexOf('if (signupStage === "expired") {'), html.indexOf("return;", html.indexOf('if (signupStage === "expired") {')));
+  assert.match(expired, /That sign-in timed out\./);
+  assert.match(expired, />Sign in again</);
+  assert.doesNotMatch(expired, /authorization|approval|Restart setup/);
+});

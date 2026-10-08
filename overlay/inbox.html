@@ -22365,7 +22365,7 @@
     if (detail.includes("invalid_email_code")) return "That code isn’t right or has expired. Try again.";
     if (detail.includes("email_code_cooldown")) return "A code was just sent. Check your inbox or wait a moment.";
     if (detail.includes("email_rate_limited")) return "Too many codes were requested. Try again later.";
-    if (detail.includes("authorization_expired")) return "Setup expired. Start again.";
+    if (detail.includes("authorization_expired")) return "That sign-in timed out. Sign in again.";
     if (detail.includes("authorization_changed")) return "Setup changed securely. Resume setup to continue.";
     if (detail.includes("authorization_recovery_failed")) return "Relay could not recover the approved setup. Restart setup to create a new one-time approval.";
     if (detail.includes("request_timeout")) return "Relay took too long to respond. Try again.";
@@ -22393,7 +22393,7 @@
       detail.includes("authorization_recovery_failed") ||
       detail.includes("pkce_verification_failed")
     ) signupStage = "restart-required";
-    else if (detail.includes("authorization_expired")) signupStage = "expired";
+    else if (detail.includes("authorization_expired")) signupStage = expiredSignupStage();
     signupError = signupFailureMessage(reason, fallback);
     renderSignup();
   }
@@ -22416,12 +22416,22 @@
     });
   }
 
+  // A sign-in link that lapsed before anyone chose an account is nothing to
+  // recover: both sign-in buttons on the first screen quietly make a fresh one
+  // (activeContext in installation-authorization.js). Someone who stepped away
+  // mid-sign-in used to land on "Setup expired" with a Restart button (fresh
+  // Mac VM, 2026-10-08). Only a link someone already signed in through asks
+  // them to sign in again.
+  function expiredSignupStage(account = signupAccount) {
+    return account && typeof account === "object" ? "expired" : "method";
+  }
+
   function applyInstallationState(state) {
     if (!state || typeof state !== "object") return;
     if (state.account && typeof state.account === "object") signupAccount = state.account;
     if (state.status === "pending_approval") signupStage = payload.ui?.desktopOnboarding ? "google" : "approval";
     else if (state.status === "approved" || state.status === "consumed") signupStage = "finishing";
-    else if (state.status === "expired") signupStage = "expired";
+    else if (state.status === "expired") signupStage = expiredSignupStage(state.account || signupAccount);
   }
 
   function stopSignupPolling() {
@@ -22477,7 +22487,7 @@
           detail.includes("authorization_recovery_failed") ||
           detail.includes("pkce_verification_failed")
         ) { signupStage = "restart-required"; terminalRecovery = true; }
-        else if (detail.includes("authorization_expired")) { signupStage = "expired"; terminalRecovery = true; }
+        else if (detail.includes("authorization_expired")) { signupStage = expiredSignupStage(); terminalRecovery = true; }
         if (terminalRecovery || signupPollFailures >= SIGNUP_POLL_SURFACE_FAILURE) {
           signupPollErrorVisible = true;
           signupError = signupFailureMessage(reason, "Relay couldn’t check setup safely. Resume setup to try again.");
@@ -22555,7 +22565,7 @@
       if (!state || state.status === "idle") {
         state = { status: "idle" };
       } else if (state.status === "expired") {
-        signupStage = "expired";
+        signupStage = expiredSignupStage(state.account);
       } else if (resumedExistingApproval) {
         signupStage = "resume";
       }
@@ -23614,7 +23624,7 @@
       return;
     }
     if (signupStage === "expired") {
-      signupBodyEl.innerHTML = `<p class="su-step">Setup expired</p><h1 class="su-title">Start setup again.</h1><p class="su-copy">The one-time setup authorization expired without connecting this computer. Restart removes only that expired approval before creating a replacement.</p><div class="su-form"><button class="su-primary" id="suRestart" type="button"${busy}>Restart setup</button></div>${error}`;
+      signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">That sign-in timed out.</h1><p class="su-copy">Nothing was connected. Sign in again to finish setting up Relay.</p><div class="su-form"><button class="su-primary" id="suRestart" type="button"${busy}>Sign in again</button></div>`;
       document.getElementById("suRestart")?.addEventListener("click", () => restartInstallationSetup());
       return;
     }

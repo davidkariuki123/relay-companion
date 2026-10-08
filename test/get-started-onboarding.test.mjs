@@ -19,13 +19,14 @@ const slice = (start, end) => {
   return html.slice(i, j);
 };
 
-function signInHarness({ agentInstalled = true, status = "idle", signInFails = false } = {}) {
+function signInHarness({ agentInstalled = true, status = "idle", account = undefined, signInFails = false } = {}) {
   const source = slice("  function signupFailureMessage(reason, fallback) {", "  function cancelSetupButton() {")
+    + slice("  function expiredSignupStage(", "  function applyInstallationState(")
     + slice("  async function initializeInstallationAuthorization(", "  let networkInvite = ");
   const calls = [];
   const context = vm.createContext({
     window: { relay: {
-      installationAuthState: async () => { calls.push("state"); return { status }; },
+      installationAuthState: async () => { calls.push("state"); return account ? { status, account } : { status }; },
       installationAuthSignIn: async (options) => {
         // The options object crosses the vm realm; keep its text instead.
         calls.push(["signIn", JSON.stringify(options)]);
@@ -34,7 +35,7 @@ function signInHarness({ agentInstalled = true, status = "idle", signInFails = f
       },
     } },
     payload: { account: { paired: false }, ui: { agentInstalled } },
-    signupStateLoaded: false, signupBusy: false, signupError: "", signupStage: "",
+    signupStateLoaded: false, signupBusy: false, signupError: "", signupStage: "", signupAccount: null,
     signupForceGoogleSelection: false, signupAutoSignInStarted: false,
     pendingOpenSignupCard: () => "", rendererSurfaceActive: () => true,
     renderSignup: () => calls.push("render"), applyInstallationState: (state) => {
@@ -68,9 +69,12 @@ test("without the setup marker the method stage waits for a click", async () => 
   assert.equal(h.context.signupAutoSignInStarted, false);
 });
 
+// A lapsed link nobody signed in through goes back to the first screen (its
+// buttons make a fresh link); one someone already signed in through asks them
+// to sign in again. Neither opens a browser on its own.
 test("an unfinished or expired approval keeps its recovery screen instead of a new sign-in", async () => {
-  for (const [status, stage] of [["pending_identity", "resume"], ["expired", "expired"]]) {
-    const h = signInHarness({ status });
+  for (const [status, account, stage] of [["pending_identity", undefined, "resume"], ["expired", undefined, "method"], ["expired", { email: "sam@example.com" }, "expired"]]) {
+    const h = signInHarness({ status, account });
     await h.context.initializeInstallationAuthorization();
     assert.deepEqual(h.signIns(), [], status);
     assert.equal(h.context.signupStage, stage);
