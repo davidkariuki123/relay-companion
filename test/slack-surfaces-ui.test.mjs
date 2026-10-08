@@ -30,6 +30,7 @@ function chatsRuntime(payload) {
     const assignFallbackChatIds = () => {};
     const knownAddresses = () => new Set();
     const isRequestRoom = () => false;
+    function slackMessagesVisible() { return false; }
     ${between(html, "function isSlackIntegratedRoom(room)", "\n  // The background service stages")}
     ${between(html, "function normalizedPartyName(", "function chatRoomForThread(")}
     ${between(html, "function slackChannelRoomListed(room)", "// Inbox has Chats")}
@@ -472,4 +473,28 @@ test("one person is one chat from the first paint, and Slack's 'You' DM is your 
   assert.match(fn, /\|\| \(payload\.contacts \|\| \[\]\)\.find\(\(candidate\) => String\(candidate\.relayUserId \|\| ""\) === id\)/);
   // A DM whose every participant is you joins your note-to-self chat.
   assert.match(fn, /participants\.every\(\(person\) => person\.self\)/);
+});
+
+test("half-duplex: opening a DM that also posts to Slack never makes it a second, Slack-badged chat", () => {
+  const pick = (start, end) => html.slice(html.indexOf(start), html.indexOf(end, html.indexOf(start)));
+  const runtime = new Function(`
+    function slackMessagesVisible() { return false; }
+    ${pick("  function isSlackIntegratedRoom(", "  // The background service stages")}
+    ${pick("  function slackIntegrationForChat(", "  function roomFromChatSummary(")}
+    return { halfDuplexDmLink, isSlackIntegratedRoom, slackIntegrationForChat };
+  `)();
+  const dm = { chatId:"chat_self", integration:{ provider:"slack", type:"im", conversationId:"D1" } };
+  const channel = { chatId:"chat_code", integration:{ provider:"slack", type:"public_channel", conversationId:"C1" }, channel:{ slack:{ type:"public_channel" } } };
+  assert.equal(runtime.isSlackIntegratedRoom(dm), false, "a Slack DM link leaves the Relay chat a Relay chat");
+  assert.equal(runtime.slackIntegrationForChat(dm), null);
+  assert.equal(runtime.isSlackIntegratedRoom({ integration:{ provider:"slack", type:"mpim" } }), false);
+  assert.equal(runtime.isSlackIntegratedRoom(channel), true, "a channel stays a Slack room");
+  assert.equal(runtime.slackIntegrationForChat(channel)?.type, "public_channel");
+  assert.equal(runtime.isSlackIntegratedRoom({ integration:{ provider:"slack" } }), true, "an untyped link from an older server is never dropped");
+  // Storing an opened chat must not copy its DM link onto the list's summary.
+  const store = pick("  function storeCanonicalChatDetail(", "  async function refreshActiveCanonicalChat(");
+  assert.match(store, /chat\.integration && !halfDuplexDmLink\(chat\.integration\)/);
+  assert.match(store, /chat\.channel && !halfDuplexDmLink\(chat\.channel\.slack\)/);
+  // Nor project the DM's stored detail as a second message stream (the stray "You" row).
+  assert.match(html, /integration\?\.provider !== "slack" \|\| halfDuplexDmLink\(integration\)\) continue;/);
 });

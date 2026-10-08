@@ -7274,11 +7274,21 @@
     return source === "slack" ? "slack" : "relay";
   }
   function isSlackIntegratedRoom(room) {
+    if (room && halfDuplexDmLink(room.integration?.provider === "slack" ? room.integration : room.channel?.slack)) return false;
     return Boolean(room && (
       room.integration?.provider === "slack"
       || room.channel?.slack
       || room.provider === "slack"
     ));
+  }
+  // Half-duplex (Granola call, 2026-10-08): only a Slack CHANNEL is a Slack
+  // room in Relay. A DM that also posts to Slack is just its Relay chat, so its
+  // Slack link must never turn it into a second, Slack-badged row (opening a
+  // Relay from a Slack card fetched the self chat with its im link and the
+  // list grew a "You" row beside "David Kariuki").
+  function halfDuplexDmLink(integration) {
+    if (!integration || slackMessagesVisible()) return false;
+    return ["im", "mpim"].includes(String(integration.type || ""));
   }
   // The background service stages inbound Relay rows into the local store
   // this transcript reads, while the person's own messages and their read
@@ -7481,8 +7491,8 @@
         ? {
             ...summary,
             threadIds:[...new Set([...(summary.threadIds || []), ...(chat.threadIds || [])])],
-            ...(chat.integration ? { integration:chat.integration } : {}),
-            ...(chat.channel ? { channel:chat.channel } : {}),
+            ...(chat.integration && !halfDuplexDmLink(chat.integration) ? { integration:chat.integration } : {}),
+            ...(chat.channel && !halfDuplexDmLink(chat.channel.slack) ? { channel:chat.channel } : {}),
           }
         : summary);
     }
@@ -17691,7 +17701,9 @@
       const integration = chat?.integration || (chat?.channel?.slack
         ? { provider:"slack", ...chat.channel.slack }
         : null);
-      if (!chat || integration?.provider !== "slack") continue;
+      // Half-duplex: a DM's Relay messages are already here from Sent and the
+      // inbox; projecting its Slack-linked detail again drew a second "You" room.
+      if (!chat || integration?.provider !== "slack" || halfDuplexDmLink(integration)) continue;
       const integrationType = String(integration.type || "");
       const isGroup = chat.kind === "group" || integrationType === "mpim"
         || integrationType === "public_channel" || integrationType === "private_channel";
@@ -18121,8 +18133,10 @@
     return contactChatAnchors.get(id) || null;
   }
   function slackIntegrationForChat(chat) {
-    if (chat?.integration?.provider === "slack") return chat.integration;
-    return chat?.channel?.slack ? { provider:"slack", ...chat.channel.slack } : null;
+    const integration = chat?.integration?.provider === "slack"
+      ? chat.integration
+      : chat?.channel?.slack ? { provider:"slack", ...chat.channel.slack } : null;
+    return halfDuplexDmLink(integration) ? null : integration;
   }
   function roomFromChatSummary(chat) {
     const integration = slackIntegrationForChat(chat);
