@@ -168,6 +168,31 @@ test("a request is a direct Relay room from an address you do not know and never
   assert.match(model, /return account \? `\$\{IGNORED_REQUESTS_PREF\}:\$\{account\}` : "";/);
 });
 
+test("a reply through your own link is a conversation, never a request", () => {
+  const src = slice("  function roomAddress(room)", "  function requestAddresses()");
+  const isRequestRoom = new Function(`"use strict"; ${src}; return isRequestRoom;`)();
+  const known = new Set(["sam@example.test"]);
+  const jo = { partyKey: "email:slm_1@guests.sendrelays.com", msgs: [{ direction: "in", source: { host: "share_link" } }] };
+  assert.equal(isRequestRoom(jo, known), false, "Jo answered the link you sent her");
+  const stranger = { partyKey: "email:stranger@example.test", msgs: [{ direction: "in", source: { host: "relay-mcp" } }] };
+  assert.equal(isRequestRoom(stranger, known), true, "a stranger writing first is still a request");
+});
+
+test("a link reply's room opens with the note you sent, and replies go to that person", () => {
+  const block = slice("const linkNotes = new Map(", "for (const message of msgs) {");
+  const run = new Function("msgs", `"use strict"; ${block} return msgs;`);
+  const note = { id: "relay_link", direction: "out", partyKey: "share:shl_1", threadId: "relay_link", title: "hey jo", addressRecipient: { email: "shl_1@guests.sendrelays.com" } };
+  const reply = (who, at) => ({ id: `relay_${who}`, direction: "in", partyKey: `email:slm_${who}@guests.sendrelays.com`, threadId: `copy_${who}`, party: who,
+    addressRecipient: { email: `slm_${who}@guests.sendrelays.com` }, source: { host: "share_link", shareLinkId: "shl_1" }, at });
+  const msgs = run([note, reply("jo", 1), reply("jo", 2), reply("priya", 3)]);
+  const notes = msgs.filter((m) => m.linkNote);
+  assert.deepEqual(notes.map((m) => m.partyKey), ["email:slm_jo@guests.sendrelays.com", "email:slm_priya@guests.sendrelays.com"], "one note per person who replied");
+  assert.deepEqual(notes[1].addressRecipient, { email: "slm_priya@guests.sendrelays.com" }, "your answer goes to Priya, not back to the link");
+  assert.equal(notes[1].threadId, "copy_priya");
+  const forged = run([note, { ...reply("x", 4), source: { host: "relay-device-direct", shareLinkId: "shl_1" } }]);
+  assert.equal(forged.some((m) => m.linkNote), false, "only a real share-link reply pulls in your note");
+});
+
 test("Ignore belongs to the account that clicked it, and nothing is read or written without one", () => {
   const src = slice("  const IGNORED_REQUESTS_PREF", "  function knownAddresses()");
   const store = new Map();

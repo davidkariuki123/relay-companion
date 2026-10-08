@@ -14165,6 +14165,11 @@
     const address = roomAddress(room);
     if (!address || known.has(address)) return false;
     if ((room.msgs || []).some((message) => message.direction === "out")) return false;
+    // A reply through one of your own links is someone you invited: you sent
+    // them the link. Their guest address is per person and never matches the
+    // link's own room, so without this every link reply sat in Requests beside
+    // "Delete all" (live run, Jo replying to "Your parcel is with me", 2026-10-08).
+    if ((room.msgs || []).some((message) => message.source?.host === "share_link")) return false;
     return true;
   }
   function requestAddresses() {
@@ -17076,6 +17081,22 @@
         continue;
       }
       msgs.push(optimistic);
+    }
+    // A reply through your link opens its own person's room, while the note
+    // you sent stays in the link's hidden room, so the conversation began at
+    // "6 is perfect" with nothing it answers (live run, Jo, 2026-10-08). The
+    // server stamps which link a reply came through; that person's room opens
+    // with your note. Replies still address the person, never the link.
+    const linkNotes = new Map(msgs.filter((m) => m.direction === "out" && String(m.partyKey || "").startsWith("share:"))
+      .map((m) => [String(m.partyKey).slice(6), m]));
+    const notedRooms = new Set();
+    for (const reply of [...msgs]) {
+      const linkId = reply.direction === "in" && reply.source?.host === "share_link" ? String(reply.source.shareLinkId || "") : "";
+      const note = linkId && linkNotes.get(linkId);
+      if (!note || notedRooms.has(reply.partyKey)) continue;
+      notedRooms.add(reply.partyKey);
+      msgs.push({ ...note, partyKey: reply.partyKey, threadId: reply.threadId, party: reply.party,
+        addressRecipient: reply.addressRecipient, isGroup: false, groupId: "", groupName: "", linkNote: true });
     }
     for (const message of msgs) {
       if (message.direction !== "out") continue;
