@@ -849,7 +849,9 @@ async function openRelayDeepLink(parsed) {
     import(pathToFileURL(path.join(__dirname, "..", "src", "client.js")).href),
     loadPlainStager(),
   ]);
-  if (parsed.host === "relay") {
+  // Open Relay (and Conductor, which starts from the Relay the pill opens):
+  // the Relay itself, in the pill, from a Slack card.
+  if (parsed.host === "relay" || parsed.host === "conductor") {
     const client = new RelayClient();
     await refreshCanonicalChats();
     const chatId = String(
@@ -865,7 +867,7 @@ async function openRelayDeepLink(parsed) {
     }
     acknowledgeRelayDeepLink(parsed, "accepted");
     await pushInbox(true);
-    pendingRelayReader = { messageId: parsed.messageId, chatId };
+    pendingRelayReader = { messageId: parsed.messageId, chatId, ...(parsed.host === "conductor" ? { app: "conductor" } : {}) };
     requestExternalReopen(randomUUID());
     // Hot Pills receive this immediately. Cold Pills keep it until the renderer
     // explicitly confirms that its openReader listener is installed.

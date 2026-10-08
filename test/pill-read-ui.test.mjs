@@ -182,7 +182,7 @@ test("Slack Settings is one truthful card with the official mark and no optimist
     "permanent account actions stay ordinary page controls instead of trapping Settings in a modal menu role");
   assert.doesNotMatch(html, /class="open-actions sv-actions" data-stop="1" role="menu"/);
   // One line says it; no second paragraph repeating the card.
-  assert.match(slackSettings, /: "Your channels and DMs, synced";/);
+  assert.match(slackSettings, /: "Send Relays to your channels";/);
   assert.doesNotMatch(slackSettings, /sv-slack-foot/);
   assert.match(slackSettings, /\? "Connected · messages sync both ways"/);
   assert.match(slackSettings, /\? "Click Allow in your browser"/);

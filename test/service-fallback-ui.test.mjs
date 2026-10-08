@@ -46,7 +46,7 @@ test("the pill judges the daemon's heartbeat on its own tick and repairs it thro
 });
 
 test("a Relay room reads the server's page of the conversation while the service is not ok, and only then", () => {
-  const helper = between(inbox, "function serviceDegraded()", "function slackMessagesVisible(room)");
+  const helper = between(inbox, "function serviceDegraded()", "function slackMessagesVisible(");
   assert.match(helper, /daemon === "checking" \|\| daemon === "repairing" \|\| daemon === "stopped"/);
   assert.match(helper, /function serverTranscriptRoom\(room\)/);
   assert.match(helper, /if \(!chatId \|\| isSlackIntegratedRoom\(room\)\) return false;/, "Slack rooms keep their own path");

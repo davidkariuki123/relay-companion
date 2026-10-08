@@ -46,7 +46,7 @@ function parseRelayDeepLink(value) {
     || (chatId && !CHAT_ID.test(chatId))
     || (handoffId && !HANDOFF_ID.test(handoffId))
     || (rawAckOrigin && !ackOrigin)
-    || !["relay", "codex", "claude"].includes(rawHost)
+    || !["relay", "codex", "claude", "conductor"].includes(rawHost)
   ) return null;
   return {
     messageId,

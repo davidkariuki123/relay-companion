@@ -105,6 +105,9 @@ try {
   assert.equal(await page.locator('.th-under .th-seen').last().textContent(), "Delivered");
   // Reading older messages and selecting text must survive routine updates.
   await page.evaluate(() => {
+    // The reader scrolls up: a wheel first (a freshly opened room holds its
+    // newest message until someone actually scrolls), then the distance.
+    roomScrollElement().dispatchEvent(new WheelEvent("wheel", { bubbles:true, deltaY:-40 }));
     roomScrollElement().scrollTop = 120;
     window.readingTop = roomScrollElement().scrollTop;
     const range = document.createRange(); range.selectNodeContents(oldText.querySelector(".th-msg-title"));

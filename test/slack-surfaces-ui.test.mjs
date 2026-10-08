@@ -61,7 +61,10 @@ test("there is no Slack tab: the nav, view, list, badge and renderer are gone", 
   // One list of chats: no separate Slack branch inside chatSections.
   const sections = between(html, "function chatSections()", "function chatRoomForThread(");
   assert.doesNotMatch(sections, /surface === "slack"/);
-  assert.match(sections, /const slackSummaries = payload\.features\?\.slack === true \? \(payload\.slackChats \|\| \[\]\) : \[\];/);
+  // Relay → Slack only: Slack channels come along as places to send to,
+  // stripped of everything Slack itself said; Slack DMs not at all.
+  assert.match(sections, /\.filter\(\(chat\) => \["public_channel", "private_channel"\]\.includes\(slackIntegrationForChat\(chat\)\?\.type\)\)/);
+  assert.match(sections, /\.map\(\(chat\) => \(\{ \.\.\.chat, lastMessage:null, unreadCount:0, messageCount:0, threadIds:\[\] \}\)\)/);
   assert.match(sections, /for \(const chat of \[\.\.\.\(payload\.chats \|\| \[\]\), \.\.\.slackSummaries\]\)/);
 });
 
@@ -82,17 +85,15 @@ test("Relay and Slack summaries of one chat merge into one room in Chats, by cha
   const runtime = chatsRuntime(payload);
   const { rooms } = runtime.chatSections();
   const product = rooms.filter((room) => room.chatId === "chat_product");
-  assert.equal(product.length, 1, "one chat, one room, wherever its messages were typed");
+  assert.equal(product.length, 1, "one channel, one room");
   assert.equal(product[0].name, "#product", "a Slack channel reads the way Slack writes it");
-  assert.equal(product[0].unreadCount, 3, "the merged room carries the larger unread count");
-  assert.equal(product[0].latest.id, "relay_2", "the newest message from either side leads");
-  assert.equal(product[0].messageCount, 5, "freshness keys follow the Slack projection the room opens on");
+  assert.equal(product[0].unreadCount, 1, "only Relay's own messages count; Slack's never do");
+  assert.equal(product[0].latest.id, "relay_1", "the preview is the newest message sent from Relay");
 
   const listed = runtime.relayIdentityRows().map((room) => room.chatId);
-  assert.ok(listed.includes("chat_product"));
-  assert.ok(listed.includes("chat_design"), "a Slack channel you are in is listed before anyone writes in it");
-  assert.ok(listed.includes("chat_dm_live"), "a Slack DM joins once it has a message");
-  assert.ok(!listed.includes("chat_dm"), "a quiet Slack DM stays out");
+  assert.ok(listed.includes("chat_product"), "a channel something was sent to from Relay is listed");
+  assert.ok(!listed.includes("chat_design"), "a channel nothing was sent to stays out of Chats (found in search and Groups)");
+  assert.ok(!listed.includes("chat_dm_live") && !listed.includes("chat_dm"), "Slack DMs are not rooms: Relay → Slack only");
   assert.ok(!listed.includes("chat_old"), "an archived channel stays out");
 
   const off = chatsRuntime({ ...payload, features: { slack: false } });
@@ -116,8 +117,8 @@ test("a Slack-linked row wears the Slack mark on its avatar, and a channel wears
 
 test("Connect is one row at the top of Chats in plain words, with no signup escape copy", () => {
   const nudge = between(html, "function slackNudgeState()", "function renderSetupNudge()");
-  assert.match(nudge, /: slackConnectionInfo\?\.team\?\.connected \? "Sync your messages with Slack"\s*: "Bring your Slack chats here";/,
-    "a teammate already seated in Slack groups is asked to sync, a newcomer to bring their chats");
+  assert.match(nudge, /: slackConnectionInfo\?\.team\?\.connected \? "Post to Slack as you"\s*: "Send Relays to Slack";/,
+    "Slack is somewhere Relays go, not a feed that comes in");
   assert.match(nudge, /: "Connect";/);
   assert.match(nudge, /state === "waiting" \|\| state === "opening" \? "Click Allow in your browser"/);
   assert.match(nudge, /state === "waiting" \? "Open again"/);
@@ -137,10 +138,9 @@ test("Slack surfaces and transport are fail-closed outside the dev feature row",
   assert.doesNotMatch(html, /data-view="slack"/, "no build has a Slack tab");
   assert.match(html, /function slackNudgeState\(\) \{\s*if \(payload\.features\?\.slack !== true \|\| !window\.relay\.slackConnect\) return "";/,
     "the Chats row cannot paint while the feature is off");
-  assert.match(html, /function slackMessagesVisible\(room\) \{\s*return payload\.features\?\.slack === true && isSlackIntegratedRoom\(room\);/);
+  assert.match(html, /function slackMessagesVisible\(\) \{\s*return false;/, "Slack's own messages never come into Relay");
   assert.match(html, /function slackChannelRoomListed\(room\) \{\s*if \(payload\.features\?\.slack !== true \|\| !isSlackIntegratedRoom\(room\)\) return false;/);
-  assert.match(html, /const slackUnread = payload\.features\?\.slack === true \? \(payload\.slackChats \|\| \[\]\)\.reduce\(/,
-    "Slack unread never counts for an account without the feature");
+  assert.doesNotMatch(html, /const slackUnread =/, "Slack unread never counts");
   assert.match(html, /function slackSettingsHtml\(info\) \{\s*if \(payload\.features\?\.slack !== true\) return "";/,
     "Settings cannot paint a Slack card while the feature is off");
   assert.match(html, /async function refreshSlackConnection[\s\S]{0,140}payload\.features\?\.slack !== true\) return;/,
@@ -173,21 +173,17 @@ test("the Companion requests Relay-hidden and Slack-visible projections explicit
     "Slack has its own linked-conversation projection");
   assert.match(detailClient, /const relayPath = `\$\{managedBase\}\?surface=relay\$\{suffix\}`/);
   assert.match(detailClient, /surface=slack&includeSlack=true/);
-  assert.match(detailClient, /surface=relay&includeSlack=true/,
-    "Slack enters Relays only through the explicit reveal path");
+  assert.match(detailClient, /surface=relay&includeSlack=true/);
 
   const visibility = html.slice(html.indexOf("function conversationSurface("), html.indexOf("// Store one server generation"));
   assert.match(visibility, /return source === "slack" \? "slack" : "relay"/);
   assert.doesNotMatch(visibility, /slackVisibilityOverrides|slackVisibilityKey/, "visibility is not a per-room toggle any more");
 
-  // A Slack-integrated room opened from any list reads Slack's projection of
-  // itself (every message, Slack's read cursor); Back still returns to that list.
+  // A Slack channel room reads Relay's side of itself only: what was sent
+  // from Relay. Nothing opens on Slack's projection any more.
   const open = between(html, "function openThreadDetail(", "// ---------- Settings view");
-  assert.match(open, /const roomFromList = isConversationRoomSource\(source\) \? chatRoomForThread\(threadId, "relay"\) : null;/);
-  assert.match(open, /if \(isConversationRoomSource\(source\) && payload\.features\?\.slack === true && isSlackIntegratedRoom\(roomFromList\)\) \{\s*source = "slack";\s*\}/);
-  assert.ok(open.indexOf('const returnSource = source === "slack" ? "relays" : source;') >= 0
-    && open.indexOf('const returnSource = source === "slack" ? "relays" : source;') < open.indexOf('source = "slack";'),
-    "the list a room came from is remembered before the projection switches");
+  assert.match(open, /if \(source === "slack"\) source = "relays";/);
+  assert.doesNotMatch(open, /source = "slack";/);
   assert.match(open, /threadsReturnSource = returnSource;/);
 });
 
@@ -220,16 +216,18 @@ test("a Slack-linked room shows every message and says so once, with the Slack m
   // Slack's own words: "Message #code" in a channel, "Message Sven" in a DM.
   assert.match(html, /\? `Message \$\{slackChannelLabel\(room\)\}` : `Message \$\{name\.split\(\/\\s\+\/\)\[0\]\}`;/);
   assert.match(html, /slackComposerPlaceholder\(chatRoom\) \|\| "Reply…"/);
-  // A channel nobody has written in since it connected is quiet, not broken.
-  assert.match(html, /"Nothing here yet\. It syncs with Slack\."/);
+  // A channel nothing was sent to yet says what sending does.
+  assert.match(html, /`Nothing sent from Relay yet\. What you send here posts to \$\{slackChannelLabel\(chatRoom\)\} in Slack\.`/);
+  // And once there are messages, the top of the room says it once, quietly.
+  assert.match(html, /What you send here also posts to <b>\$\{esc\(slackChannelLabel\(chatRoom\)\)\}<\/b> in Slack\. Replies stay in Slack\./);
 });
 
-test("Inbox counts Relay and Slack unread in one number", () => {
+test("Inbox counts Relay's own unread only; Slack's messages never count", () => {
   assert.match(main, /slackChats\s*:/,
-    "the payload still carries Slack summaries beside Relay summaries");
+    "the payload still carries Slack channel summaries, as places to send to");
   const renderAll = between(html, "function renderAll()", "function onPayload");
-  assert.match(renderAll, /const slackUnread = payload\.features\?\.slack === true \? \(payload\.slackChats \|\| \[\]\)\.reduce\(\s*\(sum, chat\) => sum \+ Math\.max\(0, Number\(chat\?\.unreadCount \|\| 0\)\), 0\) : 0;/);
-  assert.match(renderAll, /const unread = relayUnreadIds\.size \+ slackUnread;/);
+  assert.doesNotMatch(renderAll, /slackUnread/);
+  assert.match(renderAll, /const unread = relayUnreadIds\.size;/);
   assert.match(renderAll, /setBadge\(relaysBadgeEl, unread\);/);
   assert.doesNotMatch(renderAll, /slackBadgeEl/);
 
@@ -396,7 +394,7 @@ test("canonical responses match the still-visible room, surface, and Slack proje
     "switching surfaces invalidates the old surface response");
 });
 
-test("a read of a Slack-linked room is a whole read: one call, both summaries quiet, local rows acked", () => {
+test("a read of a Slack channel room reads Relay's side in one call, and acks the local rows", () => {
   const read = between(html, "function readVisibleChatRoom()", "// Open a conversation INTO");
   assert.match(read, /if \(\(isSlackIntegratedRoom\(visibleRoom\) \|\| resolvedDirectAnchor \|\| serverTranscriptRoom\(visibleRoom\)\) && visibleRoom\.chatId\)/,
     "visible canonical Relay, resolved direct and server-read Relay rows share the canonical read path");
@@ -420,7 +418,7 @@ test("a read of a Slack-linked room is a whole read: one call, both summaries qu
     { relayId: "relay_slack", direction: "inbound", state: "delivered", origin: "slack" },
   ] }]]);
   const runtime = new Function("payload", "canonicalChatDetails", "visibleRoom", "persisted", "acked", `
-    const threadsSource = "slack";
+    const threadsSource = "relays";
     const threadDetailId = "chat_product";
     const canonicalReadGeneration = new Map();
     const canonicalReadFailures = new Map();
@@ -436,19 +434,19 @@ test("a read of a Slack-linked room is a whole read: one call, both summaries qu
     const visibleChatRoomMessages = () => [{ id: "relay_local", direction: "in", unread: true }];
     const persistReadIds = (ids) => { if (ids.length) acked.push(...ids); };
     ${between(html, "function conversationSurface(", "\n  // The background service stages")}
-    ${between(html, "function slackMessagesVisible(room)", "function canonicalChatHydrationKey(")}
+    ${between(html, "function slackMessagesVisible()", "function canonicalChatHydrationKey(")}
     ${between(html, "function readVisibleChatRoom()", "// Open a conversation INTO")}
     return readVisibleChatRoom;
   `)(payload, canonicalChatDetails, visibleRoom, persisted, acked);
   runtime();
-  assert.deepEqual(persisted, [{ chatId: "chat_product", options: { surface: "slack", includeSlack: true } }],
-    "one call; the server moves Relay's and Slack's cursors together");
+  assert.deepEqual(persisted, [{ chatId: "chat_product", options: { surface: "relay", includeSlack: false } }],
+    "one call, on Relay's side only: Slack's own messages are not Relay's to read");
   assert.equal(payload.chats.find((chat) => chat.chatId === "chat_product").unreadCount, 0);
   assert.equal(payload.slackChats.find((chat) => chat.chatId === "chat_product").unreadCount, 0);
   assert.equal(payload.chats.find((chat) => chat.chatId === "chat_other").unreadCount, 2, "other chats keep their counts");
   assert.equal(payload.slackChats.find((chat) => chat.chatId === "chat_other").unreadCount, 4);
-  assert.ok(canonicalChatDetails.get("chat_product").items.every((item) => item.state === "read"),
-    "every visible message, wherever it was typed, paints read");
+  assert.ok(canonicalChatDetails.get("chat_product").items.filter((item) => item.origin !== "slack").every((item) => item.state === "read"),
+    "every message sent from Relay paints read");
   assert.deepEqual(acked, ["relay_local"], "the local Relay row is acknowledged too");
   assert.equal(payload.relays[0].unread, false);
 

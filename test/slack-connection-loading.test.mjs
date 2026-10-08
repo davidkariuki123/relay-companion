@@ -101,7 +101,7 @@ function slackRow({ prefs = new Map() } = {}) {
 }
 
 function assertNoConnect(markup) {
-  assert.doesNotMatch(markup, /Bring your Slack chats here|>Connect</);
+  assert.doesNotMatch(markup, /Send Relays to Slack|>Connect</);
 }
 
 test("a delayed first connection check never paints the Connect row", async () => {
@@ -132,7 +132,7 @@ test("only a successful disconnected or paused response shows the connect action
       assert.match(row.markup(), /class="rat-see">Reconnect</);
       assert.doesNotMatch(row.markup(), /slackNudgeHide/, "a paused connection cannot be waved away");
     } else {
-      assert.match(row.markup(), /Bring your Slack chats here/);
+      assert.match(row.markup(), /Send Relays to Slack/);
       assert.match(row.markup(), /class="rat-see">Connect</);
       assert.match(row.markup(), /id="slackNudgeHide" aria-label="Not now"/);
     }
@@ -177,7 +177,7 @@ test("refresh failures never take a connected account back to Connect", async ()
   const disconnected = row.refresh();
   row.pending[2].resolve({ ok: true, connection: { state: "disconnected" } });
   await disconnected;
-  assert.match(row.markup(), /Bring your Slack chats here/, "a confirmed disconnect still updates the row");
+  assert.match(row.markup(), /Send Relays to Slack/, "a confirmed disconnect still updates the row");
 });
 
 test("a late older disconnected response cannot replace a newer connected result", async () => {
@@ -259,7 +259,7 @@ test("Not now snoozes the row: gone for six hours, back the next time Relay open
   const back = later.refresh();
   later.pending[0].resolve({ ok: true, connection: { state: "disconnected" } });
   await back;
-  assert.match(later.markup(), /Bring your Slack chats here/);
+  assert.match(later.markup(), /Send Relays to Slack/);
   assert.equal(prefs.get("slackNudgeSnoozedUntil:user_a"), "0");
 });
 
@@ -275,8 +275,8 @@ test("onboarding offers Slack once, between the first link and Grow your network
   assert.match(screen, /return slackOnboardingOffered\(\) \? "slack" : "network";/);
   // Not now there is the same Not now as the row's: one snooze.
   assert.match(screen, /suSlackLater"\)\?\.addEventListener\("click", \(\) => \{\s*snoozeSlackNudge\(\);/);
-  assert.match(screen, /Bring your Slack here\./);
-  assert.match(screen, /Your Slack is here\./);
+  assert.match(screen, /Send Relays to Slack\./);
+  assert.match(screen, /Slack is connected\./);
   // Connecting during onboarding never yanks the person into the inbox.
   assert.match(html, /if \(info\.connected && activeView !== "threads" && !cardEl\.classList\.contains\("signup"\)\) \{/);
 });

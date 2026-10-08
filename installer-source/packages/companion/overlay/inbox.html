@@ -1609,6 +1609,10 @@
   .th-thread-link:hover { opacity:.76; }
   .th-thread-link img { width:13px; height:13px; object-fit:contain; }
   .th-thread-link.mine { margin-left:auto; }
+  .th-slack-posts { display:flex; align-items:center; justify-content:center; gap:7px; max-width:330px; margin:14px auto 10px; padding:7px 12px;
+    border-radius:var(--r-2); background:var(--wash); color:var(--muted); font:400 11.5px/1.45 var(--sans); text-align:left; }
+  .th-slack-posts img { width:13px; height:13px; flex:none; object-fit:contain; }
+  .th-slack-posts b { color:var(--ink); font-weight:600; }
   .th-thread-link-go { font-size:13px; line-height:1; transform:translateY(-.5px); }
   /* Reply threads: the line under a message that has one. On a Relay it is
      the card's last strip; under a text it sits beside the bubble's edge. */
@@ -3488,7 +3492,7 @@
   .su-slack-relay i:nth-child(3) { background:#7164ff; }
   .su-slack:not(.settled) .su-slack-bridge > * { animation:su-first-send .6s var(--settle) both; }
   .su-slack:not(.settled) .su-slack-flow { animation-delay:.08s; }
-  .su-slack:not(.settled) .su-slack-relay { animation-delay:.16s; }
+  .su-slack:not(.settled) .su-slack-tile { animation-delay:.16s; }
   .su-slack[data-slack-state="waiting"] .su-slack-flow i, .su-slack[data-slack-state="opening"] .su-slack-flow i {
     animation:su-slack-travel 1.5s cubic-bezier(.45,0,.3,1) infinite; animation-play-state:var(--relay-loop-state); }
   .su-slack[data-slack-state="waiting"] .su-slack-flow i:nth-child(2), .su-slack[data-slack-state="opening"] .su-slack-flow i:nth-child(2) { animation-delay:.18s; }
@@ -7060,8 +7064,11 @@
     return rooms;
   }
   // A chat that is also in Slack shows every message, wherever it was typed.
-  function slackMessagesVisible(room) {
-    return payload.features?.slack === true && isSlackIntegratedRoom(room);
+  // RELAY → SLACK ONLY (David and Shane, 2026-10-08). Slack's own messages
+  // never come into Relay: a Relay notification stays high signal, and replies
+  // to what you send live in Slack, where people already are.
+  function slackMessagesVisible() {
+    return false;
   }
   function canonicalChatHydrationKey(room, source = threadsSource, includeSlack = slackMessagesVisible(room, source)) {
     if (!room?.chatId) return "";
@@ -7846,14 +7853,15 @@
     pendingRelaysRender = false;
     if (activeView === "relays") renderRelays();
   }
-  // A Slack channel you are in is a group in Chats from the moment Slack
-  // connects, before anyone writes in it. Slack DMs join once they have a
-  // message; archived channels stay out.
+  // Slack channels are places to send to, not feeds: one joins Chats once
+  // something has been sent to it from Relay. Every channel is still found by
+  // name in search and under Contacts › Groups (an enterprise Slack has dozens
+  // of channels nobody wants listed).
   function slackChannelRoomListed(room) {
     if (payload.features?.slack !== true || !isSlackIntegratedRoom(room)) return false;
     const type = String(room.integration?.type || "");
     if (type !== "public_channel" && type !== "private_channel") return false;
-    return String(room.integration?.state || "active") === "active";
+    return String(room.integration?.state || "active") === "active" && room.hasActivity === true;
   }
   function relayIdentityRows() {
     // Relays and Chat are two views of the SAME rooms. The room projection
@@ -9201,7 +9209,7 @@
     groupInfoDetailEl.innerHTML = `<div class="slk-members">
       <div class="slk-head">
         <span class="avatar sq channel-hash" style="--av-h:${avatarHue(room.name)}" aria-hidden="true">#</span>
-        <span class="slk-head-copy"><span class="slk-title">${esc(slackChannelLabel(room))}</span><span class="slk-sub"><img src="slackMark.png" alt="" />In sync with Slack · ${people.onRelay.length + people.notOnRelay.length} ${people.onRelay.length + people.notOnRelay.length === 1 ? "person" : "people"}</span></span>
+        <span class="slk-head-copy"><span class="slk-title">${esc(slackChannelLabel(room))}</span><span class="slk-sub"><img src="slackMark.png" alt="" />Posts to Slack · ${people.onRelay.length + people.notOnRelay.length} ${people.onRelay.length + people.notOnRelay.length === 1 ? "person" : "people"}</span></span>
       </div>
       ${people.notOnRelay.length ? `<div class="slk-section"><span>Not on Relay yet · ${people.notOnRelay.length}</span>${waiting.length > 1 ? '<button type="button" class="slk-invite all" data-slack-invite-open="*">Invite everyone</button>' : ""}</div>${preview("*", null)}${notOnRelayRows}` : ""}
       <div class="slk-section"><span>On Relay · ${people.onRelay.length}</span></div>
@@ -17902,7 +17910,14 @@
     // Slack-linked summaries join the rooms by canonical chat/thread ids only,
     // never by a person's name. The Relay summary and the Slack summary of the
     // same chat merge into one room; its unread count is the larger of the two.
-    const slackSummaries = payload.features?.slack === true ? (payload.slackChats || []) : [];
+    // Slack channels stay as places to send to (with the Slack mark); nothing
+    // Slack itself said comes along: no messages, previews or unread counts.
+    // Slack DMs are not rooms at all; a Relay DM is the conversation.
+    const slackSummaries = payload.features?.slack === true
+      ? (payload.slackChats || [])
+        .filter((chat) => ["public_channel", "private_channel"].includes(slackIntegrationForChat(chat)?.type))
+        .map((chat) => ({ ...chat, lastMessage:null, unreadCount:0, messageCount:0, threadIds:[] }))
+      : [];
     for (const chat of [...(payload.chats || []), ...slackSummaries]) {
       const projected = roomFromChatSummary(chat);
       if (!projected) continue;
@@ -19484,7 +19499,12 @@
     }).join("");
     // A Slack thread needs no banner of its own: the header already says
     // Thread beside the channel's name and mark.
-    const finalRowsHtml = `${missingSlackThreadStubsHtml}${rowsHtml}`;
+    // The top of a Slack channel says what it is, once, quietly: what you
+    // send here posts to Slack, and the replies stay there.
+    const slackPostsNote = payload.features?.slack === true && rowsHtml && !slackFocusedThreadId && slackChannelRoom(chatRoom)
+      ? `<div class="th-slack-posts" data-stop="1"><img src="slackMark.png" alt="" /><span>What you send here also posts to <b>${esc(slackChannelLabel(chatRoom))}</b> in Slack. Replies stay in Slack.</span></div>`
+      : "";
+    const finalRowsHtml = `${slackPostsNote}${missingSlackThreadStubsHtml}${rowsHtml}`;
     // Chat order: history above, composer at the bottom, land at the newest.
     // Inbox order: composer + newest on top. The actions card is gone either
     // way — actions live in the reader; the composer is the resident action.
@@ -19528,7 +19548,7 @@
     // broken: say so in one line.
     const quietRowsEl = document.getElementById("thRows");
     if (quietRowsEl) {
-      const note = payload.features?.slack === true && isSlackIntegratedRoom(chatRoom) ? "Nothing here yet. It syncs with Slack." : "";
+      const note = payload.features?.slack === true && isSlackIntegratedRoom(chatRoom) ? `Nothing sent from Relay yet. What you send here posts to ${slackChannelLabel(chatRoom)} in Slack.` : "";
       if ((quietRowsEl.dataset.emptyNote || "") !== note) quietRowsEl.dataset.emptyNote = note;
     }
     const thRowsEl = document.getElementById("thRows");
@@ -20308,10 +20328,8 @@
     // message, Slack's read cursor) whichever list it was opened from. Back
     // still returns to that list.
     const returnSource = source === "slack" ? "relays" : source;
+    if (source === "slack") source = "relays";
     const roomFromList = isConversationRoomSource(source) ? chatRoomForThread(threadId, "relay") : null;
-    if (isConversationRoomSource(source) && payload.features?.slack === true && isSlackIntegratedRoom(roomFromList)) {
-      source = "slack";
-    }
     const surface = conversationSurface(source);
     const requestedRoom = isConversationRoomSource(source)
       ? (roomFromList || chatRoomForThread(threadId, surface))
@@ -21435,8 +21453,8 @@
       : state === "waiting" || state === "opening" ? "Click Allow in your browser"
       : state === "error" ? "Slack didn’t connect"
       : state === "paused" ? "Reconnect your Slack"
-      : slackConnectionInfo?.team?.connected ? "Sync your messages with Slack"
-      : "Bring your Slack chats here";
+      : slackConnectionInfo?.team?.connected ? "Post to Slack as you"
+      : "Send Relays to Slack";
     const verb = state === "connected" ? ""
       : state === "opening" ? "Opening…"
       : state === "waiting" ? "Open again"
@@ -21604,7 +21622,7 @@
         ? "Click Allow in your browser"
         : state === "paused"
           ? "Needs a quick reconnect"
-          : "Your channels and DMs, synced";
+          : "Send Relays to your channels";
     return `<section class="sv-slack-section" data-stop="1">
       <div class="sv-open-title">Slack</div>
       <div class="sv-slack-card${slackDisconnectConfirm ? " is-confirming" : ""}" id="svSlackCard">
@@ -22901,15 +22919,15 @@
     const shown = channels.slice(0, 3);
     const chips = shown.map((name) => `<span class="su-slack-chip">#${esc(name)}</span>`).join("")
       + (channels.length > shown.length ? `<span class="su-slack-chip more">+${channels.length - shown.length}</span>` : "");
-    const title = state === "connected" ? "Your Slack is here."
+    const title = state === "connected" ? "Slack is connected."
       : state === "waiting" ? "Click Allow in your browser."
       : state === "error" ? "Slack didn’t connect."
-      : "Bring your Slack here.";
-    const copy = state === "connected" ? (channels.length ? "" : "Your channels are on their way.")
+      : "Send Relays to Slack.";
+    const copy = state === "connected" ? (channels.length ? "Send to any of them from Relay." : "Your channels are on their way.")
       : state === "waiting" ? "Slack opened in your browser."
       : state === "error" ? "Nothing changed. Give it another go."
-      : teamHere ? "Your team’s Slack is already on Relay. Connect yours and your channels show up here."
-      : "Your channels and DMs show up here, and stay in sync with Slack.";
+      : teamHere ? "Your team uses Relay with Slack. Connect yours to post to your channels as you."
+      : "Send a Relay to a Slack channel and it posts there too. Replies stay in Slack.";
     const buttons = state === "connected"
       ? `<button class="su-primary" id="suSlackContinue" type="button">Continue</button>`
       : state === "waiting"
@@ -22917,9 +22935,9 @@
         : `<button class="su-primary su-slack-go" id="suSlackGo" type="button"${state === "opening" ? " disabled" : ""}><img src="slackMark.png" alt="" />${state === "opening" ? "Opening Slack…" : state === "error" ? "Try again" : "Connect Slack"}</button><button class="su-link" id="suSlackLater" type="button">Not now</button>`;
     signupBodyEl.innerHTML = `<div class="su-first-relay su-slack${arriving ? " settled" : ""}${wasConnected ? " ticked" : ""}" data-slack-state="${state}" style="--su-countdown-ms:${SLACK_ONBOARDING_CONNECTED_MS}ms">
         <div class="su-slack-bridge" aria-hidden="true">
-          <span class="su-slack-tile"><img src="slackMark.png" alt="" /></span>
-          <span class="su-slack-flow"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></span>
           <span class="su-slack-relay"><i></i><i></i><i></i></span>
+          <span class="su-slack-flow"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></span>
+          <span class="su-slack-tile"><img src="slackMark.png" alt="" /></span>
         </div>
         <p class="su-step">${state === "connected" ? "Connected" : "Your team"}</p>
         <h1 class="su-title">${esc(title)}</h1>
@@ -24226,9 +24244,8 @@
         .map((r) => r.id),
     );
     // A chat that is also in Slack counts in the same Inbox number.
-    const slackUnread = payload.features?.slack === true ? (payload.slackChats || []).reduce(
-      (sum, chat) => sum + Math.max(0, Number(chat?.unreadCount || 0)), 0) : 0;
-    const unread = relayUnreadIds.size + slackUnread;
+    // Slack's own messages never count: Relay → Slack only.
+    const unread = relayUnreadIds.size;
     setCount(unread);
     setBadge(relaysBadgeEl, unread);
     markAllReadEl.classList.toggle("gone", activeView !== "relays" || unread === 0);
@@ -24269,24 +24286,7 @@
     if (markAllReadEl.disabled || unreadCount === 0) return;
     markAllReadEl.disabled = true;
     markAllReadEl.textContent = "Marking…";
-    // The Inbox number counts chats that are also in Slack, so "all" reads
-    // them too: each one is a whole read, here and in Slack.
-    const slackUnread = payload.features?.slack === true
-      ? (payload.slackChats || []).filter((chat) => Number(chat?.unreadCount || 0) > 0)
-      : [];
-    const slackReads = slackUnread.map((chat) => Promise.resolve(
-      persistCanonicalChatRead(String(chat.chatId), { surface:"slack", includeSlack:true }),
-    ).catch(() => null));
     const result = await window.relay.markAllRead();
-    await Promise.all(slackReads);
-    if (slackUnread.length) {
-      const read = new Set(slackUnread.map((chat) => String(chat.chatId)));
-      const quiet = (summary) => read.has(String(summary.chatId)) ? { ...summary, unreadCount:0 } : summary;
-      payload.slackChats = (payload.slackChats || []).map(quiet);
-      payload.chats = (payload.chats || []).map(quiet);
-      lastPayloadSignature = "";
-      renderAll();
-    }
     markAllReadEl.textContent = "Mark all as read";
     if (!result || !result.ok) {
       markAllReadEl.disabled = false;
@@ -24552,7 +24552,10 @@
       // A Slack button is a deliberate open, just like clicking the menu-bar
       // mark. Never leave the requested reader clipped inside the 244×44 pill.
       openFull();
-      openReader(messageId, "threads");
+      await openReader(messageId, "threads");
+      // "Open in Conductor" from Slack: the same hand-off as the Conductor
+      // chip in this reader, so Conductor gets the sentence it always gets.
+      if (input?.app === "conductor") openInConductor(messageId, readerRow(messageId) || relayById(messageId) || { id:messageId });
     } catch {}
   });
   // The renderer holds the only connectivity signal either process has. A
