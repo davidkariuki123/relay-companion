@@ -31,7 +31,7 @@ const SAFE_GET = [
   /^\/v1\/inbox(?:\?.*)?$/,
   /^\/v1\/sent(?:\?.*)?$/,
   /^\/v1\/contacts\/search\?q=.+$/,
-  /^\/v1\/relays\/[A-Za-z0-9_-]+$/,
+  /^\/v1\/relays\/[A-Za-z0-9_-]+(?:\?include=replies)?$/,
   /^\/v1\/threads\/[A-Za-z0-9_-]+$/,
   /^\/v1\/share-links\/[A-Za-z0-9_-]+$/,
 ];
@@ -786,7 +786,7 @@ async function directToolCommand(command, body, config) {
   else if (name === "relay_inbox_list") {
     if (args.relayIds) {
       const items = [];
-      for (const relayId of new Set(args.relayIds)) items.push({ relayId, ...await request("GET", `/v1/relays/${relayId}`) });
+      for (const relayId of new Set(args.relayIds)) items.push({ relayId, ...await request("GET", `/v1/relays/${relayId}?include=replies`) });
       value = { items, readStateChanged: false, readReceiptsSent: false };
     } else value = await request("GET", "/v1/inbox?view=summary");
   } else if (name === "relay_share_stats") {

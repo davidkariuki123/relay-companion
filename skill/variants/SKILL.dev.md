@@ -666,7 +666,9 @@ Choose every clearly applicable label; sentence-level attribution still matters.
 ## Reading a Relay
 
 Fetch only the context the request needs. For a recent inbound Relay, find its
-metadata with relay_inbox_list and open its exact relayIds. For conversation
+metadata with relay_inbox_list and open its exact relayIds. An opened Relay
+may carry threadReplies: the replies people made in its thread, oldest first.
+Read them with the Relay; a later reply can answer, correct or change it. For conversation
 context, relay_chat_fetch defaults to the newest 25 messages, oldest first;
 limit accepts 1–200. Continue with nextBeforeCursor for older messages or
 nextAfterCursor for newer ones, keeping the same chat and surface. Never call

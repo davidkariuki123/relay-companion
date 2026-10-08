@@ -1207,6 +1207,42 @@ test("relay_inbox_list selectively opens exact ids read-free and preserves reque
   );
 });
 
+test("relay_inbox_list hands an opened Relay's thread replies to the agent", async () => {
+  const requests = [];
+  const threadReplies = {
+    count: 2,
+    items: [
+      { relayId: "relay_reply_1", createdAt: "2026-10-08T09:00:00.000Z", direction: "outbound", sender: { name: "Shane" }, forHuman: "Can you do Friday instead?" },
+      { relayId: "relay_reply_2", createdAt: "2026-10-08T09:05:00.000Z", direction: "inbound", sender: { name: "Sven" }, forHuman: "Friday works." },
+    ],
+  };
+  const fakeClient = {
+    async fetchRelayPackets(ids, _provenance, options) {
+      requests.push({ ids, options });
+      return {
+        packets: {
+          relay_root: { packet: { title: "Planning", forHuman: "Meet Thursday?" }, threadReplies },
+          relay_quiet: { packet: { title: "Quiet", forHuman: "No replies" } },
+        },
+      };
+    },
+  };
+  const result = JSON.parse((await handleCall(
+    fakeClient,
+    "relay_inbox_list",
+    { relayIds: ["relay_root", "relay_quiet"] },
+    { mode: "messages-only" },
+  )).content[0].text);
+  assert.deepEqual(requests, [{ ids: ["relay_root", "relay_quiet"], options: { includeReplies: true } }]);
+  assert.equal(result.items[0].threadReplies.count, 2);
+  assert.deepEqual(result.items[0].threadReplies.items.map((reply) => [reply.relayId, reply.sender.name, reply.forHuman]), [
+    ["relay_reply_1", "Shane", "Can you do Friday instead?"],
+    ["relay_reply_2", "Sven", "Friday works."],
+  ]);
+  assert.equal(Object.hasOwn(result.items[1], "threadReplies"), false);
+  assert.match(result.agentInstruction, /threadReplies are the replies people made/);
+});
+
 test("thread and chat fetches are read-free even when they return unread inbound Relays", async () => {
   const fakeClient = {
     async thread() {

@@ -32,6 +32,13 @@ function startExplicitOpenHold({ now = Date.now(), graceMs = EXPLICIT_OPEN_GRACE
   return { until: now + graceMs, bundle: "" };
 }
 
+// Acting in the pill ends the grace: the launcher's focus handback is long
+// over, so the next app to come forward is the person's own choice — Safari
+// for Google sign-in must land on top of the pill, not under it.
+function settleExplicitOpenHold(hold) {
+  return hold ? { ...hold, until: 0 } : null;
+}
+
 function applyExplicitOpenHold({ hold, bundle, now = Date.now(), selfBundles = [] } = {}) {
   if (!hold) return { hold: null, keep: false };
   const id = String(bundle || "").trim();
@@ -43,4 +50,4 @@ function applyExplicitOpenHold({ hold, bundle, now = Date.now(), selfBundles = [
   return { hold: null, keep: false };
 }
 
-module.exports = { elevationForFrontmost, startExplicitOpenHold, applyExplicitOpenHold, EXPLICIT_OPEN_GRACE_MS };
+module.exports = { elevationForFrontmost, startExplicitOpenHold, settleExplicitOpenHold, applyExplicitOpenHold, EXPLICIT_OPEN_GRACE_MS };

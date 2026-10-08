@@ -178,7 +178,7 @@ const {
   chatReadPresenceAvailable,
   observedFreshSystemInput,
 } = require("./chat-read-presence.cjs");
-const { elevationForFrontmost, startExplicitOpenHold, applyExplicitOpenHold } = require("./elevation-policy.cjs");
+const { elevationForFrontmost, startExplicitOpenHold, settleExplicitOpenHold, applyExplicitOpenHold } = require("./elevation-policy.cjs");
 const { openingFaceFor } = require("./message-face.cjs");
 const perf = require("./perf-counters.cjs");
 const {
@@ -10350,6 +10350,7 @@ ipcMain.handle("relay:adoptLegacySettings", (_event, legacy) => {
 ipcMain.on("relay:engage", (event) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
   lastEngagedAt = Date.now();
+  explicitOpenHold = settleExplicitOpenHold(explicitOpenHold);
   setOverlayElevated(true);
 });
 // The renderer publishes the visible card size. Ordinary Windows/Linux windows

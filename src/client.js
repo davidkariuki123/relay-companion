@@ -817,10 +817,10 @@ export class RelayClient {
    * catching up on a backlog take minutes. Ids the caller may not read are
    * absent from `packets` — same meaning as a 404 from the single-relay route.
    */
-  async fetchRelayPackets(ids, provenance = {}) {
+  async fetchRelayPackets(ids, provenance = {}, { includeReplies = false } = {}) {
     const wanted = ids || [];
     if (!wanted.length) return { packets: {} };
-    return this.#req("POST", "/v1/relays/packets", { ids: wanted }, provenanceOptions(provenance));
+    return this.#req("POST", "/v1/relays/packets", { ids: wanted, ...(includeReplies ? { includeReplies: true } : {}) }, provenanceOptions(provenance));
   }
 
   /**

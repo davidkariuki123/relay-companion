@@ -59,3 +59,15 @@ test("the Dock's Relay.app counts as Relay itself", async () => {
   assert.match(ids, /"work\.relay\.application"/);
   assert.match(source, /explicitOpenHold = startExplicitOpenHold\(/, "every explicit open starts the hold");
 });
+
+test("clicking in the pill ends the grace, so the browser it opens comes in front", () => {
+  const { startExplicitOpenHold, settleExplicitOpenHold, applyExplicitOpenHold } = policy;
+  let hold = startExplicitOpenHold({ now: 1000, graceMs: 5000 });
+  let step = applyExplicitOpenHold({ hold, bundle: "com.apple.finder", now: 1300 });
+  assert.equal(step.keep, true);
+  // Continue with Google, two seconds after the open: Safari must not be absorbed.
+  hold = settleExplicitOpenHold(step.hold);
+  step = applyExplicitOpenHold({ hold, bundle: "com.apple.Safari", now: 3000 });
+  assert.deepEqual(step, { hold: null, keep: false });
+  assert.equal(settleExplicitOpenHold(null), null);
+});
