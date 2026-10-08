@@ -102,7 +102,7 @@
        pill never lands at the old left edge and then jumps home when AppKit
        trims the transparent remainder. This remains local to the current native
        window, so a user-dragged pill morphs exactly where it was placed. */
-    position:absolute; top:0; right:0;
+    position:absolute; top:var(--surface-top, 0px); right:var(--surface-right, 0px);
     width:344px; height:524px;
     background:transparent;
     border-radius:var(--r-card);
@@ -4632,11 +4632,14 @@
   const WIDE_SIDE = EXPANDED.w; // the sidebar IS the small card's list, at its own width
   let wideDomReady = false; // the expanded app's DOM helpers are defined further down
   let appExpanded = (() => { try { return localStorage.getItem("relayAppExpanded") === "1"; } catch { return false; } })();
+  // The expanded app fills the screen it is on (David and Shane, 2026-10-08):
+  // two thirds was too big to work beside and too small to be the app. The
+  // native window grows to the screen's work area to hold it (main.cjs,
+  // "THE FULL APP").
   function wideSize() {
-    // Never wider or taller than the screen that holds the card.
-    const aw = Number(window.screen?.availWidth) || WIDE.w + 48;
-    const ah = Number(window.screen?.availHeight) || WIDE.h + 48;
-    return { w: Math.max(READER.w, Math.min(WIDE.w, aw - 48)), h: Math.max(EXPANDED.h, Math.min(WIDE.h, ah - 48)) };
+    const aw = Number(window.screen?.availWidth) || WIDE.w;
+    const ah = Number(window.screen?.availHeight) || WIDE.h;
+    return { w: Math.max(READER.w, Math.round(aw)), h: Math.max(EXPANDED.h, Math.round(ah)) };
   }
   // The frame the open card wears: the app expanded, else the reader's page,
   // else the small card.
@@ -23765,10 +23768,24 @@
   }
   let wideDomOn = false;
   wideDomReady = true;
+  // Where the small card sits inside the grown native surface while the
+  // full app is on screen: it grows from there and folds back to it. The
+  // full app itself fills the surface.
+  let surfaceInset = { top:0, right:0 };
+  function paintSurfaceInset() {
+    const full = wideLayoutActive();
+    cardEl.style.setProperty("--surface-top", `${full ? 0 : surfaceInset.top}px`);
+    cardEl.style.setProperty("--surface-right", `${full ? 0 : surfaceInset.right}px`);
+  }
+  window.relay.onSurfaceInset?.((inset) => {
+    surfaceInset = { top:Math.max(0, Number(inset.top) || 0), right:Math.max(0, Number(inset.right) || 0) };
+    paintSurfaceInset();
+  });
   function syncWideDom() {
     const wide = wideLayoutActive();
     cardEl.classList.toggle("wide", wide);
     cardEl.style.setProperty("--wide-side", `${WIDE_SIDE}px`);
+    paintSurfaceInset();
     if (wide === wideDomOn) return;
     const movers = [
       [relaysLayoutEl, wideSideHeadEl],

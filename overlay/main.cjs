@@ -4048,6 +4048,8 @@ const RELAY_BUNDLE_IDS = [
 
 function setOverlayElevated(next, { moveTop = true } = {}) {
   if (process.platform !== "darwin") return;
+  // The full app is an ordinary window: other apps come in front of it.
+  if (appSurface) next = false;
   const elevated = Boolean(next);
   if (overlayElevated === elevated) return;
   overlayElevated = elevated;
@@ -5838,6 +5840,8 @@ function reportAttachmentDownload(event) {
 // ---- window placement / visibility ---------------------------------------
 
 function anchorTopRight() {
+  // The full app's home is its screen; re-showing it never shrinks it.
+  if (appSurface) return { ...appSurface.workArea };
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
   const wa = display.workArea;
   // AppKit needs one stable compositor surface because it does not present an
@@ -6099,6 +6103,107 @@ function pollHosts({ probeFrontmost = true } = {}) {
 const CARD_INITIAL = { w: 344, h: 524 };    // EXPANDED in inbox.html; renderer publishes its live size before announcing readiness
 const CARD_MAX = { w: 900, h: 800 };        // WIDE in inbox.html (the expanded app; READER is 720, PEEK is 400px wide)
 const FIXED_OVERLAY_SURFACE = usesFixedOverlaySurface(process.platform);
+
+// THE FULL APP (David and Shane, 2026-10-08). Expand used to take two thirds
+// of the screen: too big to work beside, too small to be the app. Now it
+// fills the screen and behaves like any other app while it does: it sits at
+// the normal window level, so Cmd+Tab and a click on Claude bring Claude in
+// front, and Relay is in the Dock and the app switcher to come back to.
+// Collapse returns the pill to exactly where it was, always on top again,
+// and hands the screen back to the app that was in front. It is the same
+// window throughout, never a separate full-screen Space.
+//
+// macOS keeps one fixed transparent surface (see above); the full app grows
+// that surface to the display's work area for as long as it lasts. `inset`
+// is where the small card sat inside the grown surface, so it does not jump
+// while it grows and shrinks.
+let appSurface = null; // { restore, workArea, inset, returnBundle }
+let appSurfaceDockIcon = null;
+function overlayCardMax() {
+  return appSurface ? { w: appSurface.workArea.width, h: appSurface.workArea.height } : CARD_MAX;
+}
+function appSurfaceInset() {
+  if (!appSurface) return { top: 0, right: 0 };
+  const full = cardSize.w >= appSurface.workArea.width - 1 && cardSize.h >= appSurface.workArea.height - 1;
+  return full ? { top: 0, right: 0 } : appSurface.inset;
+}
+function enterAppSurface() {
+  if (appSurface || !win || win.isDestroyed()) return appSurface;
+  let restore;
+  try { restore = win.getBounds(); } catch { return null; }
+  const display = screen.getDisplayMatching(restore) || screen.getPrimaryDisplay();
+  const wa = display.workArea;
+  appSurface = {
+    restore,
+    workArea: { x: wa.x, y: wa.y, width: wa.width, height: wa.height },
+    inset: {
+      top: Math.max(0, restore.y - wa.y),
+      right: Math.max(0, wa.x + wa.width - (restore.x + restore.width)),
+    },
+    returnBundle: null,
+  };
+  // Whoever was in front gets the screen back on Collapse.
+  frontmostBundleId((bundle) => {
+    if (appSurface && bundle && !RELAY_BUNDLE_IDS.includes(bundle)) appSurface.returnBundle = bundle;
+  });
+  try { win.setAlwaysOnTop(false); } catch {}
+  overlayElevated = false;
+  try { win.webContents.send("relay:surfaceInset", appSurface.inset); } catch {}
+  try { win.setBounds(appSurface.workArea, false); } catch {}
+  // The app you expanded is the app in front.
+  try { win.moveTop(); win.focus(); } catch {}
+  if (process.platform === "darwin" && app.dock) {
+    try {
+      if (!appSurfaceDockIcon) appSurfaceDockIcon = nativeImage.createFromPath(path.join(__dirname, "relayAppIcon.png"));
+      if (appSurfaceDockIcon && !appSurfaceDockIcon.isEmpty()) app.dock.setIcon(appSurfaceDockIcon);
+    } catch {}
+    Promise.resolve(app.dock.show()).catch(() => {}).then(() => {
+      // Showing in the Dock can reorder the window; the app is the one in front.
+      if (appSurface && win && !win.isDestroyed()) { try { app.focus({ steal: true }); win.focus(); } catch {} }
+    });
+  } else {
+    try { win.focus(); } catch {}
+  }
+  return appSurface;
+}
+function exitAppSurface() {
+  if (!appSurface || !win || win.isDestroyed()) { appSurface = null; return; }
+  const { restore, returnBundle } = appSurface;
+  appSurface = null;
+  try { win.webContents.send("relay:surfaceInset", { top: 0, right: 0 }); } catch {}
+  try { win.setBounds(restore, false); } catch {}
+  overlayElevated = false;
+  setOverlayElevated(true, { moveTop: false });
+  if (process.platform === "darwin" && app.dock) {
+    // Leaving the Dock turns Relay back into an accessory app. Should macOS
+    // order the pill out as it does, bring it straight back, on every Space,
+    // at its own level; a pill that stayed up is left alone (no re-show flash).
+    try { app.dock.hide(); } catch {}
+    const reshow = () => {
+      if (!win || win.isDestroyed() || appSurface) return;
+      if (!win.isVisible()) showOverlayWindow({ force: true, reposition: false });
+      try { reinforceSpacePresence(win, { alwaysOnTop: overlayElevated }); } catch {}
+    };
+    setImmediate(reshow);
+    setTimeout(reshow, 250);
+  }
+  // Hand the screen back, but only if Relay still has it: someone who has
+  // already Cmd+Tabbed to another app keeps that one.
+  if (returnBundle && process.platform === "darwin") {
+    frontmostBundleId((bundle) => {
+      if (!bundle || RELAY_BUNDLE_IDS.includes(bundle)) {
+        perf.inc("spawns");
+        execFile("/usr/bin/open", ["-b", returnBundle], () => {});
+      }
+    });
+  }
+}
+function syncAppSurfaceForCard(w, h, { settled = false } = {}) {
+  if (!FIXED_OVERLAY_SURFACE) return null;
+  if (w > CARD_MAX.w || h > CARD_MAX.h) return enterAppSurface();
+  if (appSurface && settled) exitAppSurface();
+  return appSurface;
+}
 const HIT_IN = 6;
 const HIT_OUT = 12;
 const POLL_NEAR_MS = 24;
@@ -6135,9 +6240,11 @@ function applyIgnore(next, { force = false } = {}) {
 }
 
 function cardScreenRect(bounds) {
-  const w = Math.min(Math.max(cardSize.w, 0), CARD_MAX.w);
-  const h = Math.min(Math.max(cardSize.h, 0), CARD_MAX.h);
-  return { x: bounds.x + bounds.width - w, y: bounds.y, w, h };
+  const max = overlayCardMax();
+  const w = Math.min(Math.max(cardSize.w, 0), max.w);
+  const h = Math.min(Math.max(cardSize.h, 0), max.h);
+  const inset = appSurfaceInset();
+  return { x: bounds.x + bounds.width - w - inset.right, y: bounds.y + inset.top, w, h };
 }
 
 function scheduleHit(ms) {
@@ -6191,7 +6298,16 @@ function fitOverlayWindowToCard({ settle = false } = {}) {
   // Preserve the user's current top-right anchor while the ordinary Windows or
   // Linux window grows and shrinks with the one visible card. A card centred
   // for setup stays centred as its sign-in screens change height.
-  const target = setupCentered ? overlayHomeBounds() : resizedOverlayBounds(current, cardSize, { maximum: CARD_MAX });
+  // The full app may be as large as the screen it is on; it never spills
+  // past that screen's work area.
+  let wa = null;
+  try { wa = (screen.getDisplayMatching(current) || screen.getPrimaryDisplay()).workArea; } catch {}
+  const maximum = wa && (cardSize.w > CARD_MAX.w || cardSize.h > CARD_MAX.h) ? { w: wa.width, h: wa.height } : CARD_MAX;
+  const target = setupCentered ? overlayHomeBounds() : resizedOverlayBounds(current, cardSize, { maximum });
+  if (wa && !setupCentered) {
+    target.x = Math.max(wa.x, Math.min(target.x, wa.x + wa.width - target.width));
+    target.y = Math.max(wa.y, Math.min(target.y, wa.y + wa.height - target.height));
+  }
   if (target.x === current.x && target.y === current.y && target.width === current.width && target.height === current.height) {
     return;
   }
@@ -10543,6 +10659,7 @@ function acceptRendererCardSize(event, w, h, motion = {}) {
   if (motionId < latestCardMotionId) return { ok:false, stale:true };
   latestCardMotionId = motionId;
   cardSize = { w, h };
+  syncAppSurfaceForCard(w, h, { settled: motion.phase === "settled" });
   if (FIXED_OVERLAY_SURFACE) scheduleHit(0);
   else {
     const settled = motion.phase === "settled";
@@ -10561,14 +10678,16 @@ ipcMain.handle("relay:prepareCardSize", (event, w, h) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok:false };
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return { ok:false };
   cardSize = { w, h };
+  const surface = syncAppSurfaceForCard(w, h);
   if (FIXED_OVERLAY_SURFACE) scheduleHit(0);
   else {
     fitOverlayWindowToCard();
     scheduleNativeGeometryReconcile(NATIVE_GEOMETRY_WATCHDOG_MS);
   }
-  return { ok:true };
+  return { ok:true, ...(surface ? { surfaceInset: surface.inset } : {}) };
 });
 ipcMain.on("relay:setPos", (_e, x, y) => {
+  if (appSurface) return; // the full app fills the screen; there is nowhere to drag it
   if (win && !win.isDestroyed() && Number.isFinite(x) && Number.isFinite(y)) {
     win.setPosition(Math.round(x), Math.round(y));
     perf.inc("spaceAsserts");

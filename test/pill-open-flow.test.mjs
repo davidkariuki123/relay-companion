@@ -618,7 +618,7 @@ test("Windows/Linux use ordinary focusable windows, with a Linux taskbar fallbac
   assert.match(create, /if \(FIXED_OVERLAY_SURFACE\) \{[\s\S]*?applyIgnore\(true/,
     "only the macOS fixed surface starts the click-through hit tester");
   assert.doesNotMatch(main + preload + html, /relay:setFocusable|setFocusable/);
-  assert.match(html, /\.card \{[\s\S]*?position:absolute; top:0; right:0;/,
+  assert.match(html, /\.card \{[\s\S]*?position:absolute; top:var\(--surface-top, 0px\); right:var\(--surface-right, 0px\);/,
     "the visible card shares the native window's top-right anchor throughout a morph");
   assert.doesNotMatch(html, /body \{[^}]*user-select:none/);
 });

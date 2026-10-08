@@ -9,7 +9,8 @@ const { chromium } = require(process.env.RELAY_PLAYWRIGHT_MODULE || 'playwright'
 const browser = await chromium.launch({headless:true, ...(process.env.RELAY_CHROMIUM_EXECUTABLE ? {executablePath:process.env.RELAY_CHROMIUM_EXECUTABLE} : {})});
 const errors = [];
 try {
-  const page = await browser.newPage({viewport:{width:960,height:820}, screen:{width:1512,height:982}, reducedMotion:'reduce'});
+  // The screen is the window here: the expanded app fills the screen it is on.
+  const page = await browser.newPage({viewport:{width:1280,height:800}, screen:{width:1280,height:800}, reducedMotion:'reduce'});
   page.setDefaultTimeout(8000);
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(() => {
@@ -51,6 +52,7 @@ try {
   const wide = () => card.evaluate(el => el.classList.contains('wide'));
   const state = () => page.evaluate(() => ({ view:activeView, room:threadDetailId, expanded:appExpanded }));
   const settle = () => page.waitForTimeout(250);
+  const FULL = await page.evaluate(() => ({ w:screen.availWidth, h:screen.availHeight }));
 
   // The small card opens a room; the window's one switch turns the WHOLE
   // APP wide, and stays exactly where it was, now reading Collapse.
@@ -63,7 +65,8 @@ try {
   await page.locator('#wideToggle').click();
   await page.waitForFunction(() => appExpanded && document.getElementById('card').classList.contains('wide'));
   await settle();
-  assert.equal(await width(), 900, 'the expanded app is wider than the reader');
+  assert.equal(await width(), FULL.w, 'the expanded app fills the screen');
+  assert.equal(Math.round((await card.boundingBox()).height), FULL.h, 'top to bottom');
   assert.equal((await state()).room, 'room-shane', 'the room stays open through Expand');
   assert.equal(await page.locator('#wideSide #relaysView').isVisible(), true, 'the inbox list is the sidebar');
   const after = await switchBox();
@@ -81,7 +84,7 @@ try {
   // Another chat from the sidebar replaces the pane; the frame holds.
   await page.locator('#relaysList .relay-row[data-party="Sven Wellmann"]').click();
   await page.waitForFunction(() => threadDetailId === 'room-sven');
-  assert.equal(await width(), 900);
+  assert.equal(await width(), FULL.w);
 
   // A chat opens on its newest message and stays there while what loads late
   // settles in; a real scroll lets go (David, 2026-10-08: chats opened 100 to
@@ -124,7 +127,7 @@ try {
   assert.equal(await page.locator('#wideEmpty').isVisible(), true, 'nothing open: the pane says so');
   await page.locator('#topicsSide [data-topic-open]').click();
   await page.waitForFunction(() => topicsState.detail && !document.getElementById('topicsView').classList.contains('hidden'));
-  assert.equal(await width(), 900);
+  assert.equal(await width(), FULL.w);
   await page.locator('.tab[data-view="contacts"]').click();
   await settle();
   assert.equal(await wide(), true, 'Contacts stays expanded');
@@ -135,7 +138,7 @@ try {
   await page.waitForFunction(() => activeView === 'threads' && threadDetailId === 'room-kiara');
   await page.locator('#cvList .cv-item').filter({ hasText:'Aron van Ammers' }).click();
   await page.waitForFunction(() => String(threadDetailId).includes('chat_aron'));
-  assert.equal(await width(), 900);
+  assert.equal(await width(), FULL.w);
   await page.locator('.tab[data-view="settings"]').click();
   await settle();
   assert.equal(await wide(), true, 'You stays expanded');
@@ -154,7 +157,7 @@ try {
   await page.evaluate(() => document.getElementById('thBack').click());
   await page.waitForFunction(() => activeView === 'relays');
   await settle();
-  assert.equal(await width(), 900, 'Back never collapses the expanded app');
+  assert.equal(await width(), FULL.w, 'Back never collapses the expanded app');
   assert.equal(await page.locator('#wideEmpty').isVisible(), true);
 
   // Folding to the pill and back keeps the mode; the pill is the pill.
@@ -167,7 +170,7 @@ try {
   await page.waitForFunction(() => !collapsed);
   await settle();
   assert.equal(await wide(), true);
-  assert.equal(await width(), 900);
+  assert.equal(await width(), FULL.w);
 
   // The mode outlives a restart.
   assert.equal(await page.evaluate(() => localStorage.getItem('relayAppExpanded')), '1');
