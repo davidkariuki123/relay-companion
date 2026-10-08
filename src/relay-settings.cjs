@@ -204,7 +204,7 @@ function taskMode(vendor, label) {
   return {
     id: `task_permissions_${vendor === "claude" ? "claude_code" : "codex"}`,
     label: `What Tasks may do: ${label}`,
-    where: "You › What Tasks may do",
+    where: "You › Your AIs › What Tasks may do",
     description: `The ${label} permission mode for Tasks the person starts from Relay.`,
     type: "choice",
     scope: "device",
@@ -251,8 +251,8 @@ function pillOnly({ id, label, where, description, available }) {
 const SETTINGS = [
   {
     id: "milestone_relays",
-    label: "Milestone Relays",
-    where: "You › Milestone Relays",
+    label: "Draft a Relay when work is done",
+    where: "You › Draft a Relay when work is done",
     description: "Whether agents on this computer create a Relay link unasked when finished work matters to someone. Nothing is sent either way.",
     type: "boolean",
     scope: "device",
@@ -267,7 +267,7 @@ const SETTINGS = [
   {
     id: "show_automatically",
     label: "Show Relay automatically",
-    where: "You › Notifications",
+    where: "You › New messages (Menu bar only turns it off)",
     description: "Whether the Relay pill comes forward when new messages arrive. Off keeps it in the status area until the person opens it.",
     type: "boolean",
     scope: "device",
@@ -281,8 +281,8 @@ const SETTINGS = [
   },
   {
     id: "play_sounds",
-    label: "Play sounds",
-    where: "You › Notifications",
+    label: "Sounds",
+    where: "You › Sounds",
     description: "Whether Relay plays a sound for new messages.",
     type: "boolean",
     scope: "device",
@@ -292,7 +292,7 @@ const SETTINGS = [
   {
     id: "notification_style",
     label: "New messages",
-    where: "You › Notifications",
+    where: "You › New messages",
     description: "Which new messages make the Relay pill show a banner: every message, only direct messages and mentions (busy groups just count), or none (only the count changes). Hiding the pill entirely is show_automatically.",
     type: "choice",
     scope: "device",
@@ -315,14 +315,14 @@ const SETTINGS = [
     read: (ctx) => readStore(ctx.options).theme === "light" ? "light" : "dark",
     write: (ctx, value) => patchDevice({ theme: value }, ctx.options),
   },
-  appSwitch({ id: "open_with_claude", app: "Claude", list: CHAT_APPS, key: "chatApps", label: "Open Relays with Claude", where: "You › Your agent", description: "Offer Claude (the Claude app or claude.ai) when the person opens a Relay." }),
-  appSwitch({ id: "open_with_chatgpt", app: "ChatGPT", list: CHAT_APPS, key: "chatApps", label: "Open Relays with ChatGPT", where: "You › Your agent", description: "Offer ChatGPT when the person opens a Relay." }),
-  appSwitch({ id: "open_with_claude_code", app: "Claude Code", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Claude Code", where: "You › Your agent", description: "Offer Claude Code when the person opens a Relay. Takes effect only where Claude Code is installed; the first app switched on starts Tasks." }),
-  appSwitch({ id: "open_with_codex", app: "Codex", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Codex", where: "You › Your agent", description: "Offer Codex when the person opens a Relay. Takes effect only where Codex is installed." }),
+  appSwitch({ id: "open_with_claude", app: "Claude", list: CHAT_APPS, key: "chatApps", label: "Open Relays with Claude", where: "You › Your AIs › Open Relays in", description: "Offer Claude (the Claude app or claude.ai) when the person opens a Relay." }),
+  appSwitch({ id: "open_with_chatgpt", app: "ChatGPT", list: CHAT_APPS, key: "chatApps", label: "Open Relays with ChatGPT", where: "You › Your AIs › Open Relays in", description: "Offer ChatGPT when the person opens a Relay." }),
+  appSwitch({ id: "open_with_claude_code", app: "Claude Code", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Claude Code", where: "You › Your AIs › Open Relays in", description: "Offer Claude Code when the person opens a Relay. Takes effect only where Claude Code is installed; the first app switched on starts Tasks." }),
+  appSwitch({ id: "open_with_codex", app: "Codex", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Codex", where: "You › Your AIs › Open Relays in", description: "Offer Codex when the person opens a Relay. Takes effect only where Codex is installed." }),
   {
     id: "open_with_conductor",
     label: "Open Relays with Conductor",
-    where: "You › Your agent",
+    where: "You › Your AIs › Open Relays in",
     description: "Offer Conductor, which opens a new workspace per Relay. Shown in the pill only where Conductor is installed.",
     type: "boolean",
     scope: "account",
@@ -348,9 +348,9 @@ const SETTINGS = [
   chatAgentField("claude", "effort"),
   chatAgentField("codex", "model"),
   chatAgentField("codex", "effort"),
-  pillOnly({ id: "account", label: "Account", where: "You › the account row at the top", description: "Sign out, switch account, or open account settings on the web." }),
+  pillOnly({ id: "account", label: "Account", where: "You › Account", description: "Sign out, switch account, or open account settings on the web." }),
   pillOnly({ id: "slack", label: "Slack", where: "You › Slack", description: "Connect or disconnect Slack.", available: (ctx) => ctx.features?.slack === true }),
-  pillOnly({ id: "blocked_contacts", label: "Blocked contacts", where: "Contacts › Blocked contacts", description: "Block or unblock people." }),
+  pillOnly({ id: "blocked_contacts", label: "Blocked people", where: "You › Blocked people", description: "Block or unblock people." }),
 ];
 const BY_ID = new Map(SETTINGS.map((setting) => [setting.id, setting]));
 

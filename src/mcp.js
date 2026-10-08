@@ -130,7 +130,7 @@ const MEDIUM_ROUTING =
 const TASK_STARTUP_RULE =
   "For authorized Task work (research too): relay_task_start first, relay_task_complete last. Task Runs finish automatically.";
 
-// Settings › Milestone Relays, switched off on this computer. Shorter than the
+// You › Draft a Relay when work is done (milestone_relays), off on this computer. Shorter than the
 // rule it replaces, so the startup budget holds.
 const MILESTONE_RELAYS_OFF_STARTUP_RULE =
   "This person turned off milestone Relays: never create one unasked; mint or send only when they ask.";
@@ -2968,7 +2968,7 @@ export async function createRelayMcpSession({
   // late profile answer (below) changes what this session offers in place.
   const features = {
     ...initialFeatures.features,
-    // The person's own switch on this computer (Settings › Milestone Relays),
+    // The person's own switch on this computer (You › Draft a Relay when work is done),
     // read once per session like the rest of the startup text.
     milestoneRelays: milestoneRelaysEnabled(),
   };

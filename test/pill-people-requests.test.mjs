@@ -17,15 +17,29 @@ const slice = (start, end) => {
 // in People, out of the feed and the count, until you accept it, reply, or
 // ignore it. A contact is an address and what you call them.
 
-test("Add offers two cases: an address for someone on Relay, your link for everyone else", () => {
-  const sheet = slice('<div class="cv-add-sheet hidden" id="cvAddSheet">', '<form class="cv-form hidden" id="cvForm">');
-  assert.match(sheet, /<div class="cv-add-t">Add someone who already uses Relay<\/div>/);
-  assert.match(sheet, /id="cvAddInput" type="email"[^>]*placeholder="their@email\.com"/);
-  assert.match(sheet, /id="cvAddNote">Enter the email address they use for Relay\.<\/div>/);
-  assert.match(sheet, /id="cvAddT2">Invite someone to join Relay<\/div>/);
-  assert.match(sheet, /id="cvAddLink">Copy your invite link<\/button>/);
-  assert.match(sheet, /They can paste it into Claude Code or Codex to set up Relay and appear in your Contacts\./);
-  assert.doesNotMatch(sheet, /invite by email|Invite by email/);
+test("Add offers two cases: an address for someone on Relay, your link for everyone else", async () => {
+  // One field finds and adds; there is no separate add sheet any more.
+  assert.match(html, /<input id="cvSearch" type="search" placeholder="Search, or add by email"/);
+  assert.doesNotMatch(html, /id="cvAddSheet"|id="cvAddInput"|id="cvAddLink"|id="cvAddT2"/);
+  assert.doesNotMatch(html, /invite by email|Invite by email/);
+  // Case one: an address nobody in the book has offers Add.
+  const h = addPersonHarness({ contactAdd: async () => ({ ok: true, found: false }) });
+  h.type("new@example.test");
+  assert.equal(h.findTitle(), "Not in your contacts");
+  assert.equal(h.findNote(), "Added right away if they’re on Relay");
+  assert.ok(h.button("cvFindAdd"), "the row's verb is Add");
+  assert.equal(h.button("cvFindLink"), null);
+  // Case two: Relay has no account for it, so the row turns into your link.
+  await h.button("cvFindAdd").click();
+  assert.equal(h.findTitle(), "Not on Relay yet");
+  assert.match(h.findNote(), /join/);
+  assert.equal(h.button("cvFindAdd"), null);
+  assert.equal(h.button("cvFindLink").text, "Copy link");
+  // Nothing to offer for a name, or an address already in the book.
+  h.type("not an address");
+  assert.equal(h.cvFindEl.innerHTML, "");
+  h.type("Old@Example.test");
+  assert.equal(h.cvFindEl.innerHTML, "", "someone already in the book is found, not added again");
 });
 
 test("Add is one write with the exact row back; nothing is deleted, and the outcome is told as it is", () => {
@@ -33,72 +47,132 @@ test("Add is one write with the exact row back; nothing is deleted, and the outc
   assert.match(add, /await window\.relay\.contactAdd\(\{ email:address \}\)/, "one IPC, one upsert");
   assert.doesNotMatch(add, /contactDelete|contactSave|openChatWith/, "no compensating delete, no lookup by side effect");
   assert.match(add, /res\.found === false/);
-  assert.match(add, /No Relay account found for \$\{address\}\. Check their email or invite them using your link below\./);
+  assert.match(add, /cvFind = \{ address, state:"missing", note:"" \};/, "a miss is told as a miss, not as an error");
+  assert.match(add, /if \(generation !== addSheetGeneration\) return;/, "a cleared field ignores a late answer");
   assert.match(add, /if \(account !== signupAccountKey\(\)\) return;/, "a late result never paints another account's People");
 });
 
 // The real functions, run against controlled outcomes. What the person sees
 // must follow from what the server said, not from a list refresh.
-function addPersonHarness({ contactAdd, accountSwitch = false }) {
-  const el = () => ({ value: "", disabled: false, textContent: "", classList: { set: new Set(), add(c) { this.set.add(c); }, remove(c) { this.set.delete(c); }, has(c) { return this.set.has(c); } } });
-  const cvAddInputEl = el(); const cvAddGoEl = el(); const cvAddNoteEl = el(); const cvAddT2El = el();
-  const calls = { closeAddSheet: 0, renderContacts: 0, renderAll: 0 };
+function addPersonHarness({ contactAdd, accountSwitch = false, copyResult = "Copied" }) {
+  const calls = { renderContacts: 0, renderAll: 0, contactAdd: 0, copy: 0 };
   let account = "user_a";
-  const src = slice("  function addSheetWarn(text)", "  // The link lands on the clipboard from main");
-  const run = new Function("cvAddInputEl", "cvAddGoEl", "cvAddNoteEl", "cvAddT2El", "window", "calls", "signupAccountKey", "isValidEmail", "contactKey", "seed",
-    `"use strict"; let contactsList = seed; let addSheetGeneration = 0;
-     const closeAddSheet = () => { calls.closeAddSheet += 1; };
-     const renderContacts = () => { calls.renderContacts += 1; };
+  let api = null;
+  const cvSearchEl = { value: "" };
+  // The find row is rendered as a string; its buttons are looked up by id.
+  const cvFindEl = { innerHTML: "" };
+  const buttons = new Map();
+  const document = {
+    getElementById(id) {
+      if (!cvFindEl.innerHTML.includes(`id="${id}"`)) return null;
+      if (!buttons.has(cvFindEl.innerHTML + id)) {
+        const label = cvFindEl.innerHTML.match(new RegExp(`id="${id}"[^>]*>([^<]*)<`))?.[1] ?? "";
+        const button = { id, textContent: label, disabled: /id="[^"]+" disabled/.test(cvFindEl.innerHTML), listeners: [],
+          addEventListener(type, fn) { if (type === "click") this.listeners.push(fn); } };
+        buttons.set(cvFindEl.innerHTML + id, button);
+      }
+      return buttons.get(cvFindEl.innerHTML + id);
+    },
+  };
+  const src = slice("  function cvTypedAddress()", "  // The link lands on the clipboard from main");
+  const run = new Function("cvSearchEl", "cvFindEl", "document", "window", "calls", "signupAccountKey", "isValidEmail", "contactKey", "contactEmails", "esc", "copyInviteLinkFromPeople", "seed",
+    `"use strict"; let contactsList = seed; let cvFind = null; let addSheetGeneration = 0;
+     function renderContacts() { calls.renderContacts += 1; renderContactFind(); }
      const renderAll = () => { calls.renderAll += 1; };
      ${src}
-     return { addPersonByAddress, list: () => contactsList };`);
-  const api = run(cvAddInputEl, cvAddGoEl, cvAddNoteEl, cvAddT2El,
-    { relay: { contactAdd: async (input) => { const out = await contactAdd(input); if (accountSwitch) account = "user_b"; return out; } } },
+     return { addPersonByAddress, renderContactFind, closeAddSheet, list: () => contactsList, find: () => cvFind };`);
+  api = run(cvSearchEl, cvFindEl, document,
+    { relay: { contactAdd: async (input) => { calls.contactAdd += 1; const out = await contactAdd(input); if (accountSwitch) account = "user_b"; return out; } } },
     calls, () => account, (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s)), (c) => c.id || (c.emails || [])[0] || c.name,
+    (c) => c.emails || [], (s) => String(s),
+    async (button) => { calls.copy += 1; button.textContent = copyResult; },
     [{ id: "con_old", name: "Old Friend", emails: ["old@example.test"], onRelay: true }]);
-  return { api, cvAddInputEl, cvAddGoEl, cvAddNoteEl, cvAddT2El, calls };
+  const text = (cls) => cvFindEl.innerHTML.match(new RegExp(`class="${cls}">([^<]*)<`))?.[1] ?? null;
+  return {
+    api, calls, cvFindEl, cvSearchEl,
+    // What the field's input handler does: the lists re-render, and with them the find row.
+    type(value) { cvSearchEl.value = value; api.renderContactFind(); },
+    findTitle: () => text("cv-name"),
+    findNote: () => text("cv-sub"),
+    button(id) {
+      const button = document.getElementById(id);
+      if (!button) return null;
+      return { text: button.textContent, disabled: button.disabled, click: () => Promise.all(button.listeners.map((fn) => fn({ currentTarget: button }))) };
+    },
+  };
 }
 
 test("adding someone on Relay closes the sheet with their row in the list", async () => {
   const h = addPersonHarness({ contactAdd: async ({ email }) => ({ ok: true, contact: { id: "con_new", name: "Dana Kim", emails: [email], onRelay: true }, contacts: null }) });
-  h.cvAddInputEl.value = "Dana@Example.test";
-  await h.api.addPersonByAddress();
-  assert.equal(h.calls.closeAddSheet, 1);
+  h.type("Dana@Example.test");
+  const pending = h.api.addPersonByAddress();
+  assert.equal(h.findNote(), "Looking for their Relay account…");
+  assert.equal(h.button("cvFindAdd").disabled, true, "one write in flight");
+  await h.api.addPersonByAddress(); // a second press while busy is ignored
+  await pending;
+  assert.equal(h.calls.contactAdd, 1);
   assert.deepEqual(h.api.list().map((c) => c.id), ["con_old", "con_new"], "the exact row joins the list even when the refresh brought nothing");
-  assert.equal(h.cvAddGoEl.disabled, false);
+  assert.equal(h.cvFindEl.innerHTML, "", "the find row closes: they are in the book now");
+  assert.equal(h.api.find(), null);
+  assert.ok(h.calls.renderContacts >= 1 && h.calls.renderAll === 1);
+  // A full list back replaces the book.
+  const full = addPersonHarness({ contactAdd: async ({ email }) => ({ ok: true, contact: { id: "con_new", emails: [email] }, contacts: [{ id: "con_new", emails: [email] }] }) });
+  full.type("dana@example.test");
+  await full.api.addPersonByAddress();
+  assert.deepEqual(full.api.list().map((c) => c.id), ["con_new"]);
 });
 
 test("an address not on Relay leaves People unchanged and points at your link", async () => {
   const h = addPersonHarness({ contactAdd: async () => ({ ok: true, found: false }) });
-  h.cvAddInputEl.value = "new@example.test";
+  h.type("new@example.test");
   await h.api.addPersonByAddress();
-  assert.equal(h.calls.closeAddSheet, 0, "the sheet stays so the person sees the outcome");
-  assert.equal(h.cvAddNoteEl.textContent, "No Relay account found for new@example.test. Check their email or invite them using your link below.");
-  assert.ok(h.cvAddT2El.classList.has("lit"));
+  assert.equal(h.findTitle(), "Not on Relay yet", "the row stays so the person sees the outcome");
+  assert.ok(h.button("cvFindLink"), "and offers your link");
+  assert.equal(h.api.find().state, "missing");
   assert.equal(h.api.list().length, 1, "a miss never creates a row");
+  assert.equal(h.calls.renderContacts + h.calls.renderAll, 0);
 });
 
 test("a failure is shown as a failure and changes nothing; a bad address never leaves the pill", async () => {
   const h = addPersonHarness({ contactAdd: async () => ({ ok: false, error: "Relay is unreachable right now. Try again in a moment." }) });
-  h.cvAddInputEl.value = "new@example.test";
+  h.type("new@example.test");
   await h.api.addPersonByAddress();
-  assert.equal(h.cvAddNoteEl.textContent, "Relay is unreachable right now. Try again in a moment.");
+  assert.equal(h.findTitle(), "Couldn’t add them");
+  assert.equal(h.findNote(), "Relay is unreachable right now. Try again in a moment.");
+  assert.ok(h.button("cvFindAdd") && !h.button("cvFindAdd").disabled, "Add stays to try again");
   assert.equal(h.api.list().length, 1);
   assert.equal(h.calls.renderContacts, 0);
+  const thrown = addPersonHarness({ contactAdd: async () => { throw new Error("fetch failed"); } });
+  thrown.type("new@example.test");
+  await thrown.api.addPersonByAddress();
+  assert.equal(thrown.findTitle(), "Couldn’t add them");
+  assert.equal(thrown.findNote(), "fetch failed");
+  assert.equal(thrown.api.list().length, 1);
   let called = 0;
   const bad = addPersonHarness({ contactAdd: async () => { called += 1; return { ok: true }; } });
-  bad.cvAddInputEl.value = "not an address";
+  bad.type("not an address");
   await bad.api.addPersonByAddress();
   assert.equal(called, 0);
-  assert.equal(bad.cvAddNoteEl.textContent, "That doesn't look like an address.");
+  assert.equal(bad.cvFindEl.innerHTML, "", "a name is a search, not an add");
 });
 
 test("a result that lands after the account changed paints nothing", async () => {
   const h = addPersonHarness({ accountSwitch: true, contactAdd: async ({ email }) => ({ ok: true, contact: { id: "con_new", name: "Dana", emails: [email], onRelay: true }, contacts: null }) });
-  h.cvAddInputEl.value = "dana@example.test";
+  h.type("dana@example.test");
   await h.api.addPersonByAddress();
-  assert.equal(h.calls.renderContacts + h.calls.renderAll + h.calls.closeAddSheet, 0);
+  assert.equal(h.calls.renderContacts + h.calls.renderAll, 0);
   assert.equal(h.api.list().length, 1);
+  assert.notEqual(h.findTitle(), "Not on Relay yet");
+  // Same for a field that was cleared or closed while the write was out.
+  let resolve;
+  const late = addPersonHarness({ contactAdd: () => new Promise((r) => { resolve = r; }) });
+  late.type("dana@example.test");
+  const pending = late.api.addPersonByAddress();
+  late.api.closeAddSheet();
+  resolve({ ok: true, found: false });
+  await pending;
+  assert.equal(late.cvFindEl.innerHTML, "");
+  assert.equal(late.calls.renderContacts + late.calls.renderAll, 0);
 });
 
 test("main adds only verified Relay accounts and caches the exact committed row", async () => {
@@ -145,13 +219,26 @@ test("a contact is an address and what you call them; no first name, no surname"
   assert.doesNotMatch(html, /A first name is required/);
 });
 
-test("your link sits under the list for whoever is not on Relay yet", () => {
-  assert.match(html, /<div class="cv-latent" id="cvLatent">Invite someone to join Relay\. <button type="button" class="cv-latent-link" id="cvLatentLink">Copy your invite link<\/button> and share it with them\.<\/div>/);
-  const copy = slice("async function copyInviteLinkFromPeople(", "cvAddEl.addEventListener(");
+test("your link is offered in place for whoever is not on Relay yet", async () => {
+  // The standing invite sentence under the list is gone; the link appears
+  // exactly where someone typed an address Relay does not know.
+  assert.doesNotMatch(html, /id="cvLatent"|id="cvLatentLink"|cvLatentLinkEl|cvAddLinkEl/);
+  const copy = slice("async function copyInviteLinkFromPeople(", 'cvSearchEl.addEventListener("input"');
   assert.match(copy, /window\.relay\.copyOnboardingInviteLink\(\)/, "main mints the link and puts it on the clipboard");
   assert.match(copy, /button\.textContent = "Copied";/);
-  assert.match(html, /cvLatentLinkEl\.addEventListener\("click", \(\) => copyInviteLinkFromPeople\(cvLatentLinkEl\)\);/);
-  assert.match(html, /cvAddLinkEl\.addEventListener\("click", \(\) => copyInviteLinkFromPeople\(cvAddLinkEl\)\);/);
+  const h = addPersonHarness({ contactAdd: async () => ({ ok: true, found: false }) });
+  h.type("new@example.test");
+  await h.api.addPersonByAddress();
+  await h.button("cvFindLink").click();
+  assert.equal(h.calls.copy, 1);
+  assert.equal(h.findTitle(), "Link copied");
+  assert.equal(h.button("cvFindLink").text, "Copy again");
+  // A copy that failed does not claim it was copied.
+  const failed = addPersonHarness({ contactAdd: async () => ({ ok: true, found: false }), copyResult: "Could not copy" });
+  failed.type("new@example.test");
+  await failed.api.addPersonByAddress();
+  await failed.button("cvFindLink").click();
+  assert.equal(failed.findTitle(), "Not on Relay yet");
 });
 
 test("a request is a direct Relay room from an address you do not know and never wrote to", () => {
@@ -248,6 +335,7 @@ test("requests use one Relays entry, with no Contacts badge or third Contacts pa
   assert.match(html, /requestSummaryHtml\(requestCount\)/);
   assert.match(html, /setBadge\(peopleBadgeEl, 0\)/);
   assert.doesNotMatch(html, /id="cvSegRequests"/);
-  assert.match(html, /aria-label="Contacts and groups"/);
+  assert.doesNotMatch(html, /id="cvSeg|data-pane="(people|groups)"/, "Contacts has no panes at all now");
+  assert.match(html, /aria-label="Search contacts and groups, or add someone by email"/);
   assert.match(html, /data-view="contacts">Contacts /);
 });

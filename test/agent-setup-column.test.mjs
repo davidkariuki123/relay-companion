@@ -218,8 +218,19 @@ test("the pill draws Your AIs from that evidence, first on the You page, with th
   assert.match(main, /if \(testApps && !String\(host\.where \|\| ""\)\.startsWith\(testApps\)\) throw/);
 
   const settings = inbox.slice(inbox.indexOf("function renderSettings()"), inbox.indexOf("function wireSettings()"));
-  // Your AIs first; Slack, the other thing Relay connects to, sits right after it.
-  assert.match(settings, /if \(window\.relay\.setupSnapshot\) html \+= setupEntryHtml\(\);(?:\s*\/\/[^\n]*)*\s*html \+= slackSettingsHtml\(info\);\s*html \+= yourLinkHtml\(\);/);
+  // Your AIs first; Slack, the other thing Relay connects to, shares its card
+  // right after it, and the invite link follows that card.
+  assert.match(settings, /const connections = `\$\{window\.relay\.setupSnapshot \? setupEntryHtml\(\) : ""\}\$\{slackSettingsHtml\(info\)\}`;\s*if \(connections\) html \+= `<div class="sv-group" data-stop="1"><div class="sv-open-list">\$\{connections\}<\/div><\/div>`;\s*html \+= yourLinkHtml\(\);/);
+  // Nothing on You sits above that card but your name.
+  assert.ok(settings.indexOf('<div class="sv-profile">') < settings.indexOf("const connections ="), "the profile heads the page");
+  assert.match(settings, /if \(info\.paired\) \{\s*const connections =/, "the connections card is the paired page's first card");
+  // The door is one row: "Your AIs", a line only when something needs doing
+  // (warn when an app does), otherwise the app marks; then the chevron.
+  const entry = inbox.slice(inbox.indexOf("function setupEntryHtml()"), inbox.indexOf("async function refreshSetup("));
+  assert.match(entry, /<button class="sv-row setup-entry" type="button" id="setupEntry">/);
+  assert.match(entry, /<span class="sv-row-name">Your AIs<\/span>\$\{attention \? `<span class="sv-row-sub\$\{first \? " warn" : ""\}">/);
+  assert.match(entry, /\$\{!attention && shown\.length \? `<span class="setup-marks" aria-hidden="true">/);
+  assert.match(entry, /<svg class="sv-row-chev"/);
   // The inbox's one quiet word is the setup nudge; the Slack row is its sibling.
   assert.match(inbox, /<div id="relaysIntro" hidden><div id="relaysRequestsSummary"><\/div><div id="setupNudge"><\/div><div id="slackNudge"><\/div><div id="relayAnyoneTip" hidden><\/div><\/div>/);
 

@@ -194,8 +194,7 @@ try {
   assert.equal(groupResult?.ok, true, `group bridge failed: ${JSON.stringify({ groupResult, requests })}`);
   assert.equal(groupResult?.result?.length, 1, `group fixture was not returned: ${JSON.stringify({ groupResult, requests })}`);
   await evaluate(page, `document.documentElement.dataset.theme = "dark"; document.querySelector('[data-view="contacts"]').click(); true`);
-  await waitFor(page, "!document.querySelector('#cvSegGroups').disabled");
-  await evaluate(page, "document.querySelector('#cvSegGroups').click(); true");
+  // Groups sit above People on the one Contacts list; there is no pane to switch.
   await waitFor(page, "Boolean(document.querySelector('[data-group]'))");
   await evaluate(page, "document.querySelector('[data-group]').click(); true");
   await waitFor(page, "Boolean(document.querySelector('#contactsView [data-gd-leave]'))");

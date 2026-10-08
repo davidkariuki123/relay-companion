@@ -27,6 +27,13 @@ test("a Task has no Start dock: its verbs are a Relay's Open rows and the reply 
   assert.equal(inbox.includes('"Start again" : "Start task"'), false);
   assert.equal(reader.includes("requestActionable"), false);
   assert.equal(reader.includes("requestDockHtml"), false);
-  assert.match(reader, /const documentHostActions = onHuman \? `<div class="rd-host-actions"/);
+  // The host rows go once a received Task is over (Sven, 2026-10-08): there
+  // is nothing left to open it in. The sender's copy keeps them.
+  assert.match(reader, /const documentHostActions = onHuman && !readerRunsHere && !\(request && !r\.outbound && taskIsOver\(r\)\) \? `<div class="rd-host-actions"/);
+  // A received Task that can run here runs from the card's Run block, and the
+  // Open in bar steps aside so the apps and the copied prompt appear once.
+  assert.match(reader, /const readerRun = request && !\(!r\.outbound && taskIsOver\(r\)\) \? taskReaderRunHtml\(r\) : "";/);
+  assert.match(reader, /const readerRunsHere = readerRun\.includes\("tk-reader-run"\);/);
+  assert.match(inbox, /function taskReaderRunHtml\(row\) \{[\s\S]*?taskRunBlockHtml\(row\)[\s\S]*?return `\$\{run\}\$\{nativeExecuteHtml\(row\)\}`;/, "Execute stays only where no plan can be read");
   assert.match(reader, /<div id="qrInput"[^>]+contenteditable="true"[^>]+data-placeholder="\$\{replyThread \? "Reply in thread…" : "Reply…"\}">/);
 });

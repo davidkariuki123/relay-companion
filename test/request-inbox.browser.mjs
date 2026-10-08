@@ -69,7 +69,14 @@ try {
   await page.locator('#requestsBack').click();
   assert.ok(await page.locator('.relay-arrival').count()>1,'accepted sender moves to main inbox');
   await page.locator('[data-view="contacts"]').click();
-  assert.ok((await page.locator('#cvList').innerText()).includes(added));
+  // Contacts rows are names (the address shows only when a search matched it).
+  const addedName=await page.evaluate(email=>window.contactsFixture.find(c=>c.email===email).name,added);
+  assert.ok(addedName);
+  assert.ok((await page.locator('#cvList .cv-name').allInnerTexts()).includes(addedName));
+  await page.locator('#cvSearch').fill(added);
+  assert.deepEqual(await page.locator('#cvList .cv-name').allInnerTexts(),[addedName],'the accepted sender is found by address');
+  assert.equal(await page.locator('#cvFind').innerHTML(),'','an accepted sender is already in the book, so nothing offers Add');
+  await page.locator('#cvSearch').press('Escape');
   await page.locator('[data-view="relays"]').click();
   await page.locator('#requestsEntry').click();
   await page.locator('#requestsDeleteAll').click();

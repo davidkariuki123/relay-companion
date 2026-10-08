@@ -68,30 +68,68 @@ try {
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.people-dialog:popover-open').count(),0);
   assert.equal(await page.locator('#cvList [data-message-more]').first().evaluate(el=>el===document.activeElement),true);
-  const open = () => page.locator('#cvBlockedPeople').click();
+  // Blocked people is a row on You, and the page it opens is a page of You:
+  // it stays under the You tab, drawn in You's view (2026-10-08).
+  assert.equal(await page.locator('#cvBlockedPeople').count(),0,'Contacts has no Blocked entry of its own');
+  const lit = view => page.locator(`.tab[data-view="${view}"]`).evaluate(el=>el.classList.contains('active'));
+  const host = () => page.locator('#cvBlockedPage').evaluate(el=>el.parentElement?.id);
+  const you = () => page.locator('.tab[data-view="settings"]').click();
+  const open = async () => { if(!(await page.locator('#svBlockedPeople').isVisible())) await you(); await page.locator('#svBlockedPeople').click(); };
   const back = () => page.locator('#cvBlockedBack').click();
   await open();
   await page.locator('.cv-blocked-empty').waitFor();
   assert.equal(await page.locator('dialog[open]').count(),0,'Blocked people must not open a modal');
-  assert.equal(await page.locator('#cvOverview').isVisible(),false);
-  assert.equal(await page.locator('.tab[data-view="contacts"]').evaluate(el=>el.classList.contains('active')),true);
+  assert.equal(await host(),'settingsView','opened from You, the page is drawn in You');
+  assert.equal(await page.locator('#settingsView').isVisible(),true);
+  assert.equal(await page.locator('#contactsView').isVisible(),false,'opening it never navigates to Contacts');
+  assert.equal(await lit('settings'),true,'You stays lit');
+  assert.equal(await lit('contacts'),false);
+  assert.equal(await page.locator('#svBlockedPeople').count(),0,'the page takes You\'s place');
+  assert.equal(await page.locator('#cvBlockedTitle').innerText(),'Blocked people');
+  assert.equal(await page.locator('.cv-blocked-empty strong').innerText(),'No one is blocked');
+  assert.equal(await page.locator('.cv-blocked-empty p').innerText(),'People you block will appear here.');
   assert.equal(await page.locator('#cvBlockedPage').evaluate(el=>Boolean(el.closest('#card'))),true);
+  assert.equal(await page.locator('#cvBlockedBack').innerText(),'← You','Back names the page it returns to');
   assert.equal(await page.evaluate(()=>document.activeElement.id),'cvBlockedBack');
   assert.equal(await page.locator('#scroll').evaluate(el=>el.scrollTop),0);
   await page.locator('#cvBlockedPage').evaluate(async el=>{await Promise.all(el.getAnimations().map(animation=>animation.finished));});
   if(process.env.RELAY_BLOCKED_SCREENSHOT) await page.locator('#card').screenshot({path:process.env.RELAY_BLOCKED_SCREENSHOT});
   await page.locator('#themeToggle').click();
   assert.equal(await page.locator('#cvBlockedPage').isVisible(),true);
+  // A fresh inbox for the same account redraws You around the page, never over it.
+  await page.evaluate(()=>window.fixtureEvents.onInbox(structuredClone(window.fixturePayload)));
+  await page.waitForTimeout(150);
+  assert.equal(await page.locator('#cvBlockedPage').isVisible(),true,'a same-account refresh keeps the page open');
+  assert.equal(await host(),'settingsView');
+  assert.equal(await page.locator('#svBlockedPeople').count(),0);
   if(process.env.RELAY_BLOCKED_SCREENSHOT) await page.locator('#card').screenshot({path:process.env.RELAY_BLOCKED_SCREENSHOT.replace('.png','-alternate-theme.png')});
   await back();
-  assert.equal(await page.evaluate(()=>document.activeElement.id),'cvBlockedPeople');
-  assert.ok(await page.locator('#scroll').evaluate(el=>el.scrollTop)>0,'back restores the scrolled People list');
+  assert.equal(await lit('settings'),true,'Back returns to You');
+  await page.waitForFunction(()=>document.activeElement?.id==='svBlockedPeople');
+  assert.equal(await host(),'contactsView','Back puts the page home, hidden');
+  assert.equal(await page.locator('#cvBlockedPage').isVisible(),false);
   await open();
+  await page.locator('.cv-blocked-empty').waitFor();
   await page.keyboard.press('Escape');
-  assert.equal(await page.locator('#cvOverview').isVisible(),true);
+  assert.equal(await page.locator('.tab[data-view="settings"]').evaluate(el=>el.classList.contains('active')),true,'Escape is Back');
+  assert.equal(await page.locator('#svBlockedPeople').isVisible(),true);
   await open();
+  await page.locator('.cv-blocked-empty').waitFor();
+  await you();
+  assert.equal(await page.locator('#cvBlockedPage').isVisible(),false,'the You tab, tapped again, leaves the subpage');
+  assert.equal(await page.locator('#svBlockedPeople').isVisible(),true);
+  assert.equal(await page.evaluate(()=>document.activeElement.id),'svBlockedPeople');
+  // Another tab leaves it too: Contacts opens home, and You comes back as You.
+  await open();
+  await page.locator('.cv-blocked-empty').waitFor();
   await page.locator('.tab[data-view="contacts"]').click();
-  assert.equal(await page.locator('#cvOverview').isVisible(),true,'selected People tab returns home');
+  assert.equal(await page.locator('#cvOverview').isVisible(),true,'Contacts opens home, not the old subpage');
+  assert.equal(await page.locator('#cvBlockedPage').isVisible(),false);
+  assert.equal(await lit('contacts'),true);
+  await you();
+  assert.equal(await page.locator('#svBlockedPeople').isVisible(),true,'You is You again');
+  assert.equal(await page.locator('#cvBlockedPage').isVisible(),false);
+  await page.locator('.tab[data-view="contacts"]').click();
 
   await page.evaluate(()=>{window.fixtureReadMode='fail';});
   await open();
@@ -142,17 +180,45 @@ try {
   await open();
   assert.equal(await page.locator('#cvBlockedPage').evaluate(el=>el.getAnimations().length),0);
   await page.locator('.tab[data-view="relays"]').click();
+  await you();
+  assert.equal(await page.locator('#cvBlockedPage').isVisible(),false,'leaving You resets the subpage');
+  assert.equal(await page.locator('#svBlockedPeople').isVisible(),true);
   await page.locator('.tab[data-view="contacts"]').click();
-  assert.equal(await page.locator('#cvOverview').isVisible(),true,'leaving People resets the subpage');
-  // The existing block confirmation's recovery link lands on this same page.
-  await page.locator('#cvList [data-message-more]').first().click();
-  await page.locator('[data-contact-block]').first().click();
+  assert.equal(await page.locator('#cvOverview').isVisible(),true);
+  // The existing block confirmation's recovery link lands on this same page,
+  // and its Back returns to the scrolled Contacts list it came from.
+  const lastMore = page.locator('#cvList [data-message-more]').last();
+  await lastMore.scrollIntoViewIfNeeded();
+  const scrolled = await page.locator('#scroll').evaluate(el=>el.scrollTop);
+  assert.ok(scrolled>0,'the list is long enough to scroll');
+  await lastMore.click();
+  await page.locator('.th-message-menu:popover-open [data-contact-block]').click();
   await page.locator('[data-block-confirm]').click();
+  assert.match(await page.locator('.people-dialog').innerText(),/You can unblock them in You › Blocked people\./);
+  assert.equal(await page.locator('.people-dialog [data-blocked-list]').innerText(),'Blocked people');
   await page.locator('.people-dialog [data-blocked-list]').click();
   await page.locator('.cv-blocked-empty').waitFor();
   assert.equal(await page.locator('dialog[open]').count(),0);
+  assert.equal(await page.locator('#cvBlockedBack').innerText(),'← Contacts');
+  // Opened from Contacts, it is a page of Contacts, under the Contacts tab.
+  assert.equal(await host(),'contactsView');
+  assert.equal(await lit('contacts'),true);
+  assert.equal(await lit('settings'),false);
+  assert.equal(await page.locator('#cvOverview').isVisible(),false);
   await back();
-  assert.equal(await page.locator('#cvList [data-message-more]').first().evaluate(el=>el===document.activeElement),true);
+  assert.equal(await page.locator('.tab[data-view="contacts"]').evaluate(el=>el.classList.contains('active')),true);
+  assert.equal(await page.locator('#scroll').evaluate(el=>el.scrollTop),scrolled,'back restores the scrolled Contacts list');
+  assert.equal(await lastMore.evaluate(el=>el===document.activeElement),true);
+  // The Contacts tab, tapped again on a Contacts-opened page, is Back.
+  await lastMore.click();
+  await page.locator('.th-message-menu:popover-open [data-contact-block]').click();
+  await page.locator('[data-block-confirm]').click();
+  await page.locator('.people-dialog [data-blocked-list]').click();
+  await page.locator('.cv-blocked-empty').waitFor();
+  await page.locator('.tab[data-view="contacts"]').click();
+  assert.equal(await page.locator('#cvBlockedPage').isVisible(),false,'the Contacts tab leaves its own subpage');
+  assert.equal(await page.locator('#cvOverview').isVisible(),true);
+  assert.equal(await lit('contacts'),true);
   assert.deepEqual(errors,[]);
-  console.log('Blocked People browser checks passed: containment, navigation/focus/scroll, retry, unblock, duplicate prevention, stale reads, account switch, reduced motion.');
+  console.log('Blocked People browser checks passed: You entry, containment, navigation/focus/scroll, retry, unblock, duplicate prevention, stale reads, account switch, reduced motion, block-dialog recovery.');
 } finally { await browser.close(); }

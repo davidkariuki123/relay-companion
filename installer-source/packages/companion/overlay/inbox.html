@@ -1142,6 +1142,65 @@
      a member hunting for a Rename button that would only ever 404. */
   .cvg-badge { font-size:10px; font-weight:600; letter-spacing:0.02em; color:var(--muted-2); background:var(--wash-2); border-radius:var(--r-1); padding:2px 6px; white-space:nowrap; }
   .cvg-owner { font-size:12px; color:var(--muted-2); line-height:1.45; }
+  /* ---- Contacts as one list (Sven's cut, 2026-10-08) ----
+     A field that finds and adds, Groups (few, so first), then People A–Z.
+     Rows are names; their actions wait for a hover. No hairlines between
+     rows: the sections are the structure. */
+  .cv-head { padding:6px 16px 2px; }
+  .cv-search { display:flex; align-items:center; gap:8px; flex:1; height:34px; padding:0 11px; border-radius:10px; background:var(--wash-2); color:var(--muted-2); cursor:text; transition:box-shadow var(--t-fast) var(--settle); }
+  .cv-search:focus-within { box-shadow:var(--focus-ring); }
+  .cv-search svg { width:13px; height:13px; flex:none; }
+  .cv-search input { flex:1 1 auto; min-width:0; height:100%; margin:0; padding:0; -webkit-appearance:none; appearance:none; border:0; outline:none; box-shadow:none;
+    background:transparent; color:var(--ink); font:13px/1 var(--sans); caret-color:var(--accent); }
+  .cv-search input:focus, .cv-search input:focus-visible { outline:none; box-shadow:none; }
+  .cv-search input::-webkit-search-decoration, .cv-search input::-webkit-search-cancel-button { -webkit-appearance:none; appearance:none; }
+  .cv-search input::placeholder { color:var(--muted-2); }
+  .cv-section-head { display:flex; align-items:baseline; padding:14px 16px 4px; }
+  .cv-section-label { font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted-2); }
+  .cv-section-verb { margin-left:auto; appearance:none; border:0; background:transparent; color:var(--accent); font:600 12px var(--sans); padding:2px 6px; margin-right:-6px; border-radius:var(--r-1); cursor:pointer; }
+  .cv-section-verb:hover { background:var(--accent-soft); }
+  .cvg { padding-bottom:0; }
+  .cv-show-more { appearance:none; border:0; background:transparent; width:100%; text-align:left; color:var(--muted); font:12px var(--sans); padding:7px 16px 7px 58px; cursor:pointer; }
+  .cv-show-more:hover { color:var(--ink-2); }
+  .cv-show-more[hidden] { display:none; }
+  .cv-item, .cvg-item { padding:8px 16px; border-bottom:0; gap:12px; }
+  .cv-person { border-bottom:0; padding-right:10px; }
+  .cv-avatar { width:30px; height:30px; font-size:10.5px; }
+  .cv-avatar.sq { border-radius:8px; font-size:12px; }
+  .cv-avatar.pending { background:transparent; box-shadow:inset 0 0 0 1.5px var(--edge); color:var(--muted); }
+  /* A group is a deck (David, 2026-10-08): its own square in front, with
+     its letter and its hue, and up to two of its people as cards behind it,
+     up and to the right, in their own hues. A square still says "group"; the
+     cards say there are people in it. One tile's footprint. */
+  .cvg-stack { position:relative; display:block; width:30px; height:30px; flex:0 0 30px; isolation:isolate; }
+  .cvg-stack .cv-avatar { position:absolute; left:0; bottom:0; margin:0; width:24px; height:24px; border-radius:7px; font-size:9.5px; box-shadow:0 0 0 1.5px var(--bg); }
+  .cvg-stack .cv-avatar:nth-child(1) { z-index:3; }
+  .cvg-stack .cv-avatar:nth-child(2) { left:3px; bottom:3px; z-index:2; margin:0; }
+  .cvg-stack .cv-avatar:nth-child(3) { left:6px; bottom:6px; z-index:1; margin:0; }
+  .cvg-stack .cv-avatar:only-child { width:30px; height:30px; border-radius:8px; font-size:12px; }
+  .cvg-stack .cvg-slack-logo { width:30px; height:30px; }
+  /* The same deck, larger, introduces a group on its own page. */
+  .gd-identity .cvg-stack { width:40px; height:40px; flex:0 0 40px; }
+  .gd-identity .cvg-stack .cv-avatar { width:32px; height:32px; border-radius:9px; font-size:12px; box-shadow:0 0 0 2px var(--bg); }
+  .gd-identity .cvg-stack .cv-avatar:nth-child(2) { left:4px; bottom:4px; }
+  .gd-identity .cvg-stack .cv-avatar:nth-child(3) { left:8px; bottom:8px; }
+  .gd-identity .cvg-stack .cv-avatar:only-child { width:40px; height:40px; border-radius:10px; font-size:15px; }
+  .gd-identity .cvg-stack .cvg-slack-logo { width:40px; height:40px; }
+  .cv-name, .cvg-name { font-size:13.5px; font-weight:550; }
+  .cvg-sub, .cv-person .cv-sub, .cv-find-row .cv-sub { font-family:var(--sans); font-size:11.5px; line-height:1.35; color:var(--muted); margin-top:1px; }
+  .cv-meta { align-self:center; padding-top:0; }
+  .cv-name:has(b), .cvg-name:has(b) { color:var(--muted); font-weight:500; }
+  .cv-name b, .cvg-name b { color:var(--ink); font-weight:700; }
+  /* Actions are one hover away; a row at rest is a name. */
+  .cv-person-more { opacity:0; transition:opacity var(--t-fast) var(--settle); }
+  .cv-person:hover .cv-person-more, .cv-person:focus-within .cv-person-more, .cv-person-more[aria-expanded="true"] { opacity:1; }
+  .cv-find-row { display:flex; align-items:center; gap:12px; padding:10px 16px 6px; }
+  .cv-find-row .cv-body { flex:1; min-width:0; }
+  .cv-find-row .cv-add { flex:none; }
+  .cv-add.solid { background:var(--accent); color:var(--on-accent); }
+  .cv-add.solid:hover { background:var(--accent); filter:brightness(1.06); }
+  .cv-add:disabled { opacity:.55; cursor:default; }
+  .cv-find:empty { display:none; }
   .cvg-panel { padding:10px 16px 13px 76px; border-bottom:1px solid var(--hair); display:flex; flex-direction:column; gap:9px; }
   .cvg-members { display:flex; flex-wrap:wrap; gap:5px; }
   .cvg-none { font-size:12px; color:var(--muted-2); }
@@ -1490,7 +1549,10 @@
   .group-detail.in-sheet .gd-error { padding-inline:22px; }
   .contacts-group-detail .cv-head, .contacts-group-detail #cvgNewForm,
   .contacts-group-detail #cvgError, .contacts-group-detail #cvgList,
-  .contacts-group-detail #cvgEmpty { display:none !important; }
+  .contacts-group-detail #cvgEmpty, .contacts-group-detail #cvgHead,
+  .contacts-group-detail #cvgMore, .contacts-group-detail #cvPeopleHead,
+  .contacts-group-detail #cvList, .contacts-group-detail #cvFind,
+  .contacts-group-detail #contactsEmpty { display:none !important; }
   .th-room-status { margin:10px 16px 12px; padding:10px 12px; border-top:1px solid var(--hair); color:var(--muted); font-family:var(--serif); font-size:12.5px; line-height:1.4; text-align:center; }
   /* Conversation messages read like a group chat: every message is named on
      its own line, and every party's name keeps a stable color so a busy
@@ -1788,6 +1850,43 @@
      switches: people move between Claude Code and Codex independently, so a
      radio-style Claude/Codex/Both picker made the common state harder to read. */
   .sv-open-section { margin:24px 12px 0; }
+  /* ---- You, one page (Sven's cut, 2026-10-08) ----
+     A name, then cards of same-sized rows. A row names itself; a second line
+     appears only when it has something to say. */
+  .sv-profile { padding:14px 16px 4px; }
+  .sv-profile-name { font:500 21px/1.2 var(--serif); letter-spacing:-.01em; color:var(--ink); overflow-wrap:anywhere; }
+  .sv-profile-email { margin-top:2px; font:12px/1.4 var(--sans); color:var(--muted); overflow-wrap:anywhere; }
+  .sv-group { margin:12px 12px 0; }
+  .sv-group + .sv-group { margin-top:10px; }
+  .sv-row { display:flex; align-items:center; gap:10px; width:100%; min-height:46px; padding:8px 12px; box-sizing:border-box;
+    appearance:none; border:0; background:transparent; text-align:left; font:inherit; color:inherit; }
+  button.sv-row { cursor:pointer; transition:background-color var(--t-fast) var(--settle); }
+  button.sv-row:hover:not(:disabled) { background:var(--wash); }
+  button.sv-row:focus-visible { outline:none; box-shadow:inset var(--focus-ring); }
+  .sv-open-list > .sv-row + .sv-row, .sv-open-list > * + .sv-row, .sv-open-list > .sv-slack-section, .sv-row-actions .sv-row + .sv-row { border-top:1px solid var(--edge); }
+  .sv-open-list > .sv-slack-section:first-child { border-top:0; }
+  .sv-row-copy { display:flex; flex-direction:column; gap:1px; min-width:0; flex:1 1 auto; }
+  .sv-row-name { font:500 13.5px/1.3 var(--sans); color:var(--ink); }
+  .sv-row-name.danger { color:var(--danger); }
+  .sv-row-sub { display:flex; align-items:center; gap:5px; font:11.5px/1.35 var(--sans); color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sv-row-sub.warn { color:var(--warn); }
+  .sv-row-sub.sv-link-url { font-family:var(--mono); font-size:11px; }
+  .sv-row-value { flex:0 0 auto; font:12px var(--sans); color:var(--muted); white-space:nowrap; }
+  .sv-row-chev { flex:0 0 auto; color:var(--muted-2); transition:transform var(--t-fast) var(--settle); }
+  .sv-row .setup-marks { margin-left:auto; }
+  .sv-row.off .sv-row-name { color:var(--muted-2); }
+  .sv-row-actions { border-top:1px solid var(--edge); }
+  .sv-row.sub { padding-left:24px; min-height:40px; }
+  .sv-row.sub .sv-row-name { font-size:12.5px; font-weight:450; }
+  .sv-choose.primary { background:var(--accent); color:var(--on-accent); }
+  .sv-choose.quiet { background:transparent; color:var(--muted); }
+  .sv-choose.quiet:hover { background:var(--wash-2); color:var(--ink-2); }
+  .sv-slack-section .sv-slack-card { border-radius:0; background:transparent; box-shadow:none; }
+  .sv-slack-section .sv-slack-row { min-height:46px; padding:8px 12px; }
+  .sv-open-list > .sv-slack-section { margin:0; }
+  .sv-open-list > .sv-slack-section .sv-err { margin:0; padding:0 12px 10px; }
+  .sv-group .row-err { padding:0 4px; }
+  .sv-open-list > .sv-notify-tray { border-top:1px solid var(--edge); padding:4px 6px 6px; }
   .sv-open-title, .sv-quiet-title { padding:0 4px; font-family:var(--sans); font-size:15px; line-height:1.35; font-weight:600; color:var(--ink); }
   .sv-open-intro { padding:0 4px; margin:4px 0 10px; font-family:var(--sans); font-size:12px; line-height:1.45; color:var(--muted-2); }
   .sv-open-list { overflow:hidden; border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); }
@@ -1819,7 +1918,7 @@
   .rd-details-head:focus-visible { outline:none; box-shadow:var(--focus-ring); }
   .rd-details-name { font-family:var(--sans); font-size:12px; font-weight:650; color:var(--ink); }
   .rd-details-meta { grid-column:1; font-family:var(--sans); font-size:10.5px; line-height:1.35; color:var(--muted-2); }
-  .rd-details-chev { grid-column:2; grid-row:1 / span 2; color:var(--muted-2); font-size:16px; line-height:1; transition:transform .18s var(--settle); }
+  .rd-details-chev { grid-column:2; grid-row:1; color:var(--muted-2); font-size:16px; line-height:1; transition:transform .18s var(--settle); }
   .rd-details.open .rd-details-chev { transform:rotate(90deg); }
   .rd-details-body { padding:2px 14px 0; border-top:1px solid var(--hair); }
   @media (prefers-reduced-motion:reduce) { .rd-details-chev { transition:none; } }
@@ -1959,6 +2058,10 @@
      bubble — here it stands on its own, at the letter's measure. */
   .rd-host-actions { margin:18px auto 0; width:min(100%, 560px); }
   .rd-host-actions .th-host-actions { flex:none; width:100%; margin:0; }
+  /* The native-execute verb and its caption sit flush with the letter: the
+     button keeps its hover padding, outdented by exactly that much. */
+  .rd-host-actions > .oa-item { margin-left:-10px; width:calc(100% + 20px); }
+  .rd-host-actions > .sv-copy { padding-left:0; padding-right:0; }
   .rd-host-actions .th-host-actions-inner { border:1px solid var(--hair); border-radius:14px; }
   /* The reader's sheet, one bar (Shane, approved by David, 2026-09-30):
      "Open in" on the left, the app chips, an "or" divider, and Copy for your
@@ -2136,6 +2239,9 @@
   /* The foot's column is not the letter's 560 measure: the composer must be
      able to grow past it for a long rail. Its children stay centred. */
   .rd-foot .rd-col { padding-top:0; padding-bottom:0; max-width:none; }
+  /* One measure for the whole letter (expanded app review, 2026-10-08): the
+     status box, the Open in bar and the reply line up with the words. */
+  .rd-foot .rd-col:not(.run) .tk-status, .rd-foot .rd-col:not(.run) .rd-host-actions, .rd-foot .rd-col:not(.run) .qr { width:min(100%, 472px); max-width:472px; min-width:0; margin-left:auto; margin-right:auto; }
   .rd-foot .rd-end { margin-top:0; }
   /* One row regardless of file count; the native modal owns overflow and focus. */
   .rd-attachments { appearance:none; width:100%; min-height:38px; padding:9px 12px; display:flex; align-items:center; gap:9px;
@@ -3193,7 +3299,7 @@
      so the two columns read as one window, not two cards side by side. */
   .card.wide .th-detail-head { height:50px; padding-bottom:6px; }
   .card.wide #readerView .reader-bar { padding-top:14px; padding-bottom:10px; }
-  .card.wide #setupPane .setup-page { padding-top:0; }
+  .card.wide #setupPane .setup-page { padding-top:0; max-width:720px; margin-left:auto; margin-right:auto; }
   .card.wide #setupPane .setup-page h2 { margin-top:7px; }
   .card.wide #topicsView [data-topic-back] { display:none; }
   .wide-empty:not(.hidden) { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; min-height:100%; padding:0 40px; text-align:center; }
@@ -4056,6 +4162,15 @@
   .tk-helper { flex:1 1 auto; min-width:0; font-family:var(--sans); font-size:12px; line-height:1.4; color:var(--muted); }
   .tk-status.done .tk-helper { color:var(--ok); } .tk-status.rejected .tk-helper { color:var(--danger); }
   .tk-status .tk-verbs { margin-left:auto; }
+  .tk-status.settled, .tk-status.lean { padding:13px 16px; }
+  .tk-status.settled .tk-row, .tk-status.lean .tk-row { margin:0; padding:0; border:0; min-height:30px; }
+  .tk-status .tk-state { display:inline-flex; align-items:center; gap:8px; font-size:13px; }
+  .tk-status.settled.done .tk-state { color:var(--ok); font-weight:500; }
+  .tk-status .tk-pos { margin:0; }
+  .tk-status .tk-link { margin-left:auto; }
+  .tk-status.lean.bare { border-color:transparent; background:transparent; padding:6px 0; }
+  .tk-status.lean.bare .tk-row { justify-content:center; }
+  .tk-status.lean.bare .tk-verbs { margin-left:0; }
   .tk-status .tk-btn { height:30px; line-height:28px; padding:0 14px; font-size:12px; border-radius:9px; }
   .tk-status .tk-ask { margin-top:10px; }
   .tk-status .task-claim-error { margin-top:8px; }
@@ -4406,44 +4521,23 @@
       <!-- Contacts view -->
       <section class="view hidden" id="contactsView">
         <div id="cvOverview">
+        <!-- ONE FIELD (Sven's cut, 2026-10-08): it finds a person or a group,
+             and an email nobody in the book has answers in place — added if
+             they're on Relay, your link if they're not. Groups come first
+             because there are few of them: four, most recently active, then
+             "Show N more", so people always start on the first screen. -->
         <div class="cv-head">
-          <!-- One island, two lists. Groups used to sit below every contact, so a
-               long book hid them completely; stacking them the other way would just
-               bury people instead. A segment switches the pane and keeps both a
-               single tap away, with counts so neither looks empty when it isn't. -->
-          <div class="cv-seg" role="tablist" aria-label="Contacts and groups">
-            <button class="cv-seg-btn active" type="button" role="tab" data-pane="people" id="cvSegPeople">Contacts <span class="cv-seg-n" id="cvSegPeopleN"></span></button>
-            <button class="cv-seg-btn" type="button" role="tab" data-pane="groups" id="cvSegGroups">Groups <span class="cv-seg-n" id="cvSegGroupsN"></span></button>
-          </div>
-          <span id="cvCreateActions">
-            <button class="cv-add" type="button" id="cvNew" aria-label="New contact or group" aria-haspopup="menu" aria-expanded="false" aria-controls="cvNewMenu" data-message-more>New ▾</button>
-            <div class="th-message-menu" id="cvNewMenu" popover="auto" role="menu" aria-label="Create">
-              <button type="button" role="menuitem" id="cvNewContact">New Contact</button>
-              <button type="button" role="menuitem" id="cvgNew">New Group</button>
-            </div>
-          </span>
-          <span class="cv-add-slot gone" id="cvAddHome"><button class="cv-add" type="button" id="cvAdd" aria-label="Add contact">Add</button></span>
+          <label class="cv-search">
+            <svg viewBox="0 0 14 14" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="6" cy="6" r="4.3"/><path d="M9.3 9.3L12.5 12.5"/></g></svg>
+            <input id="cvSearch" type="search" placeholder="Search, or add by email" autocomplete="off" spellcheck="false" aria-label="Search contacts and groups, or add someone by email" />
+          </label>
         </div>
+        <div class="cv-find" id="cvFind" aria-live="polite"></div>
         <section class="cv-google gone" id="cvGoogle" aria-label="Google contacts">
           <div class="cv-google-top"><span class="cv-google-title">Google contacts</span><button type="button" class="cv-add" id="cvGoogleAction" disabled>Checking…</button></div>
           <div class="cv-google-detail" id="cvGoogleDetail" aria-live="polite">Checking Google contacts…</div>
           <div class="cv-google-note" id="cvGoogleNote">Names and email addresses. Read-only.</div>
         </section>
-        <!-- Add: two cases, told apart (Sven, 2026-09-08). An address finds
-             someone already on Relay; everyone else gets your link and shows
-             up here when they use it. Nobody is "invited by email". -->
-        <div class="cv-add-sheet hidden" id="cvAddSheet">
-          <div class="cv-add-t">Add someone who already uses Relay</div>
-          <div class="cv-add-line">
-            <input class="cv-input" id="cvAddInput" type="email" aria-label="Email address they use for Relay" aria-describedby="cvAddNote" placeholder="their@email.com" autocomplete="off" spellcheck="false" />
-            <span class="cv-add-slot" id="cvAddTarget"></span>
-          </div>
-          <div class="cv-add-note" id="cvAddNote">Enter the email address they use for Relay.</div>
-          <div class="cv-add-t cv-add-t2" id="cvAddT2">Invite someone to join Relay</div>
-          <button class="cv-add quiet" type="button" id="cvAddLink">Copy your invite link</button>
-          <div class="cv-add-note">Share your invite link with them. They can paste it into Claude Code or Codex to set up Relay and appear in your Contacts.</div>
-          <div class="cv-form-actions"><button class="cv-cancel" type="button" id="cvAddCancel">Cancel</button></div>
-        </div>
         <!-- Edit: a contact is an address and what you call them. No first
              name, no surname, no form to fill: their name arrives with their
              account (the revamp, 2026-09-03). -->
@@ -4468,6 +4562,7 @@
         <!-- Contact groups: saved rosters. A relay to a group fans out to every
              member under ONE shared thread; replies reach everyone. -->
         <div class="cvg" id="cvGroups">
+          <div class="cv-section-head" id="cvgHead"><span class="cv-section-label">Groups</span><button class="cv-section-verb" type="button" id="cvgNew">New group</button></div>
           <form class="cvg-newform hidden" id="cvgNewForm">
             <input class="cv-input" id="cvgNewName" placeholder="Group name" autocomplete="off" spellcheck="false" />
             <button class="cv-save" type="submit">Create</button>
@@ -4476,12 +4571,11 @@
           <div class="cvg-error" id="cvgError"></div>
           <section class="cvg-detail gone" id="cvgDetail" aria-live="polite"></section>
           <div id="cvgList"></div>
-          <div class="cv-empty" id="cvgEmpty">No groups yet. A group relays to everyone in it as one conversation.</div>
+          <button class="cv-show-more" type="button" id="cvgMore" hidden></button>
         </div>
+        <div class="cv-section-head" id="cvPeopleHead"><span class="cv-section-label">People</span></div>
         <div class="cvg-error" id="cvPeopleError"></div>
         <div class="cv-list" id="cvList"></div>
-        <div class="cv-blocked-entry" id="cvBlockedEntry"><button class="cv-latent-link" type="button" id="cvBlockedPeople">Blocked contacts</button></div>
-        <div class="cv-latent" id="cvLatent">Invite someone to join Relay. <button type="button" class="cv-latent-link" id="cvLatentLink">Copy your invite link</button> and share it with them.</div>
         <!-- Requests: a first message from someone not in your Contacts waits
              here, out of the feed and the count, until you accept it, reply,
              or ignore it. -->
@@ -4495,8 +4589,8 @@
 
         </div>
         <section class="cv-blocked-page gone" id="cvBlockedPage" aria-labelledby="cvBlockedTitle">
-          <button class="cv-blocked-back" id="cvBlockedBack" type="button">← Contacts</button>
-          <h2 id="cvBlockedTitle">Blocked contacts</h2>
+          <button class="cv-blocked-back" id="cvBlockedBack" type="button">← You</button>
+          <h2 id="cvBlockedTitle">Blocked people</h2>
           <p class="cv-blocked-copy">You can’t send each other direct messages while blocked. Existing messages stay.</p>
           <div class="cv-blocked-list" id="cvBlockedList" aria-live="polite"></div>
           <div class="cv-blocked-status" id="cvBlockedStatus" role="status"></div>
@@ -4582,20 +4676,12 @@
   const sentListEl = document.getElementById("sentList");
   const sentEmptyEl = document.getElementById("sentEmpty");
   const contactsViewEl = document.getElementById("contactsView");
-  const cvAddEl = document.getElementById("cvAdd");
   const cvListEl = document.getElementById("cvList");
   const contactsEmptyEl = document.getElementById("contactsEmpty");
   const cvFormEl = document.getElementById("cvForm");
   const cvNameEl = document.getElementById("cvName");
-  const cvAddSheetEl = document.getElementById("cvAddSheet");
-  const cvAddInputEl = document.getElementById("cvAddInput");
-  const cvAddGoEl = cvAddEl; // One real button moves between the toolbar and form.
-  const cvAddNoteEl = document.getElementById("cvAddNote");
-  const cvAddT2El = document.getElementById("cvAddT2");
-  const cvAddLinkEl = document.getElementById("cvAddLink");
-  const cvAddCancelEl = document.getElementById("cvAddCancel");
-  const cvLatentEl = document.getElementById("cvLatent");
-  const cvLatentLinkEl = document.getElementById("cvLatentLink");
+  const cvSearchEl = document.getElementById("cvSearch");
+  const cvFindEl = document.getElementById("cvFind");
   const cvEmailEl = document.getElementById("cvEmail");      // the draft <input> inside the chip field
   const cvEmailsEl = document.getElementById("cvEmails");    // the bordered chip container (click -> focus)
   const cvSuggestEl = document.getElementById("cvSuggest");  // domain autocomplete dropdown
@@ -11015,6 +11101,16 @@
       + `<button type="button" class="th-host-copy tk-run-copy" data-tk-copy="${esc(taskIdOf(row))}"><span>Copy prompt</span><span>for your agent</span></button></div>`
       + `${caption ? `<div class="tk-run-caption">${esc(caption)}</div>` : ""}${pick ? taskRunFoldersHtml(st.id, plan, pick) : ""}</div>`;
   }
+  // The reader runs a Task the way its card does (Shane, 2026-10-08): one
+  // icon per coding app, the folder when the Task names one here, the folder
+  // list when it doesn't. Execute stays only where no plan can be read.
+  function taskReaderRunHtml(row) {
+    const run = taskRunBlockHtml(row);
+    if (run && !run.startsWith('<div class="tk-run-plan"')) {
+      return `<div class="rd-host-actions tk-reader-run" data-stop="1" data-task-card="${esc(taskIdOf(row))}">${run}${nativeExecutePickerHtml(row)}</div>`;
+    }
+    return `${run}${nativeExecuteHtml(row)}`;
+  }
   // The card's agent area: the Run block where this Task can run here,
   // otherwise the agent row. While the plan is being read the agent row
   // stands in, so the card never jumps empty.
@@ -11541,10 +11637,7 @@
     const mine = taskIsMine(row);
     const parts = [taskRosterSumText(counts)];
     if (counts.rejected) parts.push(`${counts.rejected} ${counts.rejected === 1 ? "person" : "people"} rejected it`);
-    const tail = mine
-      ? "Every Done row opens that person's result."
-      : "Your own Reject and Done speak only for you.";
-    return `${parts.join(" · ")}. ${tail}`;
+    return parts.join(" · ");
   }
   // The card footer: the hairline, the sender's ladder, the agent row while the
   // Task is live, and the state row with the decision.
@@ -11561,6 +11654,7 @@
     // state row, which always carries them.
     const roster = taskIsEveryone(row) ? taskRosterCardHtml(row) : "";
     const open = `<div class="tk-footer" data-stop="1" data-task-card="${esc(taskIdOf(row))}">`;
+    if (!mine && st.over) return `${open}<div class="tk-foot ${st.tone}">${taskSettledLineHtml(row, st)}</div>${taskNoteHtml(row)}</div>`;
     if (taskIsEveryone(row) && roster) {
       const counts = taskRosterCountsOf(row);
       const tone = taskRosterTone(counts);
@@ -11582,6 +11676,19 @@
       return `${open}${taskStateRowHtml(row, st)}${live && st.claim !== "other" ? taskAgentAreaHtml(row) : ""}${live ? nativeExecutePickerHtml(row) : ""}${people ? `<div class="tk-tally quiet"><span class="tk-state">${taskMarkHtml("open")}<span class="tk-text">Sent to ${esc(taskRosterPeopleText(people))}</span></span></div>` : ""}${taskNoteHtml(row)}</div>`;
     }
     return `${open}${mine ? taskLadderRowHtml(row) : ""}${live ? taskAgentAreaHtml(row) : ""}${live ? nativeExecutePickerHtml(row) : ""}${taskStateRowHtml(row, st)}${taskNoteHtml(row)}</div>`;
+  }
+  // The settled line (Sven, 2026-10-08): once the receiver's own copy is over,
+  // the card and the reader both say it once, in a sentence about them.
+  // "Done" stamped three times, a roster and a ladder are the sender's view.
+  function taskSettledText(row, st) {
+    const claim = taskChannelClaim(row);
+    const other = claim && claim.claimant && !claim.claimant.self ? firstName(claim.claimant.name) : "";
+    const when = st.pending ? "just now" : timeAgoWords(st.at);
+    const verb = st.tone === "done" ? "finished" : st.tone === "rejected" ? "rejected" : "cancelled";
+    return `${other || "You"} ${verb} this${when ? ` · ${when}` : ""}`;
+  }
+  function taskSettledLineHtml(row, st) {
+    return `<span class="tk-state">${taskMarkHtml(st.tone)}<span class="tk-text">${esc(taskSettledText(row, st))}</span></span>${taskResultLinkHtml(row, st)}`;
   }
   // The expanded Task's module: the ladder as a stepper, one helper line in
   // plain words, and the verbs.
@@ -11610,6 +11717,19 @@
   function taskStatusModuleHtml(row) {
     if (!row) return "";
     const st = taskStateFor(row);
+    const card = `data-stop="1" data-task-card="${esc(taskIdOf(row))}"`;
+    if (!taskIsMine(row) && st.over) {
+      return `<div class="tk-status settled ${st.tone}" ${card}><div class="tk-row">${taskSettledLineHtml(row, st)}</div>${taskNoteHtml(row)}</div>`;
+    }
+    if (!taskIsMine(row) && !taskChannelClaim(row)) {
+      // While it is open: where you stand (an Everyone Task's position line, or
+      // In progress), then your verbs. No ladder, no roster, no helper.
+      const position = taskIsEveryone(row) ? taskEveryonePositionHtml(row) : "";
+      const line = position || (st.tone === "started" ? `<span class="tk-state">${taskMarkHtml(st.tone)}<span class="tk-text">${esc(st.text)}</span></span>` : "");
+      // Nothing to say beside the verbs (a direct Task, not started): the
+      // verbs stand on their own under the letter, with no box around them.
+      return `<div class="tk-status lean ${line ? "" : "bare "}${st.tone}" ${card}><div class="tk-row">${line}${taskVerbsHtml(row, st, { surface: "reader" })}</div>${taskAskRowHtml(row)}${taskNoteHtml(row)}</div>`;
+    }
     // An Everyone Task: the roster grouped by state in place of the ladder,
     // with the viewer's own row as a strip above it.
     const grouped = taskIsEveryone(row) ? taskRosterGroupedHtml(row) : "";
@@ -13701,6 +13821,7 @@
     const request = isTaskRow(r);
     const sender = relaySender(r);
     const replyChat = readerReplyChat(r);
+    const barName = replyChat.party || sender;
     const chatOwnedWork = r.source?.host === "relay-agent-run";
     const triggerRow = chatOwnedWork && r.inReplyToRelayId ? relayById(r.inReplyToRelayId) : null;
     const subject = chatOwnedWork && triggerRow
@@ -13727,7 +13848,6 @@
     // agent. also details should start closed and open if clicked."
     const twoFaces = false;
     const onAgent = twoFaces && readerTab === "agent";
-    const agentWords = agentWordCount(agentText);
     const onHuman = !onAgent;
     const handoff = handoffFor(r);
     // No contents strip on any letter: a Task folds its agent document into
@@ -13745,8 +13865,7 @@
     const details = !twoFaces && agentText ? `
         <div class="rd-details${detailsOpen ? " open" : ""}" data-stop="1">
           <button type="button" class="rd-details-head" data-rd-details="${esc(r.id)}" aria-expanded="${detailsOpen ? "true" : "false"}">
-            <span class="rd-details-name">Details for your agent</span>
-            <span class="rd-details-meta">${esc(`${agentWords.toLocaleString("en-US")} ${agentWords === 1 ? "word" : "words"} · the specifics · your agent gets these too`)}</span>
+            <span class="rd-details-name">For your agent</span>
             <span class="rd-details-chev" aria-hidden="true">›</span>
           </button>
           ${detailsOpen ? `<div class="rd-details-body rd-agentcopy">${readerParagraphs(agentText)}</div>` : ""}
@@ -13757,7 +13876,7 @@
         <div class="rd-rule"></div>
         <div class="rd-agentcopy">${readerParagraphs(agentText)}</div>`;
     const humanDoc = `
-        <div class="rd-kicker">${request ? (r.outbound ? `Task · ${esc(sender)}` : `Task · Created by ${esc(sender)}`) : esc(sender)}${r.nature ? ` · ${esc(TOPIC_NATURE_LABEL[r.nature] || r.nature)}` : ""} · ${esc(timeAgo(r.createdAt))}${r.unread ? "" : " · read"}${esc(sentLinkKickerWord(sentLinkOf(r)))}</div>
+        <div class="rd-kicker">${barName === sender ? "" : `${esc(sender)} · `}${request && taskKindOf(r) ? `${taskKindOf(r) === "everyone" ? "Each of you" : "One of you"} · ` : ""}${esc(timeAgoWords(r.createdAt))}${esc(sentLinkKickerWord(sentLinkOf(r)))}</div>
         <div class="rd-headline${headlineClass}">${esc(subject)}</div>
         <div class="rd-rule"></div>
         <div class="rd-body">${readerParagraphs(r.forHuman)}</div>
@@ -13775,7 +13894,11 @@
     // Host rows live on Message for you only. On the agent face the rail's
     // chip names the app and Send opens it; a second "Open in…" beside that
     // was two ways to say one thing (David, 2026-09-03).
-    const documentHostActions = onHuman ? `<div class="rd-host-actions" data-stop="1">${relayHostActionsHtml({
+    // A received Task that can run here runs from its Run block, which
+    // already offers each coding app and the copied prompt: one place, not two.
+    const readerRun = request && !(!r.outbound && taskIsOver(r)) ? taskReaderRunHtml(r) : "";
+    const readerRunsHere = readerRun.includes("tk-reader-run");
+    const documentHostActions = onHuman && !readerRunsHere && !(request && !r.outbound && taskIsOver(r)) ? `<div class="rd-host-actions" data-stop="1">${relayHostActionsHtml({
       id: r.id,
       direction: r.outbound ? "out" : "in",
       materializedCodex: Boolean(r.materializedCodex),
@@ -13835,13 +13958,13 @@
         <button class="th-back" type="button" id="readerBack" aria-label="Back">
           <svg width="8" height="13" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 1L1 7l6 6"/></svg>
         </button>
-        <span class="reader-name">${esc(sender)}</span>
+        <span class="reader-name">${esc(barName)}</span>
         ${sentLinkMoreHtml(r)}
         ${request && taskIsOver(r) ? `<button class="reader-delete" type="button" data-reader-delete="${esc(r.id)}" aria-label="Move task to Recently Deleted" title="Move task to Recently Deleted"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>` : ""}
       </div>
       ${documentList}
       <div class="rd-col${readerTabSwap ? " swap" : ""}">${doc}</div>`;
-    readerBodyEl.querySelector("#readerActions").innerHTML = `${status}${bothNote}${taskModule ? `<div class="reader-status-slot">${taskModule}</div>` : ""}${request ? nativeExecuteHtml(r) : ""}${documentHostActions}`;
+    readerBodyEl.querySelector("#readerActions").innerHTML = `${status}${bothNote}${taskModule ? `<div class="reader-status-slot">${taskModule}</div>` : ""}${readerRun}${documentHostActions}`;
     const taskMotionState = request ? taskStateFor(r) : null;
     readerStatusMotion.bind({
       key:JSON.stringify([accountCacheIdentity(payload.account), r.id, taskMotionState?.tone, taskMotionState?.at]),
@@ -14851,7 +14974,7 @@
     const blocking = action === "block";
     const {room, message} = entries[0];
     const current = showPeopleDialog(`<h2 id="peopleDialogTitle">${blocking ? `Block ${esc(room.name || roomAddress(room))}?` : `Delete all ${entries.length.toLocaleString()} requests?`}</h2>
-      <p>${blocking ? "You won’t be able to message each other or connect through invite links. You can unblock them in Contacts → Blocked contacts." : "These relays will move to Recently Deleted for 30 days. Your other conversations will stay."}</p>
+      <p>${blocking ? "You won’t be able to message each other or connect through invite links. You can unblock them in You › Blocked people." : "These relays will move to Recently Deleted for 30 days. Your other conversations will stay."}</p>
       <div class="people-dialog-error" role="alert"></div><div class="people-dialog-actions"><button type="button" data-dialog-close>Cancel</button><button type="button" class="danger" data-request-confirm>${blocking ? "Block sender" : "Delete all"}</button></div>`, trigger);
     peopleDialog.querySelector("[data-request-confirm]").onclick = async (event) => {
       if (!current() || account !== signupAccountKey() || event.currentTarget.disabled) return;
@@ -14881,27 +15004,45 @@
     renderAll();
   }
 
+  // ---- one list: search, Groups, People ----
+  // What the field holds right now, lowercased; every list reads it.
+  let cvQuery = "";
+  let cvFind = null; // the typed address's answer: { address, state:"ready"|"busy"|"missing"|"error", note, copied }
+  // A word in the name (or an address) that starts with what was typed: "ma"
+  // finds Magnus Lund and Benji Malta, never Shane Acton.
+  function cvMatches(query, ...values) {
+    if (!query) return true;
+    return values.some((value) => String(value || "").toLowerCase().split(/[\s@._-]+/).some((word) => word.startsWith(query))
+      || String(value || "").toLowerCase().startsWith(query));
+  }
+  // The typed prefix of each matching word, made bold; the rest stays muted.
+  function cvMarkHtml(text, query) {
+    const value = String(text || "");
+    if (!query) return esc(value);
+    return value.split(/(\s+)/).map((word) => word.toLowerCase().startsWith(query)
+      ? `<b>${esc(word.slice(0, query.length))}</b>${esc(word.slice(query.length))}` : esc(word)).join("");
+  }
   function renderContacts() {
-    contactsEmptyEl.classList.toggle("gone", contactsPane !== "people" || contactsList.length > 0);
-    refreshPaneCounts();
-    cvListEl.innerHTML = contactsList.map((c, index) => {
+    const people = contactsList
+      .filter((c) => cvMatches(cvQuery, c.name, ...contactEmails(c)))
+      .sort((a, b) => String(a.name || contactEmails(a)[0] || "").localeCompare(String(b.name || contactEmails(b)[0] || ""), undefined, { sensitivity:"base" }));
+    contactsEmptyEl.classList.toggle("gone", contactsList.length > 0 || Boolean(cvQuery));
+    document.getElementById("cvPeopleHead").classList.toggle("gone", !people.length);
+    cvListEl.classList.toggle("searching", Boolean(cvQuery));
+    cvListEl.innerHTML = people.map((c, index) => {
       const emails = contactEmails(c);
       const primary = emails[0] || "";
-      const more = emails.length > 1 ? `+${emails.length - 1} more` : "";
-      const recent = c.updatedAt ? timeAgo(c.updatedAt) : "";
+      // A row is a name. The address, the clock and the actions are one
+      // tap or one hover away; the list is for finding someone.
       return `
       <div class="cv-person">
       <button class="cv-item" type="button" data-contact="${esc(contactKey(c))}">
-        <span class="cv-avatar" style="--cv-h:${cvHue(c.name || primary)}">${esc(cvInitials(c.name, primary))}</span>
+        <span class="cv-avatar${c.onRelay === false ? " pending" : ""}" style="--cv-h:${cvHue(c.name || primary)}">${esc(cvInitials(c.name, primary))}</span>
         <span class="cv-body">
-          <span class="cv-name">${esc(c.name || primary)}</span>
-          <span class="cv-subrow">
-            <span class="cv-sub">${esc(primary || "no email")}</span>
-            ${more ? `<span class="cv-more">${esc(more)}</span>` : ""}
-            ${c.onRelay === false ? `<span class="cv-more">· not on Relay yet</span>` : ""}
-          </span>
+          <span class="cv-name">${cvMarkHtml(c.name || primary, cvQuery)}</span>
+          ${cvQuery && !cvMatches(cvQuery, c.name) ? `<span class="cv-sub">${esc(primary)}</span>` : ""}
         </span>
-        ${recent ? `<span class="cv-meta">${esc(recent)}</span>` : ""}
+        ${c.onRelay === false ? `<span class="cv-meta">Not on Relay yet</span>` : ""}
       </button>
       <button class="cv-person-more" type="button" aria-label="More actions for ${esc(c.name || primary)}" aria-haspopup="menu" aria-expanded="false" aria-controls="person-menu-${index}" data-message-more>⋯</button>
       <div class="th-message-menu" id="person-menu-${index}" popover="auto" role="menu" aria-label="Actions for ${esc(c.name || primary)}">
@@ -14910,6 +15051,7 @@
       </div>
       </div>`;
     }).join("");
+    renderContactFind();
     for (const el of cvListEl.querySelectorAll(".cv-item")) {
       el.addEventListener("click", () => {
         // A row is the PERSON, so tapping it does what you came to a person
@@ -14992,7 +15134,7 @@
     const name = person.name || contactEmails(person)[0] || "this contact";
     if (!canBlockPerson(person)) return;
     const current = showPeopleDialog(`<h2 id="peopleDialogTitle">Block ${esc(name)}?</h2>
-      <p>You won’t be able to message each other or connect through invite links. Existing messages stay. You can unblock them in Blocked contacts.</p>
+      <p>You won’t be able to message each other or connect through invite links. Existing messages stay. You can unblock them in You › Blocked people.</p>
       <div class="people-dialog-error" role="alert"></div><div class="people-dialog-actions">
       <button class="cv-cancel" type="button" data-dialog-close autofocus>Cancel</button>
       <button class="danger" type="button" data-block-confirm>Block contact</button></div>`, trigger);
@@ -15006,7 +15148,7 @@
         const result = await window.relay.blockPerson({ contactId:person.id, relayUserId:person.relayUserId });
         if (!current()) return;
         if (result?.blocked !== true) throw new Error("Could not block this contact. Try again.");
-        peopleDialog.innerHTML = `<h2 id="peopleDialogTitle">${esc(name)} is blocked</h2><p>Your existing messages and contact stay. You can unblock them in Blocked contacts.</p><div class="people-dialog-actions"><button class="cv-add" type="button" data-blocked-list>Blocked contacts</button><button class="cv-cancel" type="button" data-dialog-close>Done</button></div>`;
+        peopleDialog.innerHTML = `<h2 id="peopleDialogTitle">${esc(name)} is blocked</h2><p>Your existing messages and contact stay. You can unblock them in You › Blocked people.</p><div class="people-dialog-actions"><button class="cv-add" type="button" data-blocked-list>Blocked people</button><button class="cv-cancel" type="button" data-dialog-close>Done</button></div>`;
         peopleDialog.querySelector("[data-dialog-close]").addEventListener("click", closePeopleDialog);
         peopleDialog.querySelector("[data-blocked-list]").addEventListener("click", () => openBlockedPeople(trigger));
         positionPeopleDialog();
@@ -15035,21 +15177,34 @@
       { opacity:1, transform:"translateX(0)" },
     ], { duration:220, easing:"cubic-bezier(.2,.7,.2,1)" });
   }
+  // Blocked people is a page of whichever view opened it: You (its row) or
+  // Contacts (a Block dialog). The one page element moves into that view.
+  function blockedPeopleView(page = blockedPeoplePage) { return page?.from === "settings" ? "settings" : "contacts"; }
   function closeBlockedPeople({ restoreFocus = true, animate = true } = {}) {
     const previous = blockedPeoplePage;
     if (!previous) return;
     blockedPeoplePage = null; // invalidate pending reads and Unblock responses
     blockedPeopleAnimation?.cancel();
     cvBlockedPageEl.classList.add("gone");
+    if (cvBlockedPageEl.parentElement !== contactsViewEl) contactsViewEl.append(cvBlockedPageEl);
     cvOverviewEl.classList.remove("gone");
     cvBlockedListEl.innerHTML = "";
     cvBlockedErrorEl.textContent = "";
     cvBlockedStatusEl.textContent = "";
+    if (previous.from === "settings") {
+      delete settingsViewEl.dataset.pageHtml;
+      if (activeView === "settings") {
+        renderSettings();
+        scrollEl.scrollTop = previous.scrollTop;
+        if (restoreFocus) document.getElementById("svBlockedPeople")?.focus({ preventScroll:true });
+      }
+      return;
+    }
     if (activeView === "contacts") {
       scrollEl.scrollTop = previous.scrollTop;
       if (animate) animatePeoplePage(cvOverviewEl, false);
       if (restoreFocus && previous.account === signupAccountKey()) {
-        const trigger = previous.trigger?.isConnected ? previous.trigger : document.getElementById("cvBlockedPeople");
+        const trigger = previous.trigger?.isConnected ? previous.trigger : cvSearchEl;
         trigger.focus({ preventScroll:true });
       }
     }
@@ -15057,10 +15212,20 @@
   async function openBlockedPeople(trigger) {
     if (peopleDialog.matches(":popover-open")) closePeopleDialog();
     const previous = blockedPeoplePage;
-    const page = { account:signupAccountKey(), trigger:previous?.trigger || trigger, scrollTop:previous?.scrollTop ?? scrollEl.scrollTop };
+    // Opened from You (its Blocked people row) or from a Block dialog in
+    // Contacts; it stays in the view that opened it, under that view's tab.
+    const from = previous?.from || (activeView === "settings" ? "settings" : "contacts");
+    const page = { account:signupAccountKey(), from, trigger:previous?.trigger || trigger, scrollTop:previous?.scrollTop ?? scrollEl.scrollTop };
+    cvBlockedBackEl.textContent = from === "settings" ? "← You" : "← Contacts";
     blockedPeoplePage = page;
-    const current = () => blockedPeoplePage === page && activeView === "contacts" && page.account === signupAccountKey();
-    cvOverviewEl.classList.add("gone");
+    const current = () => blockedPeoplePage === page && activeView === blockedPeopleView(page) && page.account === signupAccountKey();
+    if (from === "settings") {
+      delete settingsViewEl.dataset.pageHtml;
+      settingsViewEl.replaceChildren(cvBlockedPageEl);
+    } else {
+      if (cvBlockedPageEl.parentElement !== contactsViewEl) contactsViewEl.append(cvBlockedPageEl);
+      cvOverviewEl.classList.add("gone");
+    }
     cvBlockedPageEl.classList.remove("gone");
     cvBlockedErrorEl.textContent = "";
     cvBlockedStatusEl.textContent = "";
@@ -15074,7 +15239,7 @@
     let currentBlocks = [];
     const paint = (blocks) => {
       currentBlocks = blocks;
-      list.innerHTML = blocks.map((person) => `<div class="people-blocked-row"><span class="cv-avatar" aria-hidden="true">${esc(cvInitials(person.name || "Relay member", ""))}</span><span>${esc(person.name || "Relay member")}</span><button class="cv-add" type="button" data-unblock="${esc(person.relayUserId)}" aria-label="Unblock ${esc(person.name || "Relay member")}">Unblock</button></div>`).join("") || '<div class="cv-blocked-empty"><strong>No blocked contacts</strong><p>Contacts you block will appear here.</p></div>';
+      list.innerHTML = blocks.map((person) => `<div class="people-blocked-row"><span class="cv-avatar" aria-hidden="true">${esc(cvInitials(person.name || "Relay member", ""))}</span><span>${esc(person.name || "Relay member")}</span><button class="cv-add" type="button" data-unblock="${esc(person.relayUserId)}" aria-label="Unblock ${esc(person.name || "Relay member")}">Unblock</button></div>`).join("") || '<div class="cv-blocked-empty"><strong>No one is blocked</strong><p>People you block will appear here.</p></div>';
       for (const button of list.querySelectorAll("[data-unblock]")) {
         button.addEventListener("click", async () => {
           if (!current() || button.disabled) return;
@@ -15108,7 +15273,7 @@
       paint(result.blocks);
     } catch {
       if (!current()) return;
-      list.innerHTML = 'Blocked contacts are unavailable right now. <button class="cv-add" type="button" data-blocks-retry>Try again</button>';
+      list.innerHTML = 'Blocked people are unavailable right now. <button class="cv-add" type="button" data-blocks-retry>Try again</button>';
       list.querySelector("button").addEventListener("click", () => openBlockedPeople(trigger));
     } finally {
       if (current()) list.setAttribute("aria-busy", "false");
@@ -15116,12 +15281,11 @@
   }
   cvBlockedBackEl.addEventListener("click", () => closeBlockedPeople());
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && activeView === "contacts" && blockedPeoplePage && !event.defaultPrevented) {
+    if (event.key === "Escape" && blockedPeoplePage && activeView === blockedPeopleView() && !event.defaultPrevented) {
       event.preventDefault();
       closeBlockedPeople();
     }
   });
-  document.getElementById("cvBlockedPeople").addEventListener("click", (event) => openBlockedPeople(event.currentTarget));
   /**
    * Open the conversation a contact row names.
    *
@@ -15284,7 +15448,7 @@
   });
   // Poll only while People is visible. This also observes browser OAuth return
   // without exposing device credentials in a callback URL.
-  setInterval(() => { if (payload.features?.googleContacts === true && rendererSurfaceActive() && activeView === "contacts" && contactsPane === "people") void loadGoogleContacts(); }, 5000);
+  setInterval(() => { if (payload.features?.googleContacts === true && rendererSurfaceActive() && activeView === "contacts") void loadGoogleContacts(); }, 5000);
   window.addEventListener("focus", () => { if (payload.features?.googleContacts === true && activeView === "contacts") void loadGoogleContacts(); });
 
   async function loadContacts() {
@@ -15301,45 +15465,24 @@
   const cvgNewFormEl = document.getElementById("cvgNewForm");
   const cvgNewNameEl = document.getElementById("cvgNewName");
   const cvgNewCancelEl = document.getElementById("cvgNewCancel");
-  // ---- contacts / groups pane (the segmented island in the head) ----
-  const cvSegPeopleEl = document.getElementById("cvSegPeople");
-  const cvSegGroupsEl = document.getElementById("cvSegGroups");
-  const cvSegPeopleNEl = document.getElementById("cvSegPeopleN");
-  const cvSegGroupsNEl = document.getElementById("cvSegGroupsN");
+  // ---- one view: the field, Groups, then People ----
   const cvGroupsEl = document.getElementById("cvGroups");
-  let contactsPane = "people";
+  const cvgMoreEl = document.getElementById("cvgMore");
+  // How many groups show before "Show N more": few enough that People
+  // always starts on the first screen of the small card.
+  const CVG_SHOWN = 4;
+  let cvgShowAll = false;
   function applyContactsPane() {
-    const people = contactsPane === "people";
-    const groups = contactsPane === "groups";
-    for (const [el, on] of [[cvSegPeopleEl, people], [cvSegGroupsEl, groups]]) {
-      el.classList.toggle("active", on);
-      el.setAttribute("aria-selected", String(on));
-    }
-    cvGoogleEl.classList.toggle("gone", !people || payload.features?.googleContacts !== true);
-    cvListEl.classList.toggle("gone", !people);
-    document.getElementById("cvBlockedEntry").classList.toggle("gone", !people);
-    cvLatentEl.classList.toggle("gone", !people);
-    contactsEmptyEl.classList.toggle("gone", !people || contactsList.length > 0);
-    cvGroupsEl.classList.toggle("gone", !groups);
-    // The shared creation menu stays available from either Contacts pane.
-    cvAddEl.classList.toggle("gone", !people);
-    if (!groups) cvgNewFormEl.classList.add("hidden");
-    if (!people) { cvFormEl.classList.add("hidden"); closeAddSheet(); }
-    // Neither pane inherits the other's refusal, and neither keeps one across
-    // a return to the tab — an error names a click, and the click is over.
+    cvGoogleEl.classList.toggle("gone", payload.features?.googleContacts !== true || Boolean(cvQuery));
+    contactsEmptyEl.classList.toggle("gone", contactsList.length > 0 || Boolean(cvQuery));
+    // An error names a click, and the click is over.
     cvPeopleErrorEl.textContent = "";
     cvOpeningKey = null;
     cvgShowError("");
   }
-  function refreshPaneCounts() {
-    cvSegPeopleNEl.textContent = contactsList.length ? String(contactsList.length) : "";
-    cvSegGroupsNEl.textContent = groupsList.length ? String(groupsList.length) : "";
-  }
-  cvSegPeopleEl.addEventListener("click", () => { contactsPane = "people"; applyContactsPane(); if (wideLayoutActive()) syncWidePane(); });
-  cvSegGroupsEl.addEventListener("click", () => { contactsPane = "groups"; applyContactsPane(); loadGroups(); if (wideLayoutActive()) syncWidePane(); });
+  function refreshPaneCounts() {}
 
   const cvgListEl = document.getElementById("cvgList");
-  const cvgEmptyEl = document.getElementById("cvgEmpty");
   const cvgErrorEl = document.getElementById("cvgError");
   const cvgDetailEl = document.getElementById("cvgDetail");
   let groupsList = [];
@@ -15769,38 +15912,65 @@
     return `${firstNames[0]}, ${firstNames[1]} + ${firstNames.length - 2}`;
   }
 
+  // Everyone in a group but you: you are in every group you can see.
+  function groupOthers(roster) {
+    const me = String(payload.account?.email || "").trim().toLowerCase();
+    return roster.filter((member) => !me || String(member.email || "").trim().toLowerCase() !== me);
+  }
+  // The deck: the group's own square with its letter in front, up to two of
+  // its people behind it as blank cards in their own hues.
   function groupAvatarStack(group, roster) {
     if (group.provider === "slack") {
       return '<img class="cvg-slack-logo" src="slackMark.png" alt="Slack" />';
     }
-    const people = roster.slice(0, 3);
-    if (!people.length) {
-      return `<span class="cv-avatar" style="--cv-h:${cvHue(group.name)}" aria-hidden="true">${esc(cvInitials(group.name, ""))}</span>`;
-    }
-    return people.map((member) => {
-      const label = member.name || member.email || "?";
-      return `<span class="cv-avatar" style="--cv-h:${cvHue(label)}" aria-hidden="true">${esc(cvInitials(label, member.email))}</span>`;
-    }).join("");
+    const letter = String(group.name || "?").trim().charAt(0).toUpperCase() || "?";
+    return `<span class="cv-avatar" style="--cv-h:${cvHue(group.name)}" aria-hidden="true">${esc(letter)}</span>`
+      + groupOthers(roster).slice(0, 2).map((member) => `<span class="cv-avatar" style="--cv-h:${cvHue(member.name || member.email || "?")}" aria-hidden="true"></span>`).join("");
   }
 
+  // When a group last moved: its room's newest message, else its own record.
+  function groupActivityAt(group) {
+    const id = String(group.id || "");
+    const room = chatSections().groups.find((candidate) => String(candidate.groupId || candidate.chatId || "") === id);
+    const at = Date.parse(room?.latest?.at || "") || Date.parse(group.updatedAt || "") || Date.parse(group.createdAt || "") || 0;
+    return group.archivedAt ? at - 1e13 : at; // an archived room never crowds out a live one
+  }
   function renderGroups() {
     syncSlackChannelRows();
-    cvgEmptyEl.classList.toggle("gone", groupsList.length > 0);
-    refreshPaneCounts();
-    cvgListEl.innerHTML = groupsList.map((g) => {
+    // A group answers to its name and to the people in it: "sven" finds
+    // Sven and every group he is in.
+    const matching = groupsList.filter((g) => cvMatches(cvQuery, g.name)
+      || (cvQuery && groupOthers(groupInfoRoster(g)).some((member) => cvMatches(cvQuery, member.name, member.email))));
+    const ordered = matching.map((g) => ({ g, at:groupActivityAt(g) })).sort((a, b) => b.at - a.at).map(({ g }) => g);
+    // The open group's details stay reachable even past the fold.
+    const cap = cvQuery || cvgShowAll ? ordered.length : CVG_SHOWN;
+    const shown = ordered.slice(0, cap);
+    if (cvgExpandedId && !shown.some((g) => g.id === cvgExpandedId)) {
+      const open = ordered.find((g) => g.id === cvgExpandedId);
+      if (open) shown.push(open);
+    }
+    const hidden = ordered.length - shown.length;
+    // Searching with nothing matching hides the section; a book with no
+    // groups at all keeps its label, because New group lives on it.
+    cvGroupsEl.classList.toggle("gone", Boolean(cvQuery) && !matching.length);
+    document.getElementById("cvgNew").classList.toggle("gone", Boolean(cvQuery));
+    cvgMoreEl.hidden = hidden <= 0;
+    cvgMoreEl.textContent = hidden > 0 ? `Show ${hidden} more` : "";
+    cvgListEl.innerHTML = shown.map((g) => {
       const roster = groupInfoRoster(g);
-      const count = roster.length;
       const slack = g.provider === "slack";
-      const mine = !slack && g.owned !== false;
       const archived = Boolean(g.archivedAt);
+      // A deck for a group, a circle for a person; Slack wears its own mark.
+      const tile = groupAvatarStack(g, roster);
+      const others = groupOthers(roster);
+      const sub = slack ? (g.lastPreview || "Slack channel") : others.length ? groupMemberSummary(others) : roster.length ? "Just you" : groupMemberSummary(roster);
       return `<button class="cvg-item" type="button" data-group="${esc(g.id)}">
-        <span class="cvg-stack">${groupAvatarStack(g, roster)}</span>
+        <span class="cvg-stack">${tile}</span>
         <span class="cvg-body">
-          <span class="cvg-name">${esc(g.name)}</span>
-          <span class="cvg-sub">${esc(slack ? (g.lastPreview || "Slack channel") : groupMemberSummary(roster))}</span>
+          <span class="cvg-name">${cvMarkHtml(g.name, cvQuery)}</span>
+          <span class="cvg-sub">${esc(archived ? `Archived · ${sub}` : sub)}</span>
         </span>
         ${slack ? "" : `<span class="cvg-edit" role="button" tabindex="0" data-group-edit="${esc(g.id)}">Edit</span>`}
-        <span class="cvg-meta">${slack ? '<span class="cvg-badge">Slack</span>' : archived ? `<span class="cvg-badge">Archived</span>` : mine ? "" : `<span class="cvg-badge">Added you</span>`}<span class="cvg-count">${slack ? `${Number(g.messageCount || 0)} ${Number(g.messageCount || 0) === 1 ? "message" : "messages"}` : `${count} ${count === 1 ? "person" : "people"}`}</span></span>
       </button>`;
     }).join("");
     renderPeopleGroupDetail();
@@ -15951,16 +16121,19 @@
     }
   }
   cvgNewEl.addEventListener("click", () => {
-    contactsPane = "groups";
-    applyContactsPane();
     loadGroups();
     cvgNewFormEl.classList.remove("hidden");
+    setInteractive(true);
     cvgNewNameEl.focus();
   });
   cvgNewCancelEl.addEventListener("click", () => {
     cvgNewNameEl.value = "";
     cvgNewFormEl.classList.add("hidden");
-    document.getElementById("cvNew").focus();
+    cvgNewEl.focus();
+  });
+  cvgMoreEl.addEventListener("click", () => {
+    cvgShowAll = true;
+    renderGroups();
   });
   cvgNewFormEl.addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -16126,53 +16299,55 @@
     }
   }
   // ---- Add: someone on Relay by address, or your link for everyone else ----
+  // The field is the add sheet. An address nobody in the book has gets one
+  // row under it: Add looks for their Relay account and adds them; a miss
+  // turns the row into your link, because Relay never emails anyone.
   let addSheetGeneration = 0;
-  let addButtonAnimation = null;
-  function moveAddButton(open) {
-    const before = cvAddEl.getBoundingClientRect();
-    addButtonAnimation?.cancel();
-    cvAddSheetEl.classList.toggle("hidden", !open);
-    document.getElementById(open ? "cvAddTarget" : "cvAddHome").append(cvAddEl);
-    const after = cvAddEl.getBoundingClientRect();
-    if (before.width && after.width && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      addButtonAnimation = cvAddEl.animate([
-        { transform:`translate(${before.left - after.left}px, ${before.top - after.top}px) scale(${before.width / after.width}, ${before.height / after.height})` },
-        { transform:"none" },
-      ], { duration:340, easing:"cubic-bezier(.2,.8,.2,1)" });
-    }
+  function cvTypedAddress() {
+    const raw = String(cvSearchEl.value || "").trim().toLowerCase();
+    return isValidEmail(raw) ? raw : "";
   }
-  function openAddSheet() {
-    addSheetGeneration += 1;
-    cvFormEl.classList.add("hidden");
-    cvAddInputEl.value = "";
-    cvAddNoteEl.textContent = "Enter the email address they use for Relay.";
-    cvAddNoteEl.classList.remove("warn");
-    cvAddT2El.classList.remove("lit");
-    moveAddButton(true);
-    setInteractive(true);
-    cvAddInputEl.focus();
+  function renderContactFind() {
+    const address = cvTypedAddress();
+    const known = address && contactsList.some((c) => contactEmails(c).some((email) => String(email).toLowerCase() === address));
+    if (!address || known) { cvFind = null; cvFindEl.innerHTML = ""; return; }
+    if (!cvFind || cvFind.address !== address) cvFind = { address, state:"ready", note:"" };
+    const missing = cvFind.state === "missing";
+    const title = missing ? (cvFind.copied ? "Link copied" : "Not on Relay yet") : cvFind.state === "error" ? "Couldn’t add them" : "Not in your contacts";
+    const note = missing ? "Added when they join"
+      : cvFind.state === "error" ? cvFind.note
+      : cvFind.state === "busy" ? "Looking for their Relay account…" : "Added right away if they’re on Relay";
+    const verb = missing
+      ? `<button class="cv-add${cvFind.copied ? "" : " solid"}" type="button" id="cvFindLink">${cvFind.copied ? "Copy again" : "Copy link"}</button>`
+      : `<button class="cv-add solid" type="button" id="cvFindAdd"${cvFind.state === "busy" ? " disabled" : ""}>Add</button>`;
+    cvFindEl.innerHTML = `<div class="cv-find-row">
+      <span class="cv-avatar pending" aria-hidden="true">${esc(address.charAt(0).toUpperCase())}</span>
+      <span class="cv-body"><span class="cv-name">${esc(title)}</span><span class="cv-sub">${esc(note)}</span></span>
+      ${verb}
+    </div>`;
+    document.getElementById("cvFindAdd")?.addEventListener("click", addPersonByAddress);
+    document.getElementById("cvFindLink")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      await copyInviteLinkFromPeople(button);
+      if (cvFind && cvFind.address === address && button.textContent === "Copied") { cvFind.copied = true; renderContactFind(); }
+    });
   }
   function closeAddSheet() {
     addSheetGeneration += 1;
-    const wasOpen = !cvAddSheetEl.classList.contains("hidden");
-    moveAddButton(false);
-    cvAddInputEl.value = "";
-    cvAddGoEl.disabled = false;
-    if (wasOpen && contactsPane === "people") document.getElementById("cvNew").focus();
+    cvFind = null;
+    cvFindEl.innerHTML = "";
   }
   function addSheetWarn(text) {
-    cvAddNoteEl.textContent = text;
-    cvAddNoteEl.classList.add("warn");
+    if (!cvFind) return;
+    cvFind = { ...cvFind, state:"error", note:text };
+    renderContactFind();
   }
   async function addPersonByAddress() {
-    const address = String(cvAddInputEl.value || "").trim().toLowerCase();
-    if (!isValidEmail(address)) { addSheetWarn("That doesn't look like an address."); return; }
-    if (cvAddGoEl.disabled) return;
+    const address = cvTypedAddress();
+    if (!address || cvFind?.address !== address || cvFind.state === "busy") return;
     const generation = addSheetGeneration;
-    cvAddGoEl.disabled = true;
-    cvAddNoteEl.textContent = "Adding…";
-    cvAddNoteEl.classList.remove("warn");
-    cvAddT2El.classList.remove("lit");
+    cvFind = { address, state:"busy", note:"" };
+    renderContactFind();
     // A miss is not a contact. Errors remain distinct from a confirmed miss.
     const account = signupAccountKey();
     try {
@@ -16181,22 +16356,20 @@
       if (account !== signupAccountKey()) return; // a different account is looking now
       if (generation !== addSheetGeneration) return; // the form was closed/reopened
       if (res?.ok && res.found === false) {
-        addSheetWarn(`No Relay account found for ${address}. Check their email or invite them using your link below.`);
-        cvAddT2El.classList.add("lit");
+        cvFind = { address, state:"missing", note:"" };
+        renderContactFind();
         return;
       }
       if (!res || res.ok === false || !res.contact) { addSheetWarn((res && res.error) || "Could not add them."); return; }
       if (Array.isArray(res.contacts)) contactsList = res.contacts;
       else contactsList = [...contactsList.filter((c) => contactKey(c) !== contactKey(res.contact)), res.contact];
+      closeAddSheet();
       renderContacts();
       renderAll();
-      closeAddSheet();
     } catch (error) {
       if (account !== signupAccountKey()) return;
       if (generation !== addSheetGeneration) return;
       addSheetWarn((error && error.message) || "Could not add them.");
-    } finally {
-      if (generation === addSheetGeneration) cvAddGoEl.disabled = false;
     }
   }
   // The link lands on the clipboard from main; the button says so for a moment.
@@ -16214,18 +16387,31 @@
       setTimeout(() => { if (button.isConnected) { button.textContent = label; button.disabled = false; } }, 1400);
     }
   }
-  wireMessageSideMenus(document.getElementById("cvCreateActions"));
-  document.getElementById("cvNewContact").addEventListener("click", () => {
-    contactsPane = "people";
-    applyContactsPane();
-    openAddSheet();
+  // Every keystroke narrows both lists at once.
+  cvSearchEl.addEventListener("input", () => {
+    cvQuery = String(cvSearchEl.value || "").trim().toLowerCase();
+    cvGoogleEl.classList.toggle("gone", payload.features?.googleContacts !== true || Boolean(cvQuery));
+    // A different address (or none) is a different question: an answer
+    // still in flight for the old one paints nothing.
+    if (cvTypedAddress() !== (cvFind?.address || "")) addSheetGeneration += 1;
+    renderGroups();
+    renderContacts();
+    if (wideLayoutActive()) syncWidePane();
   });
-  cvAddEl.addEventListener("click", addPersonByAddress);
-  cvAddInputEl.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); addPersonByAddress(); } });
-  cvAddInputEl.addEventListener("mousedown", () => setInteractive(true));
-  cvAddCancelEl.addEventListener("click", closeAddSheet);
-  cvAddLinkEl.addEventListener("click", () => copyInviteLinkFromPeople(cvAddLinkEl));
-  cvLatentLinkEl.addEventListener("click", () => copyInviteLinkFromPeople(cvLatentLinkEl));
+  cvSearchEl.addEventListener("mousedown", () => setInteractive(true));
+  cvSearchEl.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && cvSearchEl.value) {
+      ev.preventDefault(); ev.stopPropagation();
+      cvSearchEl.value = ""; cvSearchEl.dispatchEvent(new Event("input"));
+      return;
+    }
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    // Enter adds the typed address, or opens the one thing it found.
+    if (cvFind && cvFind.state === "ready") { addPersonByAddress(); return; }
+    const rows = [...contactsViewEl.querySelectorAll(".cvg-item[data-group], .cv-item[data-contact]")];
+    if (rows.length === 1) rows[0].click();
+  });
   cvCancelEl.addEventListener("click", closeContactForm);
   cvDeleteEl.addEventListener("click", async () => {
     const contactId = editingContactId();
@@ -20452,7 +20638,7 @@
   function wideStep(direction) {
     const side = wideSideTab();
     const rows = side === "relays" ? [...relaysListEl.querySelectorAll(".relay-row[data-thread], .row[data-id], .row[data-sent-id]")]
-      : side === "contacts" ? [...(contactsPane === "groups" ? document.querySelectorAll("#cvgList .cvg-item[data-group]") : cvListEl.querySelectorAll(".cv-item[data-contact]"))]
+      : side === "contacts" ? [...contactsViewEl.querySelectorAll("#cvgList .cvg-item[data-group], #cvList .cv-item[data-contact]")]
       : side === "topics" ? [...topicsSideEl.querySelectorAll("[data-topic-open]")]
       : [];
     if (!rows.length) return false;
@@ -21035,24 +21221,16 @@
         </button>`;
     }).join("");
     return `
-      <div class="sv-quiet-section" id="quietPrefs" data-stop="1">
-        <div class="sv-quiet-title">Notifications</div>
-        <div class="sv-quiet-list">
-          <button class="sv-quiet-row sv-notify-row" type="button" id="svNotifyRow" aria-expanded="${notifyTrayOpen ? "true" : "false"}" aria-controls="svNotifyTray">
-            <span class="sv-quiet-copy"><span class="sv-quiet-name">New messages</span></span>
-            <span class="sv-notify-value">${esc(currentChoice.short)}</span>
+          <button class="sv-row sv-notify-row" type="button" id="svNotifyRow" aria-expanded="${notifyTrayOpen ? "true" : "false"}" aria-controls="svNotifyTray">
+            <span class="sv-row-copy"><span class="sv-row-name">New messages</span></span>
+            <span class="sv-row-value">${esc(currentChoice.short)}</span>
             <svg class="sv-notify-chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <div class="sv-notify-tray${notifyTrayOpen ? " open" : ""}" id="svNotifyTray" role="radiogroup" aria-label="New messages"${notifyTrayOpen ? "" : " hidden"}>${choices}</div>
-          <div class="sv-quiet-row${banners ? "" : " off"}">
-            <span class="sv-quiet-copy">
-              <span class="sv-quiet-name">Play sounds</span>
-              <span class="sv-quiet-note">${banners ? "A soft chime when a banner shows." : "Plays only with banners."}</span>
-            </span>
+          <div class="sv-row${banners ? "" : " off"}">
+            <span class="sv-row-copy"><span class="sv-row-name">Sounds</span>${banners ? "" : `<span class="sv-row-sub">Only with banners</span>`}</span>
             ${svSwitchHtml("soundsMuted", !muted, { label: "Play sounds", inverted: true, disabled: !banners })}
-          </div>
-        </div>
-      </div>`;
+          </div>`;
   }
   function chatAgentDefaultsHtml() {
     // Chat-agent defaults belong to @Claude/@Codex mentions, which keep their
@@ -21093,8 +21271,7 @@
     const selected = agentAppSelection();
     return `
       <div class="sv-open-section" id="yourAgent" data-stop="1">
-        <div class="sv-open-title">Your agent</div>
-        <div class="sv-open-intro">Choose which agents you use. Turn on one or more.</div>
+        <div class="sv-open-title">Open Relays in</div>
         <div class="sv-open-list">
           ${CHAT_APP_OPTIONS.map((app) => {
             const on = chatAppEnabled(app);
@@ -21119,7 +21296,7 @@
             // it: an app whose Relay registration is missing or broken says so.
             const gap = setupAgentGap(app);
             const why = !available ? appUnavailableReason(app)
-              : gap ? `${gap} · see Your AIs`
+              : gap ? gap
               : on ? (agentOpensInApp(app) ? "Connected · opens relays in a new chat" : "Connected · Relay copies the sentence for you")
               : "Connected";
             return `<div class="sv-open-row${available ? "" : " off"}">
@@ -21312,6 +21489,50 @@
     }
     return `<div class="setup-web${open ? " open" : ""}">${head}${tray}</div>`;
   }
+  // WHAT TASKS MAY DO. One value row per app, the vendor's own modes in a tray
+  // that folds back when one is chosen (David, 2026-08-18). It lives on Your
+  // AIs beside each app's switch, so You stays one screen.
+  function permPrefsHtml() {
+    if (payload.features?.requests !== true) return "";
+    return `
+      <div class="sv-open-section" id="permPrefs" data-stop="1">
+        <div class="sv-open-title">What Tasks may do</div>
+        <div class="sv-open-list">
+          ${PERM_VENDORS.map((v) => {
+            const cur = v.modes.find((m) => m.id === permMode(v.key)) || v.modes[0];
+            const open = permTrayOpen === v.key;
+            const logo = /codex/i.test(v.key) ? "codexMark.svg" : "claudeCodeMark.svg";
+            return `<div class="perm-app${open ? " open" : ""}">
+              <button type="button" class="sv-open-row perm-vrow" data-perm-open="${esc(v.key)}" aria-expanded="${open ? "true" : "false"}">
+                <img class="sv-open-logo" src="${logo}" alt="" />
+                <span class="sv-open-name">${esc(v.label)}</span>
+                <span class="perm-value">${open ? "" : esc(cur.name)}<svg class="perm-chev" width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2.5L5.5 6L2 9.5"/></svg></span>
+              </button>
+              ${open ? `<div class="open-actions perm-tray">
+                ${v.modes.map((m, i) => `${i ? '<div class="oa-sep"></div>' : ""}<button type="button" class="oa-item ap-row perm-row${cur.id === m.id ? " on" : ""}" data-perm="${esc(v.key)}" data-mode="${esc(m.id)}">
+                    <span class="ap-sq" aria-hidden="true" style="${cur.id === m.id ? `background:${vendorSq(v.sample)}` : ""}"></span>
+                    <span class="ap-name">${esc(m.name)}</span>
+                    <svg class="ap-check" width="11" height="9" viewBox="0 0 11 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4.5L4 7.5L10 1.5"/></svg>
+                  </button>`).join("")}
+              </div>` : ""}
+            </div>`;
+          }).join("")}
+        </div>
+      </div>`;
+  }
+  // The developer surfaces for running Tasks on this computer: the Claude Code
+  // and Codex subscriptions behind them, and device execution. They are about
+  // the same apps, so they sit on Your AIs, never on You.
+  function taskRuntimeHtml() {
+    let html = settingsInfo ? connectionsHtml(settingsInfo, payload.features?.agentConnections === true) : "";
+    if (payload.features?.taskExecution) {
+      const auto = payload.nativeExecutionMode !== "default";
+      html += `<div class="sv-copy">Device execution: ${payload.nativeExecutionEnabled ? "enabled" : "off"}. Execute will ask before the first launch.${payload.nativeExecutionEnabled ? '<button type="button" class="oa-item" id="executionDisable">Disable device execution</button>' : ""}</div>`;
+      // How Execute starts a Task's Claude conversation. Auto by default.
+      html += `<div class="sv-copy">Tasks start in ${auto ? "Auto mode: Claude Code works without asking before each step, and its own safety checks still apply" : "Manual mode: Claude Code asks before each step"}.<button type="button" class="oa-item" id="executionMode" data-mode="${auto ? "default" : "auto"}">${auto ? "Ask before each step instead" : "Use Auto mode instead"}</button></div>`;
+    }
+    return html;
+  }
   function setupPageHtml() {
     const hosts = setupHosts().filter((host) => host.installed);
     const absent = ["claude-app", "chatgpt-app"].filter((id) => setupSnapshot?.hosts && !setupHost(id)?.installed);
@@ -21336,6 +21557,9 @@
         ${setupSnapshot?.connectionsError ? `<div class="row-err sv-err">${esc(setupSnapshot.connectionsError)}</div>` : ""}
       </div>
       ${otherHtml}
+      ${yourAgentHtml()}
+      ${permPrefsHtml()}
+      ${taskRuntimeHtml()}
       ${absent.length ? `<p class="setup-foot">Don’t have the app? ${absent.map((id) => `<button type="button" data-setup-get="${id}">Get the ${esc(SETUP_LOCAL[id].name)}</button>`).join(" · ")}</p>` : ""}
       ${setupError ? `<div class="row-err sv-err setup-err" role="alert">${esc(setupError)}</div>` : ""}
     </section>`;
@@ -21368,20 +21592,18 @@
     const marks = [...connectedLocal.map((host) => SETUP_LOCAL[host.id].mark), ...webSurfaces.map((surface) => SETUP_WEB[surface].mark)];
     const shown = [...new Set(marks.length ? marks : hosts.map((host) => SETUP_LOCAL[host.id].mark))].slice(0, 3);
     const count = connectedLocal.length + webSurfaces.length;
-    const name = !setupSnapshot ? "Your AIs" : count ? `${count} connected` : "Connect your AIs";
     const first = todo[0];
     const why = !setupSnapshot ? "Checking…"
       : first?.state === "restart" ? (first.stopped ? "Relay stopped in Claude’s chats" : "Restart Claude to finish")
       : first ? `${SETUP_LOCAL[first.id].name} ${first.state === "broken" ? "needs a fix" : "isn’t connected yet"}${todo.length > 1 ? ` · ${todo.length - 1} more` : ""}`
       : count ? "Everything here is connected" : "Claude, ChatGPT and more";
-    return `<div class="sv-open-section" id="yourAis" data-stop="1">
-      <div class="sv-open-title">Your AIs</div>
-      <div class="sv-open-list"><button class="sv-open-row setup-entry" type="button" id="setupEntry">
-        ${shown.length ? `<span class="setup-marks" aria-hidden="true">${shown.map((mark) => `<img src="${mark}" alt="">`).join("")}</span>` : ""}
-        <span class="sv-open-copy"><span class="sv-open-name">${esc(name)}</span><span class="sv-open-why">${first ? setupDotHtml(first.state === "restart" ? "warn" : first.state === "broken" ? "bad" : "") : ""}<span class="setup-why-text">${esc(why)}</span></span></span>
-        <svg class="perm-chev" width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2.5L5.5 6L2 9.5"/></svg>
-      </button></div>
-    </div>`;
+    // Something to do reads as the row's line; otherwise the marks say it.
+    const attention = Boolean(setupSnapshot && (first || !count));
+    return `<button class="sv-row setup-entry" type="button" id="setupEntry">
+        <span class="sv-row-copy"><span class="sv-row-name">Your AIs</span>${attention ? `<span class="sv-row-sub${first ? " warn" : ""}">${first ? setupDotHtml(first.state === "restart" ? "warn" : first.state === "broken" ? "bad" : "") : ""}${esc(why)}</span>` : ""}</span>
+        ${!attention && shown.length ? `<span class="setup-marks" aria-hidden="true">${shown.map((mark) => `<img src="${mark}" alt="">`).join("")}</span>` : ""}
+        <svg class="sv-row-chev" width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2.5L5.5 6L2 9.5"/></svg>
+      </button>`;
   }
   async function refreshSetup({ force = false } = {}) {
     if (!window.relay.setupSnapshot || !setupUserId()) return;
@@ -21592,6 +21814,48 @@
     for (const button of page.querySelectorAll("[data-setup-get]")) {
       button.addEventListener("click", (event) => { event.stopPropagation(); window.relay.openUrl?.(SETUP_DOWNLOADS[button.dataset.setupGet]); });
     }
+    wireTaskRuntimeControls(page);
+    // Each app's switch decides its tile in the reader and its mark on a
+    // bubble; each Task permission is the mode a Task you Start runs in.
+    for (const button of page.querySelectorAll("[data-agent-app]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setAgentAppEnabled(button.getAttribute("data-agent-app"), button.getAttribute("aria-checked") !== "true");
+        renderSettings();
+      });
+    }
+    for (const button of page.querySelectorAll("[data-chat-app]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setChatAppEnabled(button.getAttribute("data-chat-app"), button.getAttribute("aria-checked") !== "true");
+        renderSettings();
+      });
+    }
+    for (const button of page.querySelectorAll("[data-conductor-app]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setConductorEnabled(button.getAttribute("aria-checked") !== "true");
+        renderSettings();
+      });
+    }
+    for (const row of page.querySelectorAll("[data-perm-open]")) {
+      row.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const key = row.getAttribute("data-perm-open");
+        permTrayOpen = permTrayOpen === key ? null : key;
+        renderSettings();
+      });
+    }
+    for (const choice of page.querySelectorAll("[data-perm]")) {
+      choice.addEventListener("click", (event) => {
+        event.stopPropagation();
+        savePillSetting({ taskPermissions: { [choice.getAttribute("data-perm")]: choice.getAttribute("data-mode") } });
+        setProtoPref(`proto.perm.${choice.getAttribute("data-perm")}`, choice.getAttribute("data-mode"));
+        // Choosing folds the tray: the row's value line is the confirmation.
+        permTrayOpen = null;
+        renderSettings();
+      });
+    }
     if (setupFocus) {
       page.querySelector(`[data-setup-row="${setupFocus}"]`)?.scrollIntoView({ block:"center" });
       setupFocus = "";
@@ -21769,24 +22033,34 @@
   // the person turns it off, for the agents on this computer.
   function milestoneRelaysHtml(info) {
     const on = info.milestoneRelays !== false;
+    // "Milestones" was a word nobody defined (Sven's test, 2026-10-08): the
+    // switch says what the agent does. It is milestone_relays underneath,
+    // the same setting relay_settings and the MCP instructions read.
     return `
-      <div class="sv-quiet-section" id="milestoneRelays" data-stop="1">
-        <div class="sv-quiet-title">Milestone Relays</div>
-        <div class="sv-quiet-list">
-          <div class="sv-quiet-row">
-            <span class="sv-quiet-copy">
-              <span class="sv-quiet-name">Let your agent create them</span>
-              <span class="sv-quiet-note">${on
-                ? "When finished work matters to someone, your agent makes a Relay link for you to share. Nothing is sent."
-                : "Your agent makes a Relay only when you ask. New agent chats pick this up."}</span>
+          <div class="sv-row" id="milestoneRelays">
+            <span class="sv-row-copy">
+              <span class="sv-row-name">Draft a Relay when work is done</span>
+              <span class="sv-row-sub">${on ? "Your agent makes a link. Nothing is sent." : "Only when you ask"}</span>
             </span>
-            ${svSwitchHtml("milestoneRelays", on, { label: "Let your agent create Relays at milestones" })}
-          </div>
-        </div>
-      </div>`;
+            ${svSwitchHtml("milestoneRelays", on, { label: "Draft a Relay when work is done" })}
+          </div>`;
   }
   function blockedPeopleHtml() {
-    return `<div class="sv-open-section" data-stop="1"><button class="sv-choose" id="svBlockedPeople" type="button">Blocked contacts</button><div id="svBlockedList" aria-live="polite"></div></div>`;
+    return `<button class="sv-row" id="svBlockedPeople" type="button"><span class="sv-row-copy"><span class="sv-row-name">Blocked people</span></span><svg class="sv-row-chev" width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2.5L5.5 6L2 9.5"/></svg></button>`;
+  }
+  // THE ACCOUNT IS A ROW YOU TAP (One Door, 2026-09-03): its actions unfold
+  // under it instead of standing open above everything else.
+  function accountRowHtml() {
+    const turn = svAccountOpen ? ' style="transform:rotate(90deg)"' : "";
+    return `<button class="sv-row${svAccountOpen ? " open" : ""}" type="button" id="svAccountRow" aria-expanded="${svAccountOpen ? "true" : "false"}" aria-controls="svAccountActions">
+        <span class="sv-row-copy"><span class="sv-row-name">Account</span></span>
+        <svg class="sv-row-chev"${turn} width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2.5L5.5 6L2 9.5"/></svg>
+      </button>
+      ${svAccountOpen ? `<div class="sv-row-actions" id="svAccountActions" aria-label="Account actions">
+        <button class="sv-row sub" type="button" id="svAccount" ${svBusy ? "disabled" : ""}><span class="sv-row-copy"><span class="sv-row-name">Account settings</span></span><span class="sv-row-value" aria-hidden="true">↗</span></button>
+        <button class="sv-row sub" type="button" id="svSwitch" ${svBusy ? "disabled" : ""}><span class="sv-row-copy"><span class="sv-row-name">Switch account</span></span></button>
+        <button class="sv-row sub${svSignOutArmed ? " sv-signout-armed" : ""}" type="button" id="svSignOut" ${svBusy ? "disabled" : ""}><span class="sv-row-copy"><span class="sv-row-name danger">${svSignOutArmed ? "Sign out — click again to confirm" : "Sign out"}</span></span></button>
+      </div>` : ""}`;
   }
   // YOUR LINK. One reusable link, copied from where you are. Joining through
   // it connects the two of you (the server writes both contacts), so they land
@@ -21797,15 +22071,13 @@
     const url = String(inviteLinkInfo?.url || "");
     const shown = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
     return `
-      <div class="sv-open-section" id="yourLink" data-stop="1">
-        <div class="sv-open-title">Your invite link</div>
-        <div class="sv-open-intro">Share it with someone you want to message on Relay.</div>
-        <div class="sv-invite-field">
-          <span class="sv-open-name sv-link-url">${esc(shown || (inviteLinkUnavailable ? "Your invite link is not available right now." : "Loading your invite link…"))}</span>
-          <button class="sv-choose" type="button" id="svCopyLink" ${inviteLinkBusy ? "disabled" : ""}>${inviteLinkCopied ? "Copied" : "Copy link"}</button>
+      <div class="sv-group" id="yourLink" data-stop="1"><div class="sv-open-list">
+        <div class="sv-row">
+          <span class="sv-row-copy"><span class="sv-row-name">Invite link</span><span class="sv-row-sub sv-link-url">${esc(shown || (inviteLinkUnavailable ? "Not available right now" : "Loading…"))}</span></span>
+          <button class="sv-choose" type="button" id="svCopyLink" ${inviteLinkBusy ? "disabled" : ""}>${inviteLinkCopied ? "Copied" : "Copy"}</button>
         </div>
-        <div class="sv-invite-note">When they join, you’ll find each other in Contacts.</div>
-        ${inviteLinkError ? `<div class="row-err sv-err">${esc(inviteLinkError)}</div>` : ""}
+      </div>
+      ${inviteLinkError ? `<div class="row-err sv-err">${esc(inviteLinkError)}</div>` : ""}
       </div>`;
   }
   // The link lands on the clipboard from main (the renderer never sees the
@@ -21840,22 +22112,21 @@
     const personalConnected = connection?.personal?.state === "connected" && state === "connected";
     const teamName = team?.name || "";
     const connectLabel = slackConnectionBusy ? "Opening…" : slackConnectionWaiting ? "Open again" : state === "paused" ? "Reconnect" : "Connect";
+    // The row says the state once: no dot beside a word beside a button.
     const connectionLabel = personalConnected
-      ? "Connected · messages sync both ways"
+      ? `${teamName || "Your Slack"} · connected`
       : slackConnectionWaiting
         ? "Click Allow in your browser"
         : state === "paused"
-          ? "Needs a quick reconnect"
+          ? `${teamName || "Your Slack"} · not syncing`
           : "Send Relays to your channels";
-    return `<section class="sv-slack-section" data-stop="1">
-      <div class="sv-open-title">Slack</div>
+    return `<div class="sv-slack-section" data-stop="1">
       <div class="sv-slack-card${slackDisconnectConfirm ? " is-confirming" : ""}" id="svSlackCard">
-        <div class="sv-slack-row">
-          <img class="sv-slack-logo" src="slackMark.png" alt="Slack" />
-          <span class="sv-slack-copy"><span class="sv-slack-name">${esc(teamName || "Your Slack")}</span><span class="sv-slack-note">${esc(connectionLabel)}</span></span>
+        <div class="sv-row sv-slack-row">
+          <span class="sv-row-copy"><span class="sv-row-name">Slack</span><span class="sv-row-sub${state === "paused" && !personalConnected ? " warn" : ""}">${esc(connectionLabel)}</span></span>
           ${personalConnected
-            ? `<button class="sv-slack-action" type="button" id="svSlackDisconnect" aria-controls="svSlackDisconnectConfirmPanel" aria-expanded="${slackDisconnectConfirm ? "true" : "false"}" ${slackConnectionBusy || slackDisconnectConfirm ? "disabled" : ""}>Disconnect</button>`
-            : `<button class="sv-slack-action${slackConnectionWaiting || slackConnectionBusy ? "" : " primary"}" type="button" id="svSlackConnect" ${slackConnectionBusy ? "disabled" : ""}>${esc(connectLabel)}</button>`}
+            ? `<button class="sv-choose quiet" type="button" id="svSlackDisconnect" aria-controls="svSlackDisconnectConfirmPanel" aria-expanded="${slackDisconnectConfirm ? "true" : "false"}" ${slackConnectionBusy || slackDisconnectConfirm ? "disabled" : ""}>Disconnect</button>`
+            : `<button class="sv-choose${slackConnectionWaiting || slackConnectionBusy ? "" : " primary"}" type="button" id="svSlackConnect" ${slackConnectionBusy ? "disabled" : ""}>${esc(connectLabel)}</button>`}
         </div>
         ${personalConnected ? `<div class="sv-slack-confirm" id="svSlackDisconnectConfirmPanel" role="region" aria-labelledby="slackDisconnectTitle" aria-hidden="${slackDisconnectConfirm ? "false" : "true"}" ${slackDisconnectConfirm ? "" : "inert"}>
           <div class="sv-slack-confirm-clip">
@@ -21873,7 +22144,7 @@
         </div>` : ""}
       </div>
       ${slackConnectionError ? `<div class="row-err sv-err">${esc(slackConnectionError)}</div>` : ""}
-    </section>`;
+    </div>`;
   }
   function renderSettings() {
     if (activeView !== "settings") return;
@@ -21898,6 +22169,10 @@
       if (!wide) return;
     }
     if (!wide) delete settingsViewEl.dataset.setupHtml;
+    if (blockedPeoplePage && blockedPeopleView() === "settings") {
+      if (cvBlockedPageEl.parentElement !== settingsViewEl) settingsViewEl.replaceChildren(cvBlockedPageEl);
+      return;
+    }
     const info = settingsInfo;
     if (!info) {
       settingsViewEl.innerHTML = '<div class="td-quiet">Loading account…</div>';
@@ -21906,23 +22181,13 @@
     let html = "";
     if (info.paired) {
       const name = info.name || info.email || "Relay account";
-      // THE ACCOUNT IS A ROW YOU TAP (One Door, 2026-09-03): its actions
-      // unfold under it instead of standing open above everything else.
+      // YOUR NAME IS THE PAGE'S TITLE (Sven's cut, 2026-10-08). The disc is
+      // already in the header; the account's actions are the page's last row.
       html += `
-        <button class="sv-account${svAccountOpen ? " open" : ""}" type="button" id="svAccountRow" aria-expanded="${svAccountOpen ? "true" : "false"}" aria-controls="svAccountActions">
-          <span class="sv-avatar">${esc(cvInitials(info.name, info.email))}</span>
-          <span class="sv-id">
-            <span class="sv-name">${esc(name)}</span>
-            ${info.email ? `<span class="sv-email">${esc(info.email)}</span>` : ""}
-          </span>
-          <span class="sv-account-more">${svAccountOpen ? "Close" : "Settings"}</span>
-        </button>
-        ${svAccountOpen ? `<div class="open-actions sv-actions" id="svAccountActions" data-stop="1" aria-label="Account actions">
-          <button class="oa-item" type="button" id="svAccount" ${svBusy ? "disabled" : ""}>Account Settings…</button>
-          <button class="oa-item oa-primary" type="button" id="svSwitch" ${svBusy ? "disabled" : ""}>Switch Account…</button>
-          <div class="oa-sep" role="separator"></div>
-          <button class="oa-item${svSignOutArmed ? " sv-signout-armed" : ""}" type="button" id="svSignOut" ${svBusy ? "disabled" : ""}>${svSignOutArmed ? "Sign Out — click again to confirm" : "Sign Out"}</button>
-        </div>` : ""}`;
+        <div class="sv-profile">
+          <div class="sv-profile-name">${esc(name)}</div>
+          ${info.email ? `<div class="sv-profile-email">${esc(info.email)}</div>` : ""}
+        </div>`;
     } else {
       html += `
         <div class="sv-head"><span class="sv-title">Sign in to Relay.</span></div>
@@ -21931,33 +22196,29 @@
           <button class="oa-item oa-primary" type="button" id="svSwitch" ${svBusy ? "disabled" : ""}>Sign In to Relay</button>
         </div>`;
     }
-    if (svPairOpen) html += svPairRowHtml();
-    if (svNote) html += `<div class="sv-note">${esc(svNote)}</div>`;
-    html += `<div class="row-err sv-err" id="svErr">${esc(svError)}</div>`;
-    // David's selected B layout: account, invite link, then agent switches.
+    // Pairing (Switch account, Sign in) and its notes sit under the row that
+    // asked for them: the sign-in block, or the Account row at the bottom.
+    const accountNotes = `${svPairOpen ? svPairRowHtml() : ""}${svNote ? `<div class="sv-note">${esc(svNote)}</div>` : ""}<div class="row-err sv-err" id="svErr">${esc(svError)}</div>`;
+    if (!info.paired) html += accountNotes;
+    // ONE PAGE (Sven's cut, Shane's 1/3 rule, 2026-10-08). Rows name
+    // themselves, so there are no section headings and no sentences under
+    // them. What needs you says so on its own row, once. Your AIs stays one
+    // row here: the switches and Task permissions for each app live on its
+    // page, so the small card never scrolls past them.
     if (info.paired) {
-      // Your AIs first (Setup, 2026-10-07): Relay does nothing until an AI
-      // has it, so the door to connecting one sits right under the account.
-      if (window.relay.setupSnapshot) html += setupEntryHtml();
-      // Slack sits beside your AIs: the other thing you connect Relay to.
-      html += slackSettingsHtml(info);
+      const connections = `${window.relay.setupSnapshot ? setupEntryHtml() : ""}${slackSettingsHtml(info)}`;
+      if (connections) html += `<div class="sv-group" data-stop="1"><div class="sv-open-list">${connections}</div></div>`;
       html += yourLinkHtml();
-      html += yourAgentHtml();
-      html += milestoneRelaysHtml(info);
-      html += blockedPeopleHtml();
+      html += `<div class="sv-group" id="quietPrefs" data-stop="1"><div class="sv-open-list">${quietPrefsHtml(info)}${milestoneRelaysHtml(info)}</div></div>`;
+      html += `<div class="sv-group" data-stop="1"><div class="sv-open-list">${blockedPeopleHtml()}${accountRowHtml()}</div></div>`;
+      html += accountNotes;
     }
     // CONNECTIONS. Claude Code and Codex as the subscription runtimes behind
     // Tasks — gated with that product feature. The chat-connector rows that
     // used to sit here (ChatGPT coming soon, Claude chat) are gone: the You
     // page says what is connected, and the skill is installed for everyone
     // by setup (Sven, 2026-09-08).
-    html += connectionsHtml(info, payload.features?.agentConnections === true);
-    if (payload.features?.taskExecution) html += `<div class="sv-copy">Device execution: ${payload.nativeExecutionEnabled ? "enabled" : "off"}. Execute will ask before the first launch.${payload.nativeExecutionEnabled ? '<button type="button" class="oa-item" id="executionDisable">Disable device execution</button>' : ""}</div>`;
-    // How Execute starts a Task's Claude conversation. Auto by default.
-    if (payload.features?.taskExecution) {
-      const auto = payload.nativeExecutionMode !== "default";
-      html += `<div class="sv-copy">Tasks start in ${auto ? "Auto mode: Claude Code works without asking before each step, and its own safety checks still apply" : "Manual mode: Claude Code asks before each step"}.<button type="button" class="oa-item" id="executionMode" data-mode="${auto ? "default" : "auto"}">${auto ? "Ask before each step instead" : "Use Auto mode instead"}</button></div>`;
-    }
+
     // Version line doubles as the manual update backstop: if the auto-updater
     // has not refreshed this machine, say so here and make it one click.
     // A machine whose updates keep FAILING outranks one that merely has an
@@ -21979,45 +22240,7 @@
         <button class="oa-item oa-primary sv-update-btn" type="button" id="svUpdate" ${info.updating ? "disabled" : ""}>${info.updating ? "Updating…" : "Update and Restart"}</button>
       </div>`;
     }
-    // QUIET MODE. Two durable per-device preferences, placed after the version block
-    // so nothing above it moves. Both say plainly what happens and — for hiding —
-    // how to get the pill back, because Settings lives INSIDE the pill it hides.
-    html += quietPrefsHtml(info);
     html += chatAgentDefaultsHtml();
-    // WHAT TASKS MAY DO. One value row per app — the same species as the
-    // "Your agent" rows above (logo, name, current state), under the
-    // shared section title style. Tapping a row unfolds the standard
-    // open-actions tray inline with each vendor's real modes in their own
-    // words — never ours; picking one (or tapping again) folds it back. The
-    // four-line explainer died in review: nobody read it, and it made this
-    // the only section wearing a caption header (David, 2026-08-18). One
-    // intro line still says what a request is.
-    if (payload.features?.requests === true) html += `
-      <div class="sv-open-section" id="permPrefs" data-stop="1">
-        <div class="sv-open-title">What Tasks may do</div>
-        <div class="sv-open-intro">Each app’s own permission mode, for Tasks you Start.</div>
-        <div class="sv-open-list">
-          ${PERM_VENDORS.map((v) => {
-            const cur = v.modes.find((m) => m.id === permMode(v.key)) || v.modes[0];
-            const open = permTrayOpen === v.key;
-            const logo = /codex/i.test(v.key) ? "codexMark.svg" : "claudeCodeMark.svg";
-            return `<div class="perm-app${open ? " open" : ""}">
-              <button type="button" class="sv-open-row perm-vrow" data-perm-open="${esc(v.key)}" aria-expanded="${open ? "true" : "false"}">
-                <img class="sv-open-logo" src="${logo}" alt="" />
-                <span class="sv-open-name">${esc(v.label)}</span>
-                <span class="perm-value">${open ? "" : esc(cur.name)}<svg class="perm-chev" width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2.5L5.5 6L2 9.5"/></svg></span>
-              </button>
-              ${open ? `<div class="open-actions perm-tray">
-                ${v.modes.map((m, i) => `${i ? '<div class="oa-sep"></div>' : ""}<button type="button" class="oa-item ap-row perm-row${cur.id === m.id ? " on" : ""}" data-perm="${esc(v.key)}" data-mode="${esc(m.id)}">
-                    <span class="ap-sq" aria-hidden="true" style="${cur.id === m.id ? `background:${vendorSq(v.sample)}` : ""}"></span>
-                    <span class="ap-name">${esc(m.name)}</span>
-                    <svg class="ap-check" width="11" height="9" viewBox="0 0 11 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4.5L4 7.5L10 1.5"/></svg>
-                  </button>`).join("")}
-              </div>` : ""}
-            </div>`;
-          }).join("")}
-        </div>
-      </div>`;
     html += `<div class="sv-colophon">
       <svg class="rd-end" width="16" height="4" viewBox="0 0 16 4" aria-hidden="true"><rect x="0" width="4" height="4"/><rect x="6" width="4" height="4"/><rect x="12" width="4" height="4"/></svg>
       <span class="sv-version">${esc(info.version ? `Relay ${info.version}` : "Relay")}</span>
@@ -22026,55 +22249,6 @@
     if (settingsViewEl.dataset.pageHtml === html && settingsViewEl.querySelector(".sv-colophon")) return;
     settingsViewEl.dataset.pageHtml = html;
     settingsViewEl.innerHTML = html;
-    settingsViewEl.querySelector("#executionDisable")?.addEventListener("click", async () => {
-      await window.relay.executionDisable();
-      renderSettings();
-    });
-    settingsViewEl.querySelector("#executionMode")?.addEventListener("click", async (event) => {
-      const mode = event.currentTarget.getAttribute("data-mode");
-      const result = await window.relay.executionMode(mode);
-      if (result?.ok) payload.nativeExecutionMode = mode;
-      renderSettings();
-    });
-    for (const row of settingsViewEl.querySelectorAll("[data-perm-open]")) {
-      row.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const key = row.getAttribute("data-perm-open");
-        permTrayOpen = permTrayOpen === key ? null : key;
-        renderSettings();
-      });
-    }
-    for (const b of settingsViewEl.querySelectorAll("[data-perm]")) {
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        savePillSetting({ taskPermissions: { [b.getAttribute("data-perm")]: b.getAttribute("data-mode") } });
-        setProtoPref(`proto.perm.${b.getAttribute("data-perm")}`, b.getAttribute("data-mode"));
-        // Choosing folds the tray: the row's value line is the confirmation.
-        permTrayOpen = null;
-        renderSettings();
-      });
-    }
-    for (const button of settingsViewEl.querySelectorAll("[data-agent-app]")) {
-      button.addEventListener("click", (e) => {
-        e.stopPropagation();
-        setAgentAppEnabled(button.getAttribute("data-agent-app"), button.getAttribute("aria-checked") !== "true");
-        renderSettings();
-      });
-    }
-    for (const button of settingsViewEl.querySelectorAll("[data-chat-app]")) {
-      button.addEventListener("click", (e) => {
-        e.stopPropagation();
-        setChatAppEnabled(button.getAttribute("data-chat-app"), button.getAttribute("aria-checked") !== "true");
-        renderSettings();
-      });
-    }
-    for (const button of settingsViewEl.querySelectorAll("[data-conductor-app]")) {
-      button.addEventListener("click", (e) => {
-        e.stopPropagation();
-        setConductorEnabled(button.getAttribute("aria-checked") !== "true");
-        renderSettings();
-      });
-    }
     document.getElementById("svBlockedPeople")?.addEventListener("click", (event) => openBlockedPeople(event.currentTarget));
     document.getElementById("setupEntry")?.addEventListener("click", (event) => { event.stopPropagation(); openSetupPage(); });
     // The door's words come from a fresh look, at most every few seconds.
@@ -22106,6 +22280,58 @@
     }
 
     wireSettings();
+  }
+  // Connections and device execution, wherever Your AIs is drawn.
+  function wireTaskRuntimeControls(scope) {
+    for (const button of scope.querySelectorAll("[data-provider-connect]")) {
+      button.addEventListener("click", () => connectProviderFromSettings(button.getAttribute("data-provider-connect")));
+    }
+    for (const button of scope.querySelectorAll("[data-provider-setup-prompt]")) {
+      button.addEventListener("click", async () => {
+        const provider = button.getAttribute("data-provider-setup-prompt");
+        try {
+          await navigator.clipboard.writeText(providerSetupPrompt(provider));
+          providerAuthNote = `${providerAppName(provider)} setup prompt copied.`;
+          providerAuthError = "";
+        } catch {
+          providerAuthError = "Could not copy the setup prompt.";
+        }
+        renderSettings();
+      });
+    }
+    for (const button of scope.querySelectorAll("[data-provider-details]")) {
+      button.addEventListener("click", () => {
+        const provider = button.getAttribute("data-provider-details");
+        const willOpen = button.getAttribute("aria-expanded") !== "true";
+        providerDetailsOpen = willOpen ? provider : "";
+        for (const other of scope.querySelectorAll("[data-provider-details]")) {
+          const open = willOpen && other === button;
+          other.setAttribute("aria-expanded", open ? "true" : "false");
+          const detail = document.getElementById(other.getAttribute("aria-controls"));
+          if (detail) {
+            detail.classList.toggle("open", open);
+            detail.setAttribute("aria-hidden", open ? "false" : "true");
+            detail.toggleAttribute("inert", !open);
+          }
+        }
+      });
+    }
+    for (const button of scope.querySelectorAll("[data-provider-enable]")) {
+      button.addEventListener("click", () => setProviderEnabledFromSettings(
+        button.getAttribute("data-provider-enable"),
+        button.getAttribute("data-enabled") !== "1",
+      ));
+    }
+    scope.querySelector("#executionDisable")?.addEventListener("click", async () => {
+      await window.relay.executionDisable();
+      renderSettings();
+    });
+    scope.querySelector("#executionMode")?.addEventListener("click", async (event) => {
+      const mode = event.currentTarget.getAttribute("data-mode");
+      const result = await window.relay.executionMode(mode);
+      if (result?.ok) payload.nativeExecutionMode = mode;
+      renderSettings();
+    });
   }
   function wireSettings() {
     const upd = document.getElementById("svUpdate");
@@ -22176,45 +22402,6 @@
       if (result?.ok) slackConnectionInfo = { state:"disconnected" };
       renderSettings();
     });
-    for (const button of settingsViewEl.querySelectorAll("[data-provider-connect]")) {
-      button.addEventListener("click", () => connectProviderFromSettings(button.getAttribute("data-provider-connect")));
-    }
-    for (const button of settingsViewEl.querySelectorAll("[data-provider-setup-prompt]")) {
-      button.addEventListener("click", async () => {
-        const provider = button.getAttribute("data-provider-setup-prompt");
-        try {
-          await navigator.clipboard.writeText(providerSetupPrompt(provider));
-          providerAuthNote = `${providerAppName(provider)} setup prompt copied.`;
-          providerAuthError = "";
-        } catch {
-          providerAuthError = "Could not copy the setup prompt.";
-        }
-        renderSettings();
-      });
-    }
-    for (const button of settingsViewEl.querySelectorAll("[data-provider-details]")) {
-      button.addEventListener("click", () => {
-        const provider = button.getAttribute("data-provider-details");
-        const willOpen = button.getAttribute("aria-expanded") !== "true";
-        providerDetailsOpen = willOpen ? provider : "";
-        for (const other of settingsViewEl.querySelectorAll("[data-provider-details]")) {
-          const open = willOpen && other === button;
-          other.setAttribute("aria-expanded", open ? "true" : "false");
-          const detail = document.getElementById(other.getAttribute("aria-controls"));
-          if (detail) {
-            detail.classList.toggle("open", open);
-            detail.setAttribute("aria-hidden", open ? "false" : "true");
-            detail.toggleAttribute("inert", !open);
-          }
-        }
-      });
-    }
-    for (const button of settingsViewEl.querySelectorAll("[data-provider-enable]")) {
-      button.addEventListener("click", () => setProviderEnabledFromSettings(
-        button.getAttribute("data-provider-enable"),
-        button.getAttribute("data-enabled") !== "1",
-      ));
-    }
     // Managing addresses lives on the web (Clerk owns verification and the
     // reverification challenge), so the pill's job is to get you there rather
     // than to reimplement it. Without this the account panel showed an email the
@@ -24135,8 +24322,8 @@
   function listScrollEl() { return wideLayoutActive() ? wideSideListEl : scrollEl; }
   function wideEmptyHtml(tab) {
     const mark = `<svg class="mark" width="22" height="22" viewBox="0 0 16 16" aria-hidden="true"><rect x="0" y="6" width="4" height="4"/><rect x="6" y="6" width="4" height="4"/><rect x="12" y="6" width="4" height="4"/></svg>`;
-    const words = tab === "topics" ? "Pick a topic" : tab === "contacts" ? "Pick someone to talk to" : tab === "groups" ? "Pick a group" : "Pick a chat";
-    const noun = tab === "topics" ? "topics" : tab === "contacts" ? "people" : tab === "groups" ? "groups" : "chats";
+    const words = tab === "topics" ? "Pick a topic" : tab === "contacts" ? "Pick someone or a group" : tab === "groups" ? "Pick a group" : "Pick a chat";
+    const noun = tab === "topics" ? "topics" : tab === "contacts" ? "people and groups" : tab === "groups" ? "groups" : "chats";
     return `${mark}<div class="t1">${words}</div><div class="t2 keys"><kbd>⌥</kbd><kbd>↑</kbd><kbd>↓</kbd> move between ${noun}</div>`;
   }
   // The pane with nothing open in it says so, in the words of the list beside it.
@@ -24147,7 +24334,7 @@
     wideEmptyEl.classList.toggle("hidden", !paneEmpty);
     topicsViewEl.classList.toggle("hidden", activeView !== "topics" || (wide && !topicOpen));
     if (!paneEmpty) return;
-    const emptyTab = activeView === "contacts" ? (contactsPane === "groups" ? "groups" : "contacts") : activeView === "topics" ? "topics" : "relays";
+    const emptyTab = activeView === "contacts" ? "contacts" : activeView === "topics" ? "topics" : "relays";
     if (wideEmptyEl.dataset.tab !== emptyTab) { wideEmptyEl.dataset.tab = emptyTab; wideEmptyEl.innerHTML = wideEmptyHtml(emptyTab); }
   }
   // Back only shows where there is somewhere to go back to: a thread inside
@@ -24337,8 +24524,8 @@
       }
       if (view === "relays" && requestInboxOpen) { requestInboxOpen = false; requestInboxError = ""; if (view === activeView) { renderRelays(); scrollEl.scrollTop = 0; return; } }
       if (view === activeView) {
-        if (view === "contacts" && blockedPeoplePage) closeBlockedPeople();
-        if (view === "settings" && setupPageOpen) closeSetupPage();
+        if (blockedPeoplePage && blockedPeopleView() === view) closeBlockedPeople();
+        else if (view === "settings" && setupPageOpen) closeSetupPage();
         return;
       }
       if (sessionPickerState) sessionPickerState = null;
@@ -24357,7 +24544,7 @@
     }
     const target = view === "chat" ? "relays" : view;
     if (target === wideSideTab()) {
-      if (view === "contacts" && blockedPeoplePage) closeBlockedPeople();
+      if (blockedPeoplePage && blockedPeopleView() === view) closeBlockedPeople();
       wideSideListEl.scrollTo({ top:0, behavior:REDUCED ? "auto" : "smooth" });
       return;
     }
@@ -24447,7 +24634,7 @@
 
   function renderAll() {
     renderChatSearch();
-    if (blockedPeoplePage && (activeView !== "contacts" || blockedPeoplePage.account !== signupAccountKey())) {
+    if (blockedPeoplePage && (activeView !== blockedPeopleView() || blockedPeoplePage.account !== signupAccountKey())) {
       closeBlockedPeople({ restoreFocus:false, animate:false });
     }
     if (peopleDialog.matches(":popover-open") && peopleDialogAccount !== signupAccountKey()) closePeopleDialog();

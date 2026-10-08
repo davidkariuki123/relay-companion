@@ -22,10 +22,12 @@ test("no letter has a contents strip: a Task folds its agent document too", () =
   assert.doesNotMatch(reader, /This Relay contains|Message for your agent<\/span>|relay-contents-row/);
 });
 
-test("Details for your agent starts closed", () => {
+test("For your agent starts closed", () => {
   assert.match(reader, /const details = !twoFaces && agentText \? `/);
-  assert.match(reader, /<span class="rd-details-name">Details for your agent<\/span>/);
-  assert.match(reader, /· the specifics · your agent gets these too/);
+  // Sven, 2026-10-08: the fold is just "For your agent" — no word count and
+  // no "the specifics · your agent gets these too" meta line under it.
+  assert.match(reader, /<span class="rd-details-name">For your agent<\/span>/);
+  assert.doesNotMatch(reader, /Details for your agent|rd-details-meta|the specifics · your agent gets these too/);
   // Closed until this person opens it: the body renders only when the id is
   // in the set, and nothing puts an id there but a click.
   assert.match(reader, /const detailsOpen = readerDetailsOpen\.has\(String\(r\.id\)\);/);

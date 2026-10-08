@@ -62,7 +62,15 @@ test("Google Contacts stays hidden and unreachable outside the Dev feature gate"
   const inbox = readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
   const main = readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
   assert.match(inbox, /class="cv-google gone" id="cvGoogle"/);
-  assert.match(inbox, /cvGoogleEl\.classList\.toggle\("gone", !people \|\| payload\.features\?\.googleContacts !== true\)/);
+  // Contacts is one view now (no People/Groups panes): the gate decides, and
+  // a typed query hides the card too (it is not a search result). Both the
+  // pane's paint and every keystroke apply the same rule.
+  const pane = inbox.slice(inbox.indexOf("function applyContactsPane()"));
+  assert.match(pane, /^function applyContactsPane\(\) \{\s*cvGoogleEl\.classList\.toggle\("gone", payload\.features\?\.googleContacts !== true \|\| Boolean\(cvQuery\)\);/);
+  const search = inbox.slice(inbox.indexOf('cvSearchEl.addEventListener("input"'));
+  assert.match(search, /^cvSearchEl\.addEventListener\("input", \(\) => \{\s*cvQuery = [^\n]+\n\s*cvGoogleEl\.classList\.toggle\("gone", payload\.features\?\.googleContacts !== true \|\| Boolean\(cvQuery\)\);/);
+  assert.doesNotMatch(inbox, /cvGoogleEl\.classList\.toggle\("gone", (?!payload\.features\?\.googleContacts !== true)/, "every toggle keeps the feature gate");
+  assert.match(inbox, /setInterval\(\(\) => \{ if \(payload\.features\?\.googleContacts === true && rendererSurfaceActive\(\) && activeView === "contacts"\) void loadGoogleContacts\(\); \}, 5000\);/);
   assert.match(inbox, /async function loadGoogleContacts\(\) \{\s*if \(payload\.features\?\.googleContacts !== true\) return;/);
   assert.match(main, /relay:googleContactsStatus[\s\S]*currentProductFeatures\(\)\.googleContacts === true/);
   assert.match(main, /relay:googleContactsSync[\s\S]*currentProductFeatures\(\)\.googleContacts !== true/);

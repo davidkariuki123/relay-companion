@@ -15,11 +15,15 @@ function between(source, startMarker, endMarker) {
 test("Slack disconnect confirmation is a footer inside the existing Slack card", () => {
   const settings = between(html, "function slackSettingsHtml(info)", "function renderSettings()");
   const cardStart = settings.indexOf('<div class="sv-slack-card');
-  const row = settings.indexOf('<div class="sv-slack-row">');
+  // The row is the page's shared .sv-row species now (Sven's cut, 2026-10-08).
+  const row = settings.indexOf('<div class="sv-row sv-slack-row">');
   const confirmation = settings.indexOf('<div class="sv-slack-confirm"');
   const cardEnd = settings.indexOf('</div>\n      ${slackConnectionError');
 
   assert.ok(cardStart >= 0 && row > cardStart && confirmation > row && cardEnd > confirmation);
+  // Disconnect only opens that footer; it is the one id the panel answers to.
+  assert.match(settings.slice(row, confirmation), /id="svSlackDisconnect" aria-controls="svSlackDisconnectConfirmPanel"/);
+  assert.match(settings.slice(confirmation, cardEnd), /id="svSlackDisconnectConfirmPanel"/);
   assert.doesNotMatch(settings, /sv-integration-backdrop|aria-modal="true"/);
   assert.match(settings, /Disconnect Slack\?/);
   assert.match(settings, /Your Slack chats stop syncing\. Messages already here stay\./);
@@ -62,7 +66,9 @@ test("confirm still calls the Slack disconnect bridge and reports busy state", (
   const confirm = between(
     html,
     'const slackDisconnectConfirmButton = document.getElementById("svSlackDisconnectConfirm")',
-    'for (const button of settingsViewEl.querySelectorAll("[data-provider-connect]")',
+    // The provider rows that followed moved to Your AIs (2026-10-08); the
+    // account row is the next thing wired on You.
+    'const accountEl = document.getElementById("svAccount")',
   );
   assert.match(confirm, /result = await window\.relay\.slackDisconnect\(\)/);
   assert.match(confirm, /slackDisconnectConfirm = false/);

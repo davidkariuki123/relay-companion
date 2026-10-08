@@ -579,7 +579,7 @@ try {
   await until(page, `activeView === "contacts"`, "Back from Deborah to People");
 
   // ---- Groups: the row is the room its roster names ----
-  await clickUntil(page, "#cvSegGroups", `contactsPane === "groups"`, "the Groups pane");
+  // Groups sit above People on the same list (Sven's cut, 2026-10-08).
   await until(page, `Boolean(document.querySelector('.cvg-item[data-group="${GROUP_WITH_ROOM}"]'))`, "the groups list");
 
   await sleep(400);

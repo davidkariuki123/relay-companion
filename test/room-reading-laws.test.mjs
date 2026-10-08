@@ -337,8 +337,8 @@ test("enabled app rows share the same binder on the bubble and in the reader", (
   const reader = html.slice(html.indexOf("function renderReader()"), html.indexOf("wireHostOpen(readerBodyEl);") + 30);
   assert.match(reader, /const workOn = payload\.features\?\.relayWork === true;/);
   assert.match(reader, /const bothNote = onAgent && workOn && !handoff \?/);
-  assert.match(reader, /const documentHostActions = onHuman \? `<div class="rd-host-actions" data-stop="1">\$\{relayHostActionsHtml\(\{/,
-    "the provider rows live on every letter's page, a Task's included (David, 2026-09-13: a Task opens like a Relay)");
+  assert.match(reader, /const documentHostActions = onHuman && !readerRunsHere && !\(request && !r\.outbound && taskIsOver\(r\)\) \? `<div class="rd-host-actions" data-stop="1">\$\{relayHostActionsHtml\(\{/,
+    "the provider rows live on every letter's page, a Task's included (David, 2026-09-13: a Task opens like a Relay) — until a received Task is over (Sven, 2026-10-08)");
   assert.match(reader, /\}, \{ persistent: true, sheet: true \}\)\}<\/div>`/, "the reader asks for the sheet by name");
   assert.match(reader, /if \(onAgent && !workOn\) return "";/);
   assert.match(reader, /if \(onAgent\) return relayWorkDockHtml\(r, \{ inline: true \}\)/,

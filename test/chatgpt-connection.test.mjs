@@ -16,9 +16,14 @@ test("the pill carries no chat-connector rows and no connector hand-off", () => 
   assert.match(html, /function connectionsHtml\(info, includeAgentProviders\)/);
   assert.match(html, /const rows = includeAgentProviders \? providerConnectionRowsHtml\(\) : "";/);
   assert.doesNotMatch(html, /chatConnectionRowsHtml|id:"chatgpt-chat"|id:"claude-chat"|id="svConnectClaude"|connectClaudeFromSettings/);
+  // The one Connections section is drawn on Your AIs (2026-10-08), with the
+  // same agentConnections gate; You no longer draws it.
+  const runtime = html.slice(html.indexOf("function taskRuntimeHtml()"), html.indexOf("function setupPageHtml()"));
+  assert.match(runtime, /connectionsHtml\(settingsInfo, payload\.features\?\.agentConnections === true\)/);
+  assert.equal((html.match(/connectionsHtml\(/g) || []).length, 2, "one definition and one call, on Your AIs");
   const render = html.slice(html.indexOf("function renderSettings()"), html.indexOf("function wireSettings()"));
-  assert.match(render, /html \+= connectionsHtml\(info, payload\.features\?\.agentConnections === true\)/);
   assert.doesNotMatch(render, /chatConnectionsHtml|providerConnectionHtml/);
+  assert.doesNotMatch(runtime, /chatConnectionsHtml|providerConnectionHtml/);
   assert.doesNotMatch(main, /relay:connectClaude|relay:connectChatGPT/);
   assert.doesNotMatch(preload, /connectClaude|connectChatGPT/);
 });

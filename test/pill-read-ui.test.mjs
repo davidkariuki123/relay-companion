@@ -175,17 +175,29 @@ test("reader attachments join Details and stay reachable on either document", ()
   assert.match(html, /wireReaderAttachments\(readerBodyEl, r\)/);
 });
 
-test("Slack Settings is one truthful card with the official mark and no optimistic toggle", () => {
+test("Slack Settings is one truthful card, a plain labelled row, with no optimistic toggle", () => {
   const slackSettings = html.slice(html.indexOf("function slackSettingsHtml(info)"), html.indexOf("function renderSettings()"));
-  assert.match(html, /src="slackMark\.png" alt="Slack"/);
+  // Sven's cut (2026-10-08): the Slack row is a row like its card-mate Your
+  // AIs: the word "Slack" and one state line. The official mark left the row.
+  assert.match(slackSettings, /<div class="sv-slack-card\$\{slackDisconnectConfirm \? " is-confirming" : ""\}" id="svSlackCard">\s*<div class="sv-row sv-slack-row">\s*<span class="sv-row-copy"><span class="sv-row-name">Slack<\/span><span class="sv-row-sub\$\{state === "paused" && !personalConnected \? " warn" : ""\}">\$\{esc\(connectionLabel\)\}<\/span><\/span>/);
+  assert.doesNotMatch(slackSettings, /slackMark\.png|sv-slack-logo|sv-open-title/);
+  // Account actions stay ordinary page controls (signed out: the sign-in
+  // block; signed in: the Account row's unfolded rows), never a modal menu.
   assert.match(html, /class="open-actions sv-actions" data-stop="1" aria-label="Account actions"/,
     "permanent account actions stay ordinary page controls instead of trapping Settings in a modal menu role");
-  assert.doesNotMatch(html, /class="open-actions sv-actions" data-stop="1" role="menu"/);
+  assert.match(html, /<div class="sv-row-actions" id="svAccountActions" aria-label="Account actions">/);
+  assert.doesNotMatch(html, /class="open-actions sv-actions" data-stop="1" role="menu"|id="svAccountActions"[^>]*role="menu"/);
   // One line says it; no second paragraph repeating the card.
   assert.match(slackSettings, /: "Send Relays to your channels";/);
   assert.doesNotMatch(slackSettings, /sv-slack-foot/);
-  assert.match(slackSettings, /\? "Connected · messages sync both ways"/);
+  assert.match(slackSettings, /\? `\$\{teamName \|\| "Your Slack"\} · connected`/);
   assert.match(slackSettings, /\? "Click Allow in your browser"/);
+  assert.match(slackSettings, /\? `\$\{teamName \|\| "Your Slack"\} · not syncing`/);
+  // The button is the truth of the connection: Connect / Reconnect / Open
+  // again until connected, then a quiet Disconnect that only opens the confirm.
+  assert.match(slackSettings, /const connectLabel = slackConnectionBusy \? "Opening…" : slackConnectionWaiting \? "Open again" : state === "paused" \? "Reconnect" : "Connect";/);
+  assert.match(slackSettings, /<button class="sv-choose\$\{slackConnectionWaiting \|\| slackConnectionBusy \? "" : " primary"\}" type="button" id="svSlackConnect"/);
+  assert.match(slackSettings, /<button class="sv-choose quiet" type="button" id="svSlackDisconnect"/);
   assert.match(slackSettings, /Your Slack chats stop syncing\. Messages already here stay\./);
   assert.doesNotMatch(slackSettings, /Relay for \$\{esc\(teamName\)\}|<span class="sv-slack-name">Your Slack<\/span>/,
     "Settings keeps its compact one-card ontology");

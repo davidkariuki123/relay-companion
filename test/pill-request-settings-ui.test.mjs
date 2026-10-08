@@ -19,12 +19,16 @@ function between(source, startMarker, endMarker) {
 // menu trays. It is now one value row per app — the "Open Relays with"
 // species — that unfolds the standard open-actions tray inline on tap.
 
-test("the section header and intro are the shared settings species, not the caption label", () => {
-  const section = between(html, 'id="permPrefs"', "sv-colophon");
+// It moved to the Your AIs page (Sven's cut, 2026-10-08), beside each app's
+// switch, so the section is its own function now.
+const permSection = () => between(html, "function permPrefsHtml()", "function setupPageHtml()");
+
+test("the section header is the shared settings species, not the caption label", () => {
+  const section = permSection();
   assert.match(section, /<div class="sv-open-title">What Tasks may do<\/div>/);
-  assert.match(section, /<div class="sv-open-intro">[^<]*<\/div>/);
-  // The intro is ONE line of the same style the sibling section uses — the
-  // old sv-explain paragraph (and its style) must not come back.
+  // Rows name themselves: the one intro line went too, and the old
+  // sv-explain paragraph (and its style) must not come back.
+  assert.doesNotMatch(section, /sv-open-intro/);
   assert.doesNotMatch(html, /sv-explain/);
   assert.doesNotMatch(section, /td-label/);
   // Same enclosure material as its siblings: the raised sv-open-list.
@@ -32,7 +36,7 @@ test("the section header and intro are the shared settings species, not the capt
 });
 
 test("each app is a value row: logo, name, current mode, chevron", () => {
-  const section = between(html, 'id="permPrefs"', "sv-colophon");
+  const section = permSection();
   assert.match(section, /class="sv-open-row perm-vrow" data-perm-open="\$\{esc\(v\.key\)\}" aria-expanded=/);
   assert.match(section, /<img class="sv-open-logo" src="\$\{logo\}"/);
   assert.match(section, /<span class="sv-open-name">\$\{esc\(v\.label\)\}<\/span>/);
@@ -43,7 +47,7 @@ test("each app is a value row: logo, name, current mode, chevron", () => {
 });
 
 test("tapping a row unfolds the standard open-actions tray inline, one app at a time", () => {
-  const section = between(html, 'id="permPrefs"', "sv-colophon");
+  const section = permSection();
   assert.match(section, /\$\{open \? `<div class="open-actions perm-tray">/);
   // permTrayOpen holds ONE vendor key: opening a row is exclusive, tapping it
   // again folds it.
@@ -56,14 +60,27 @@ test("tapping a row unfolds the standard open-actions tray inline, one app at a 
 });
 
 test("choosing a mode persists it and folds the tray back to the value row", () => {
-  const wiring = between(html, 'querySelectorAll("[data-perm]")', "wireSettings()");
-  assert.match(wiring, /setProtoPref\(`proto\.perm\.\$\{b\.getAttribute\("data-perm"\)\}`, b\.getAttribute\("data-mode"\)\)/);
+  // The handlers live with the page that draws the rows: wireSetupPage,
+  // scoped to #setupPage.
+  const setup = between(html, "function wireSetupPage()", "if (setupFocus) {");
+  assert.match(setup, /const page = document\.getElementById\("setupPage"\);/);
+  const opener = between(setup, 'page.querySelectorAll("[data-perm-open]")', 'page.querySelectorAll("[data-perm]")');
+  assert.match(opener, /permTrayOpen = permTrayOpen === key \? null : key;\s*renderSettings\(\);/);
+  const wiring = setup.slice(setup.indexOf('page.querySelectorAll("[data-perm]")'));
+  assert.match(wiring, /savePillSetting\(\{ taskPermissions: \{ \[choice\.getAttribute\("data-perm"\)\]: choice\.getAttribute\("data-mode"\) \} \}\);/);
+  assert.match(wiring, /setProtoPref\(`proto\.perm\.\$\{choice\.getAttribute\("data-perm"\)\}`, choice\.getAttribute\("data-mode"\)\)/);
   assert.match(wiring, /permTrayOpen = null;/);
   assert.match(wiring, /renderSettings\(\);/);
+  // Nothing on the You page still claims these rows.
+  const settings = between(html, "function renderSettings()", "function wireSettings()");
+  assert.doesNotMatch(settings, /data-perm|permPrefs/);
 });
 
 test("the section still mounts only with the requests feature", () => {
-  assert.match(html, /if \(payload\.features\?\.requests === true\) html \+= `\s*<div class="sv-open-section" id="permPrefs" data-stop="1">/);
+  assert.match(permSection(), /^function permPrefsHtml\(\) \{\s*if \(payload\.features\?\.requests !== true\) return "";\s*return `\s*<div class="sv-open-section" id="permPrefs" data-stop="1">/);
+  // It is drawn once, on Your AIs, after the app sections.
+  assert.equal((html.match(/\$\{permPrefsHtml\(\)\}/g) || []).length, 1);
+  assert.match(between(html, "function setupPageHtml()", "function setupAgentGap("), /\$\{otherHtml\}\s*\$\{yourAgentHtml\(\)\}\s*\$\{permPrefsHtml\(\)\}/);
 });
 
 test("Connections uses the shared section species and concise privacy copy", () => {

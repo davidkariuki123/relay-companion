@@ -108,7 +108,10 @@ test("the pill knows a link it just minted before the Sent row does, and Copied 
 test("the reader's bar carries the button and the kicker the word, and Sent rows keep audience links apart", () => {
   const bar = section('      <div class="reader-bar">', '      ${documentList}');
   assert.match(bar, /\$\{sentLinkMoreHtml\(r\)\}/);
-  const kicker = section('        <div class="rd-kicker">${request ? (r.outbound', "</div>");
+  // The bar names the room (or the person in a DM); the kicker names the
+  // sender only when that differs, then the time and the link word.
+  assert.match(bar, /<span class="reader-name">\$\{esc\(barName\)\}<\/span>/);
+  const kicker = section('        <div class="rd-kicker">${barName === sender', "</div>");
   assert.match(kicker, /sentLinkKickerWord\(sentLinkOf\(r\)\)/);
   const detail = section("  function sentDetail(r) {", "  function sentClass(r) {");
   assert.match(detail, /const link = audienceLinkOf\(r\);/);

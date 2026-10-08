@@ -156,7 +156,9 @@ test("a Task reads as one page: the agent document folds into Details, not a sec
     assert.equal(inbox.includes(gone), false, `${gone} survives in the pill`);
   }
   assert.match(reader, /const status = "";/);
-  assert.match(reader, /const documentHostActions = onHuman \? `<div class="rd-host-actions"/, "the host rows show on a Task too");
+  // The host rows show on a Task too — except a received Task that is over
+  // (Sven, 2026-10-08): once your copy is settled there is nothing to open.
+  assert.match(reader, /const documentHostActions = onHuman && !readerRunsHere && !\(request && !r\.outbound && taskIsOver\(r\)\) \? `<div class="rd-host-actions"/, "the host rows show on a Task too");
   // Opening a Relay that already went to an app lands on its receipt.
   const open = between(inbox, "function openReader(", "function closeReader(");
   assert.match(open, /readerTab = !picker && openedHandoff && \["starting", "running", "failed"\]\.includes\(openedHandoff\.state\) \? "agent" : "you"/);

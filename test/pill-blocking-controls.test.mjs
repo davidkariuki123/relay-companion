@@ -38,28 +38,71 @@ test('person controls are sibling buttons, with an anchored popover and a visibl
   assert.match(rows, /<div class="cv-person">/);
   assert.match(rows, /<button class="cv-person-more"[^>]*aria-haspopup="menu"[^>]*data-message-more/);
   assert.doesNotMatch(rows, /<span class="cv-edit" role="button"/);
-  assert.match(html, /id="cvBlockedPeople">Blocked contacts/);
+  // The recovery path is Blocked people on You, plus the Blocked people
+  // button the Block dialog offers once someone is blocked.
+  assert.doesNotMatch(html, /id="cvBlockedPeople"/);
+  assert.match(html, /<button class="sv-row" id="svBlockedPeople" type="button"><span class="sv-row-copy"><span class="sv-row-name">Blocked people<\/span>/);
+  assert.match(html, /document\.getElementById\("svBlockedPeople"\)\?\.addEventListener\("click", \(event\) => openBlockedPeople\(event\.currentTarget\)\)/);
   assert.match(html, /peopleDialog\.showPopover\(\)/);
   assert.match(html, /peopleDialogAccount !== signupAccountKey\(\)\) closePeopleDialog/);
   const block = html.slice(html.indexOf('function openPersonBlock('), html.indexOf('async function openBlockedPeople('));
   assert.match(block, /\[data-block-confirm\].*addEventListener/);
   assert.match(block, /if \(!current\(\)\)/);
   assert.match(block, /result\?\.blocked !== true/);
+  assert.match(block, /\[data-blocked-list\]"\)\.addEventListener\("click", \(\) => openBlockedPeople\(trigger\)\)/);
   assert.doesNotMatch(block, /contactDelete|contactsList\s*=/);
-  const unblock = html.slice(html.indexOf('async function openBlockedPeople('), html.indexOf('document.getElementById("cvBlockedPeople").addEventListener'));
+  // Every pointer names the page by where it lives and what it is called.
+  assert.match(block, /You can unblock them in You › Blocked people\./);
+  assert.match(block, /data-blocked-list>Blocked people<\/button>/);
+  assert.match(html, /<h2 id="cvBlockedTitle">Blocked people<\/h2>/);
+  assert.doesNotMatch(html, /Blocked contacts|Contacts → Blocked/);
+  const unblock = html.slice(html.indexOf('async function openBlockedPeople('), html.indexOf('cvBlockedBackEl.addEventListener("click"'));
+  assert.ok(unblock.length > 0);
   assert.match(unblock, /result\?\.blocked !== false/);
-  assert.match(unblock, /No blocked contacts/);
+  assert.match(unblock, /No one is blocked/);
   assert.match(unblock, /Could not unblock this contact/);
+  // The page's Back names where it returns to.
+  assert.match(html, /<button class="cv-blocked-back" id="cvBlockedBack" type="button">← You<\/button>/);
+  assert.match(unblock, /const from = previous\?\.from \|\| \(activeView === "settings" \? "settings" : "contacts"\);/);
+  assert.match(unblock, /cvBlockedBackEl\.textContent = from === "settings" \? "← You" : "← Contacts";/);
+  // The page stays in the view that opened it (expanded-mode review,
+  // 2026-10-08): from You it takes You's place under the You tab; from a
+  // Block dialog it is a page of Contacts. Opening never changes the view.
+  assert.match(html, /function blockedPeopleView\(page = blockedPeoplePage\) \{ return page\?\.from === "settings" \? "settings" : "contacts"; \}/);
+  assert.doesNotMatch(unblock, /activeView = "contacts"|commitNavigation\(\)/);
+  assert.match(unblock, /const current = \(\) => blockedPeoplePage === page && activeView === blockedPeopleView\(page\) && page\.account === signupAccountKey\(\);/);
+  assert.match(unblock, /if \(from === "settings"\) \{\s*delete settingsViewEl\.dataset\.pageHtml;\s*settingsViewEl\.replaceChildren\(cvBlockedPageEl\);\s*\} else \{\s*if \(cvBlockedPageEl\.parentElement !== contactsViewEl\) contactsViewEl\.append\(cvBlockedPageEl\);\s*cvOverviewEl\.classList\.add\("gone"\);\s*\}/);
+  // Back puts the page home in Contacts' view and, from You, redraws You and
+  // returns focus to the row that opened it.
+  const close = html.slice(html.indexOf('function closeBlockedPeople('), html.indexOf('async function openBlockedPeople('));
+  assert.doesNotMatch(close, /activeView = /, "closing never navigates");
+  assert.match(close, /if \(cvBlockedPageEl\.parentElement !== contactsViewEl\) contactsViewEl\.append\(cvBlockedPageEl\);/);
+  assert.match(close, /if \(previous\.from === "settings"\) \{\s*delete settingsViewEl\.dataset\.pageHtml;\s*if \(activeView === "settings"\) \{\s*renderSettings\(\);[\s\S]*?document\.getElementById\("svBlockedPeople"\)\?\.focus\(\{ preventScroll:true \}\);\s*\}\s*return;\s*\}/);
+  // You keeps the page in place while it is open, instead of repainting over it.
+  const settings = html.slice(html.indexOf('function renderSettings()'), html.indexOf('function wireTaskRuntimeControls('));
+  assert.match(settings, /if \(blockedPeoplePage && blockedPeopleView\(\) === "settings"\) \{\s*if \(cvBlockedPageEl\.parentElement !== settingsViewEl\) settingsViewEl\.replaceChildren\(cvBlockedPageEl\);\s*return;\s*\}/);
+  assert.ok(settings.indexOf('blockedPeopleView() === "settings"') < settings.indexOf('const info = settingsInfo;'), "the early return comes before You is drawn");
+  // Escape, a stale view and a second tap on the page's own tab all close it.
+  assert.match(html, /event\.key === "Escape" && blockedPeoplePage && activeView === blockedPeopleView\(\) && !event\.defaultPrevented/);
+  assert.match(html, /if \(blockedPeoplePage && \(activeView !== blockedPeopleView\(\) \|\| blockedPeoplePage\.account !== signupAccountKey\(\)\)\) \{\s*closeBlockedPeople\(\{ restoreFocus:false, animate:false \}\);/);
+  assert.match(html, /if \(blockedPeoplePage && blockedPeopleView\(\) === view\) closeBlockedPeople\(\);\s*else if \(view === "settings" && setupPageOpen\) closeSetupPage\(\);/);
+  assert.equal((html.match(/if \(blockedPeoplePage && blockedPeopleView\(\) === view\) closeBlockedPeople\(\);/g) || []).length, 2, "the small card's tabs and the wide sidebar's tab hop agree");
+  assert.doesNotMatch(html, /blockedPeoplePage\.from = "contacts"|blockedPeoplePage\?\.from === "settings" \? "settings" : "contacts"\)/);
 });
 
-test('one Add button submits the contact form and honors reduced motion', () => {
-  assert.equal((html.match(/id="cvAdd"/g) || []).length, 1);
-  assert.doesNotMatch(html, /id="cvAddGo"/);
-  const motion = html.slice(html.indexOf('function moveAddButton('), html.indexOf('function openAddSheet()'));
-  assert.match(motion, /getBoundingClientRect/);
-  assert.match(motion, /open \? "cvAddTarget" : "cvAddHome"\)\.append\(cvAddEl\)/);
-  assert.match(motion, /prefers-reduced-motion: reduce/);
-  assert.match(motion, /addButtonAnimation\?\.cancel/);
-  assert.match(html, /cvAddEl.addEventListener\("click", addPersonByAddress\)/);
-  assert.match(html, /class="cv-add-slot gone" id="cvAddHome"/);
+test('one Add button, in the find row, submits the typed address without moving or animating', () => {
+  const find = html.slice(html.indexOf('function renderContactFind()'), html.indexOf('function closeAddSheet()'));
+  // Exactly one Add, rendered only for an address nobody in the book has.
+  assert.equal((find.match(/id="cvFindAdd"/g) || []).length, 1);
+  assert.match(find, /<button class="cv-add solid" type="button" id="cvFindAdd"\$\{cvFind\.state === "busy" \? " disabled" : ""\}>Add<\/button>/);
+  assert.match(find, /document\.getElementById\("cvFindAdd"\)\?\.addEventListener\("click", addPersonByAddress\)/);
+  assert.match(find, /if \(!address \|\| known\) \{ cvFind = null; cvFindEl\.innerHTML = ""; return; \}/);
+  // The old button that flew between the toolbar and the sheet is gone, so
+  // there is no motion to honour.
+  assert.doesNotMatch(html, /id="cvAdd"|id="cvAddGo"|id="cvAddHome"|id="cvAddTarget"/);
+  assert.doesNotMatch(html, /function moveAddButton|addButtonAnimation/);
+  const add = html.slice(html.indexOf('let addSheetGeneration = 0;'), html.indexOf('cvCancelEl.addEventListener("click", closeContactForm)'));
+  assert.doesNotMatch(add, /\.animate\(/);
+  // Enter in the field is the same Add.
+  assert.match(add, /if \(cvFind && cvFind\.state === "ready"\) \{ addPersonByAddress\(\); return; \}/);
 });

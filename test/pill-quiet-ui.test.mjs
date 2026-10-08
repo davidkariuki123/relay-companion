@@ -26,18 +26,24 @@ function codeOnly(source) {
 test("Settings offers one New messages choice, loudest to quietest, and a sound switch", () => {
   // ao1 feedback (2026-10-08): "settings around notification style". One value
   // row, never two switches that can contradict each other.
-  assert.match(html, /<div class="sv-quiet-title">Notifications<\/div>/);
-  assert.match(html, /\.sv-open-title, \.sv-quiet-title \{[^}]*font-size:15px/);
-  assert.match(html, /\.sv-quiet-title \{ margin-bottom:10px; \}/);
-  assert.match(html, /<span class="sv-quiet-name">New messages<\/span>/);
+  // Sven's cut (2026-10-08): rows name themselves, so the card has no
+  // "Notifications" heading; the value row is the same species as every row.
+  const quiet = between(html, "function quietPrefsHtml(info)", "function chatAgentDefaultsHtml()");
+  assert.doesNotMatch(quiet, /sv-quiet-title|>Notifications</);
+  assert.match(quiet, /<button class="sv-row sv-notify-row" type="button" id="svNotifyRow" aria-expanded="\$\{notifyTrayOpen \? "true" : "false"\}" aria-controls="svNotifyTray">/);
+  assert.match(quiet, /<span class="sv-row-name">New messages<\/span>/);
+  assert.match(quiet, /<span class="sv-row-value">\$\{esc\(currentChoice\.short\)\}<\/span>/);
+  assert.match(quiet, /id="svNotifyTray" role="radiogroup" aria-label="New messages"/);
   const choices = between(html, "const NOTIFY_CHOICES = [", "];");
   assert.deepEqual([...choices.matchAll(/value:"([a-z]+)"/g)].map((m) => m[1]), ["all", "direct", "count", "hidden"]);
   assert.match(choices, /name:"Every message"/);
   assert.match(choices, /name:"Direct messages and mentions"/);
   assert.match(choices, /name:"Just the count"/);
   assert.match(html, /role="radio"[\s\S]{0,120}data-notify-choice="\$\{choice\.value\}"/);
-  assert.match(html, /<span class="sv-quiet-name">Play sounds<\/span>/);
-  assert.match(html, /"A soft chime when a banner shows\."/);
+  // The sound switch is one word, with a second line only when it is off
+  // for a reason: sounds play only with banners.
+  assert.match(quiet, /<div class="sv-row\$\{banners \? "" : " off"\}">\s*<span class="sv-row-copy"><span class="sv-row-name">Sounds<\/span>\$\{banners \? "" : `<span class="sv-row-sub">Only with banners<\/span>`\}<\/span>/);
+  assert.match(quiet, /svSwitchHtml\("soundsMuted", !muted, \{ label: "Play sounds", inverted: true, disabled: !banners \}\)/);
   assert.doesNotMatch(html, />Quiet<\/div>|Relay keeps running and collecting your messages/);
   assert.match(html, /role="switch" data-quiet="\$\{esc\(key\)\}"/);
   assert.match(html, /aria-checked="\$\{checked \? "true" : "false"\}"/);
@@ -78,8 +84,14 @@ test("only arrivals the style lets through are queued; the rest are presented by
 });
 
 test("the notification section stops clicks, so flipping a switch never folds the card", () => {
-  const section = between(html, 'class="sv-quiet-section" id="quietPrefs"', "</div>");
-  assert.match(section, /data-stop="1"/);
+  // The preferences card is one .sv-group wrapping the New messages row, the
+  // sound switch and the draft-a-Relay switch; the wrapper itself stops clicks.
+  const settings = between(html, "function renderSettings()", "function wireSettings()");
+  assert.match(settings, /html \+= `<div class="sv-group" id="quietPrefs" data-stop="1"><div class="sv-open-list">\$\{quietPrefsHtml\(info\)\}\$\{milestoneRelaysHtml\(info\)\}<\/div><\/div>`;/);
+  // and wireSettings really stops every data-stop zone.
+  const wire = between(html, "function wireSettings()", "const slackConnect =");
+  assert.match(wire, /for \(const z of settingsViewEl\.querySelectorAll\('\[data-stop="1"\]'\)\) \{\s*z\.addEventListener\("click", \(e\) => e\.stopPropagation\(\)\);/);
+  assert.match(wire, /for \(const sw of settingsViewEl\.querySelectorAll\("\[data-quiet\]"\)\) \{\s*sw\.addEventListener\("click", \(\) => toggleQuietPref\(sw\.getAttribute\("data-quiet"\), sw\)\);/);
 });
 
 test("the toggles reach main through named IPC channels", () => {

@@ -44,7 +44,15 @@ test("main proxies group calls through the API client with inline error shape", 
 
 test("the renderer manages channels from server truth: list, create, rename, archive, members", () => {
   assert.match(html, /id="cvGroups"/);
-  assert.match(html, /No groups yet\. A group relays to everyone in it as one conversation\./);
+  // No empty-state sentence: a book with no groups keeps the Groups label,
+  // because New group lives on it, and hides the section only when a search
+  // matches nothing.
+  assert.doesNotMatch(html, /id="cvgEmpty"|No groups yet\./);
+  assert.match(html, /id="cvgNew">New group<\/button>/);
+  assert.match(html, /cvGroupsEl\.classList\.toggle\("gone", Boolean\(cvQuery\) && !matching\.length\)/);
+  // New group opens the existing create form.
+  assert.match(html, /cvgNewEl\.addEventListener\("click", \(\) => \{\s*loadGroups\(\);\s*cvgNewFormEl\.classList\.remove\("hidden"\);/);
+  assert.match(html, /<form class="cvg-newform hidden" id="cvgNewForm">/);
   // Mutations re-render from the RETURNED view (cvgApply), never a local guess.
   assert.match(html, /function cvgApply\(result\)/);
   assert.match(html, /groupDetailCall\(container, window\.relay\.groupRename, g\.id, name\)/);
@@ -62,11 +70,15 @@ test("the renderer manages channels from server truth: list, create, rename, arc
 });
 
 test("foreign channels expose a self-only leave action without roster administration", () => {
-  assert.match(html, /const mine = !slack && g\.owned !== false/);
+  const details = html.slice(html.indexOf("function groupDetailsMarkup("), html.indexOf("async function groupDetailCall("));
+  const rows = html.slice(html.indexOf("function renderGroups()"), html.indexOf("function openGroupRoom(groupId)"));
+  assert.match(details, /const mine = g\.owned !== false;/);
   // Archived rooms are shown, marked, and never editable — by anyone.
-  assert.match(html, /const editable = mine && !archived/);
-  assert.match(html, /<span class="cvg-badge">Archived<\/span>/);
-  assert.match(html, /<span class="cvg-badge">Added you<\/span>/);
+  assert.match(details, /const editable = mine && !archived/);
+  assert.match(rows, /class="cvg-sub">\$\{esc\(archived \? `Archived · \$\{sub\}` : sub\)\}/);
+  // A foreign group's row is a row like any other: no "Added you" badge.
+  // What separates it is in its details, where only Leave is offered.
+  assert.doesNotMatch(html, /Added you/);
   assert.match(html, /editable && member\.role !== "owner" && id/);
   assert.match(html, /else if \(!mine && !slack\)/,
     "only native Relay channels expose the legacy leave action");
@@ -181,5 +193,15 @@ test("Slack-owned channels join the Groups pane without becoming editable Relay 
   assert.match(html, /src="slackMark\.png" alt="Slack"/);
   assert.match(html, /slack \? "" : `<span class="cvg-edit"/,
     "Slack controls its channel roster, so Relay must not expose the legacy editor");
-  assert.match(html, /<span class="cvg-badge">Slack<\/span>/);
+  // The Slack mark is the row's tile; a separate "Slack" badge was redundant.
+  const rows = html.slice(html.indexOf("function renderGroups()"), html.indexOf("function openGroupRoom(groupId)"));
+  // The row's tile is the group's deck, and for Slack the deck is the mark.
+  assert.match(rows, /const tile = groupAvatarStack\(g, roster\);/);
+  const stack = html.slice(html.indexOf("function groupAvatarStack(group, roster)"), html.indexOf("function groupActivityAt("));
+  assert.match(stack, /^function groupAvatarStack\(group, roster\) \{\s*if \(group\.provider === "slack"\) \{\s*return '<img class="cvg-slack-logo" src="slackMark\.png" alt="Slack" \/>';\s*\}/);
+  assert.match(rows, /const sub = slack \? \(g\.lastPreview \|\| "Slack channel"\) : [^;\n]*groupMemberSummary\(/);
+  assert.doesNotMatch(rows, /cvg-badge/);
+  // Slack projection rows are never the viewer's own roster.
+  const sync = html.slice(html.indexOf("function syncSlackChannelRows()"), html.indexOf("function syncSlackChannelRows()") + 2000);
+  assert.match(sync, /owned:false/);
 });

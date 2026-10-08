@@ -33,11 +33,15 @@ const block = between(inbox, "// ---------- THE TASK CARD (2026-09-17) ---------
 
 // The helpers, run for real: the block evaluated with the few renderer
 // functions it leans on stubbed, and a payload of fixture rows.
+const stubTimeAgo = (iso) => { const ms = Date.now() - Date.parse(iso); const m = Math.round(ms / 60000); return m < 1 ? "now" : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
 function boot({ relays = [], sent = [], apps = ["codex", "claude"], opens = () => true, features = {}, nativeExecutions = {} } = {}) {
   const context = {
     payload: { relays, sent, account: { userId: "me" }, features, nativeExecutions },
     esc: (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])),
-    timeAgo: (iso) => { const ms = Date.now() - Date.parse(iso); const m = Math.round(ms / 60000); return m < 1 ? "now" : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; },
+    timeAgo: stubTimeAgo,
+    // The renderer's sentence form of timeAgo ("4m ago", "just now"), which
+    // the settled line reads.
+    timeAgoWords: (iso) => { const short = stubTimeAgo(iso); return !short ? "" : short === "now" ? "just now" : `${short} ago`; },
     formatChatTime: () => "09:52",
     relaySender: (row) => row.senderName || "",
     relaySubject: (row) => row.title || "",
@@ -61,7 +65,7 @@ function boot({ relays = [], sent = [], apps = ["codex", "claude"], opens = () =
     setTimeout, clearTimeout, console, Map, Set, Date, String, Number, Boolean, Array, JSON, Math,
   };
   vm.createContext(context);
-  vm.runInContext(block + "\nthis.__t = { taskStateFor, taskLadder, taskVerbsHtml, taskCardFooterHtml, taskStatusModuleHtml, taskRowLineHtml, taskEventOf, taskResultFor, taskResultLinkHtml, taskIsOver, taskAsking, taskAskRowHtml, taskStateRowHtml, taskVerb, TASK_ASK_GUARD_MS, taskIsEveryone, taskRosterCardHtml, taskRosterGroupedHtml, taskRosterYouStripHtml, taskRosterSumText, taskRosterTone, taskRosterCountsOf, taskRosterHelperText, nativeExecuteHtml, nativeExecutePickerHtml, nativeExecuteChoice, taskRunBlockHtml, taskRunPlans, taskRunPicking, taskRunTap, taskEveryonePositionHtml, taskChipHtml };", context);
+  vm.runInContext(block + "\nthis.__t = { taskSettledText, taskSettledLineHtml, taskStateFor, taskLadder, taskVerbsHtml, taskCardFooterHtml, taskStatusModuleHtml, taskRowLineHtml, taskEventOf, taskResultFor, taskResultLinkHtml, taskIsOver, taskAsking, taskAskRowHtml, taskStateRowHtml, taskVerb, TASK_ASK_GUARD_MS, taskIsEveryone, taskRosterCardHtml, taskRosterGroupedHtml, taskRosterYouStripHtml, taskRosterSumText, taskRosterTone, taskRosterCountsOf, taskRosterHelperText, nativeExecuteHtml, nativeExecutePickerHtml, nativeExecuteChoice, taskRunBlockHtml, taskRunPlans, taskRunPicking, taskRunTap, taskEveryonePositionHtml, taskChipHtml };", context);
   context.__t.__context = context;
   return context.__t;
 }
@@ -158,6 +162,37 @@ test("done names the app or the person, and points at the result", () => {
   same(t2.taskStateFor(withNote).rungs, ["past", "past", "todo", "done"]);
 });
 
+test("the receiver's settled copy says it once, on the card and in the reader", () => {
+  // Sven, 2026-10-08: once your own copy is over, one line about you — plus
+  // Result › when there is a result to read — and nothing else.
+  const result = { id: "r9", type: "completion", inReplyToRelayId: "t1", forHuman: "Shipped the patch." };
+  const t = boot({ relays: [result] });
+  const done = inboundTask({ taskStartedAt: ago(20), taskCompletedAt: ago(4), taskResultRelayId: "r9" });
+  const st = t.taskStateFor(done);
+  assert.equal(t.taskSettledText(done, st), "You finished this · 4m ago");
+  const footer = t.taskCardFooterHtml(done);
+  assert.match(footer, /^<div class="tk-footer"[^>]*><div class="tk-foot done"><span class="tk-state">[\s\S]*You finished this · 4m ago<\/span><\/span><button type="button" class="tk-link" data-task-result="t1">Result/);
+  assert.doesNotMatch(footer, /tk-ladder|tk-agents|tk-verbs|tk-roster/, "no ladder, agent row, verbs or roster once it is over");
+  const module = t.taskStatusModuleHtml(done);
+  assert.match(module, /^<div class="tk-status settled done" data-stop="1" data-task-card="t1"><div class="tk-row"><span class="tk-state">[\s\S]*You finished this · 4m ago[\s\S]*data-task-result="t1">Result/);
+  assert.doesNotMatch(module, /tk-steps|tk-helper|tk-verbs|tk-you|tk-group|Read the result/);
+  // Rejected and cancelled read the same way, with no result link.
+  const rejected = inboundTask({ taskRejectedAt: ago(5), taskClosedBy: "David Kariuki" });
+  assert.equal(t.taskSettledText(rejected, t.taskStateFor(rejected)), "You rejected this · 5m ago");
+  assert.doesNotMatch(t.taskStatusModuleHtml(rejected), /tk-link/);
+  assert.match(t.taskStatusModuleHtml(rejected), /^<div class="tk-status settled rejected"/);
+  const cancelled = inboundTask({ taskStartedAt: ago(20), taskCancelledAt: ago(2), taskClosedBy: "David Kariuki" });
+  assert.equal(t.taskSettledText(cancelled, t.taskStateFor(cancelled)), "You cancelled this · 2m ago");
+  // An Anyone Task someone else claimed and finished names them.
+  const claimedDone = inboundTask({ taskCompletedAt: ago(4), taskClosedBy: "Shane Acton", taskClaim: { scope: "channel", state: "claimed", workState: "idle", version: 1, claimant: { self: false, name: "Shane Acton" }, claimedAt: ago(20) } });
+  assert.equal(t.taskSettledText(claimedDone, t.taskStateFor(claimedDone)), "Shane finished this · 4m ago");
+  // The sender's view is unchanged: the ladder and the state in their words.
+  const sent = sentTask({ taskStartedAt: ago(20), taskCompletedAt: ago(4), taskClosedBy: "Shane Acton" });
+  assert.match(t.taskCardFooterHtml(sent), /tk-ladder/);
+  assert.match(t.taskStatusModuleHtml(sent), /tk-steps/);
+  assert.doesNotMatch(t.taskStatusModuleHtml(sent), /finished this/);
+});
+
 // Done asks the way Reject and Cancel do (David's candidate A, 2026-09-17):
 // nothing is stamped on the first press, the second seals it with the word.
 function stubClose(t, context, result = { ok: true }) {
@@ -189,7 +224,13 @@ test("Done asks before anything is posted", async () => {
   assert.match(t.taskAskRowHtml(row), /placeholder="Tell Sven how it went \(optional\)"/);
   assert.match(t.taskAskRowHtml(row), /aria-label="Tell Sven how it went"/);
   assert.match(t.taskStateRowHtml(row, st), /tk-foot open asking[\s\S]*Marking done/);
-  assert.match(t.taskStatusModuleHtml(row), /Marking done\. A word for them is optional\./);
+  // The reader's module is lean while it is open (Sven, 2026-10-08): no helper
+  // sentence, just Keep and the seal, then the optional word. A direct Task
+  // not yet started has no line beside its verbs, so the module is bare:
+  // the verbs stand alone under the letter (expanded-mode review, 2026-10-08).
+  const asking = t.taskStatusModuleHtml(row);
+  assert.match(asking, /^<div class="tk-status lean bare open"[^>]*><div class="tk-row"><span class="tk-verbs">[\s\S]*data-task-verb="keep"[^>]*>Keep<[\s\S]*data-task-verb="done"[^>]*>Mark done<\/button><\/span><\/div><div class="tk-ask">/);
+  assert.doesNotMatch(asking, /tk-helper|tk-steps|A word for them is optional/);
   // The same spot pressed twice is a double-click, not a decision.
   await t.taskVerb("done", "t1", rerender);
   assert.equal(calls.length, 0, "a second press inside the guard is ignored");
@@ -201,7 +242,10 @@ test("Done asks before anything is posted", async () => {
   assert.equal(after.pending, true, "posted, not yet stamped by main");
   assert.equal(after.text, "Done · you · just now");
   assert.equal(t.taskVerbsHtml(row, after), "", "no Undo: the Task is closed");
-  assert.doesNotMatch(t.taskStatusModuleHtml(row), /Undo/);
+  // Once the receiver's copy is over the reader says it once, about them.
+  const settled = t.taskStatusModuleHtml(row);
+  assert.match(settled, /^<div class="tk-status settled done"[^>]*><div class="tk-row"><span class="tk-state">[\s\S]*<span class="tk-text">You finished this · just now<\/span><\/span><\/div>/);
+  assert.doesNotMatch(settled, /Undo|tk-verbs|tk-steps|tk-helper/);
   assert.ok(rerenders >= 3);
 });
 
@@ -405,9 +449,11 @@ test("main posts the person's close and stamps the row at once; the bridge and t
 });
 
 // ---- EVERYONE TASKS: the roster (David, 2026-09-17) ----
-// Each member owes it, each holds their own copy, and EVERYONE sees how
-// everyone is getting on. The wire carries a few members per state plus exact
-// counts; nothing on screen may count rows to say how many there are.
+// Each member owes it and each holds their own copy. A member (a receiver)
+// sees their own copy — where they stand, their own row and verbs — while the
+// sender keeps the roster of how everyone is getting on (Sven, 2026-10-08).
+// The wire carries a few members per state plus exact counts; nothing on
+// screen may count rows to say how many there are.
 const ROSTER_COUNTS = { total: 100, done: 12, started: 4, rejected: 3, cancelled: 0, seen: 60, sent: 21 };
 const rosterMember = (name, state, over = {}) => ({ relayId: `r-${name}`, name, self: false, state, at: ago(20), ...over });
 const ROSTER = [
@@ -528,17 +574,26 @@ test("the expanded Task groups by state: the two worth acting on open, the rest 
   assert.doesNotMatch(grouped, /class="tk-roster-name">You</);
 });
 
-test("the You strip and the helper say what is theirs and what is the room's", () => {
+test("a member's reader shows their own copy; the sender's keeps the roster and the sum", () => {
+  // Sven, 2026-10-08: the member's expanded Task is lean — where they stand,
+  // then their verbs. No You strip, no grouped roster, no helper sentence.
   const t = boot();
   const row = everyoneTask();
-  const strip = t.taskRosterYouStripHtml(row, t.taskStateFor(row));
-  assert.match(strip, /<div class="tk-you open">/);
-  assert.match(strip, /<span class="tk-you-name">You<\/span>/);
-  assert.match(strip, /Yours to do/);
-  assert.match(strip, /data-task-verb="done"[^>]*>Mark done</, "the reader's verbs, not the card's");
-  assert.equal(t.taskRosterYouStripHtml(everyoneSent(), t.taskStateFor(everyoneSent())), "", "the sender has no strip");
-  assert.match(t.taskRosterHelperText(row), /^100 people · 12 done · 3 people rejected it\. Your own Reject and Done speak only for you\.$/);
-  assert.match(t.taskRosterHelperText(everyoneSent()), /Every Done row opens that person's result\.$/);
+  const mine = t.taskStatusModuleHtml(row);
+  assert.match(mine, /^<div class="tk-status lean open" data-stop="1" data-task-card="t1"><div class="tk-row"><div class="tk-pos open">/, "the position line leads");
+  assert.match(mine, /Priya and 11 others are done · <b>yours is still to do<\/b>/);
+  assert.match(mine, /data-task-verb="reject"[^>]*>Reject<[\s\S]*data-task-verb="done"[^>]*>Mark done</, "the reader's verbs, not the card's");
+  assert.doesNotMatch(mine, /tk-you|tk-group|tk-helper|tk-steps/, "no strip, no roster groups, no helper, no ladder");
+  // The sender keeps the grouped roster and the plain sum, with no strip.
+  const theirs = t.taskStatusModuleHtml(everyoneSent());
+  assert.match(theirs, /<div class="tk-group /);
+  assert.doesNotMatch(theirs, /tk-you/, "the sender owes nothing, so has no strip");
+  assert.match(theirs, /<span class="tk-helper">100 people · 12 done · 3 people rejected it<\/span>/);
+  // The helper is just the sum now, on either side: no "speak only for you",
+  // no "Every Done row opens that person's result".
+  assert.equal(t.taskRosterHelperText(row), "100 people · 12 done · 3 people rejected it");
+  assert.equal(t.taskRosterHelperText(everyoneSent()), "100 people · 12 done · 3 people rejected it");
+  assert.doesNotMatch(inbox, /speak only for you|Every Done row opens that person/);
 });
 
 test("the list line: a member reads their own state first, the sender reads the sum", () => {
@@ -624,6 +679,11 @@ test("the Run block replaces Execute on the card, only with the feature on and o
   assert.doesNotMatch(t.taskCardFooterHtml(inboundTask({ taskCompletedAt: ago(5) })), /data-task-run|data-native-execute/, "over: the agent area is gone too");
   assert.doesNotMatch(t.taskCardFooterHtml(sentTask()), /data-task-run|data-native-execute/, "the sender has no received copy to run");
   assert.match(t.nativeExecuteHtml(inboundTask()), /data-native-execute="t1"[^>]*>Execute<\/button><div class="sv-copy">Run this Task in your native app/, "the reader keeps Execute and its caption");
+  // ...until the received Task is over: a finished Task offers nothing to run
+  // in the reader either (2026-10-08). The sender's copy keeps its own rule.
+  assert.match(inbox, /request && !\(!r\.outbound && taskIsOver\(r\)\) \? (?:nativeExecuteHtml|taskReaderRunHtml)\(r\) : ""/);
+  assert.equal(t.taskIsOver(inboundTask({ taskCompletedAt: ago(5) })), true);
+  assert.equal(t.taskIsOver(inboundTask()), false);
 });
 
 test("only the apps on this computer that Settings › Your agent has on get a mark; none leaves the agent row", () => {

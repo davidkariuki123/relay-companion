@@ -99,7 +99,7 @@ test("an agent makes agents do less at once, and anything that gives them more f
   assert.equal((await settings.setSetting(ctx, "theme", "light")).status, "unchanged");
 
   // The person's own account stays theirs.
-  assert.deepEqual(await settings.setSetting(ctx, "account", "anything"), { status: "pill_only", setting: "account", where: "You › the account row at the top" });
+  assert.deepEqual(await settings.setSetting(ctx, "account", "anything"), { status: "pill_only", setting: "account", where: "You › Account" });
   await assert.rejects(settings.setSetting(ctx, "no_such_setting", true), /no Relay setting called/);
   await assert.rejects(settings.setSetting(ctx, "theme", "purple"), /must be one of: dark, light/);
 });

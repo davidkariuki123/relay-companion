@@ -2436,7 +2436,7 @@ test("relay_settings lists the person's settings and changes them within what an
 
   const sounds = await call({ action: "set", setting: "play_sounds", value: false });
   assert.equal(sounds.status, "changed");
-  assert.match(sounds.agentInstruction, /play_sounds is now off; they can change it back in the Relay app under You › Notifications/);
+  assert.match(sounds.agentInstruction, /play_sounds is now off; they can change it back in the Relay app under You › Sounds/);
   const store = JSON.parse(await fs.readFile(path.join(configDir, "settings.json"), "utf8"));
   assert.equal(store.soundsMuted, true);
 
@@ -2449,7 +2449,7 @@ test("relay_settings lists the person's settings and changes them within what an
 
   const account = await call({ action: "set", setting: "account", value: "signed-out" });
   assert.equal(account.status, "pill_only");
-  assert.match(account.agentInstruction, /Agents cannot change this\. Tell the person they can do it in the Relay app under You › the account row at the top\./);
+  assert.match(account.agentInstruction, /Agents cannot change this\. Tell the person they can do it in the Relay app under You › Account\./);
 
   // The pill reports it has no status-area icon: hiding it is refused.
   await fs.writeFile(path.join(configDir, "pill-status.json"), JSON.stringify({ tray: { available: false } }));

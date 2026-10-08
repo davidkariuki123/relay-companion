@@ -914,7 +914,8 @@ test("handoffs retain conversation context while a picker choice makes no delive
   // A Task has no Start dock in the reader any more (David, 2026-09-13): it
   // gets the plain reply dock and the same host rows as a Relay.
   assert.equal(html.includes("requestDockHtml"), false);
-  assert.match(html, /const documentHostActions = onHuman \? `<div class="rd-host-actions"/);
+  // ...except a received Task that is over (Sven, 2026-10-08).
+  assert.match(html, /const documentHostActions = onHuman && !readerRunsHere && !\(request && !r\.outbound && taskIsOver\(r\)\) \? `<div class="rd-host-actions"/);
   assert.match(html, /if \(onAgent\) return relayWorkDockHtml\(r, \{ inline: true \}\)/);
   assert.match(html, /data-handoff="\$\{esc\(r\.id\)\}"/);
   assert.match(html, /<button type="button" id="qrSend">Send<\/button>/);
