@@ -64,6 +64,7 @@ const { lifecycleOwnership } = createRequire(import.meta.url)("../bootstrap/life
 const {
   associatedBundleIdentifiersPlist,
   preferredMacElectronExecutable,
+  stablePillExecutable,
 } = createRequire(import.meta.url)("../bootstrap/mac-background-identity.cjs");
 
 export const PACKAGE_NAME = "relay-companion";
@@ -2506,6 +2507,9 @@ export function installPillAutostart(
   const relayApp = installRelayMacApp({ bin, electronPath, overlayMain, homeDir, runCommand });
   if (!relayApp.ok) return { ...relayApp, electronPath, overlayMain, logPath };
   const pathEnv = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
+  // One path across updates, so macOS does not re-post "Relay can run in the
+  // background" after each one (see stablePillExecutable).
+  const launchExecutable = stablePillExecutable(electronPath, { homeDir: home });
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -2513,7 +2517,7 @@ export function installPillAutostart(
   <key>Label</key><string>${PILL_LAUNCH_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${plistEscape(electronPath)}</string>
+    <string>${plistEscape(launchExecutable)}</string>
 ${pillArgs.map((argument) => `    <string>${plistEscape(argument)}</string>`).join("\n")}
   </array>
   <key>RunAtLoad</key><true/>

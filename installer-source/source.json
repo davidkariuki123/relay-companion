@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "14e17d79c3ab70f86f374278fff3a212f801fa63",
+  "sourceSha": "479bdf5ea70694ce104014a0ed82779f44a5aee4",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
     "packages/companion/bootstrap/application-handoff.cjs": "cc857469bd3e01c1c2bd00816e5f4338083f0aaa",
@@ -22,7 +22,7 @@
     "packages/companion/bootstrap/lifecycle-ownership.cjs": "41e6a308c5b73e83ee209dc5ed9f08dcceb8b012",
     "packages/companion/bootstrap/linux-systemd.cjs": "46d5aaffa4692c5d9122e56f85ea5b60ca62293c",
     "packages/companion/bootstrap/mac-activation-transaction.cjs": "0ee10c640c0d6d6db3a9898ace6336e256dceb2e",
-    "packages/companion/bootstrap/mac-background-identity.cjs": "b8dcbd35165edc897efd96e5754b73dcbe3b49a9",
+    "packages/companion/bootstrap/mac-background-identity.cjs": "3d8e8ebf827284c1f5db0fc46f9db073f289ba43",
     "packages/companion/bootstrap/mac-power-assertion.cjs": "37ec4664813b153612670578f14bd1da24aaa9ed",
     "packages/companion/bootstrap/mac-registration-transaction.cjs": "577feb8d8cf2b3c3557a3d3e06f3d63d3140f209",
     "packages/companion/bootstrap/mac-service-recovery.cjs": "6643176546b3b8adc3a52cb54a42984673a7cf72",

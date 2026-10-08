@@ -168,14 +168,17 @@ test("the pill agent launches MacOS/Relay, is associated with Relay.app, and is 
   const plistPath = path.join(runtime.homeDir, "Library", "LaunchAgents", "work.relay.companion.pill.plist");
   const bytes = fs.readFileSync(plistPath, "utf8");
   const plist = plistJson(plistPath);
-  assert.equal(plist.ProgramArguments[0], path.join(runtime.macos, "Relay"));
+  // One path across updates: the stable link, pointing at this release's bundle.
+  const stable = path.join(runtime.homeDir, ".relay", "runtime", "Relay.app");
+  assert.equal(plist.ProgramArguments[0], path.join(stable, "Contents", "MacOS", "Relay"));
+  assert.equal(fs.readlinkSync(stable), path.resolve(runtime.macos, "..", ".."));
   assert.deepEqual(plist.AssociatedBundleIdentifiers, ["work.relay.application"]);
   assert.equal(plist.Label, "work.relay.companion.pill");
   assert.equal(install().ok, true);
   assert.equal(fs.readFileSync(plistPath, "utf8"), bytes, "a rewrite must be byte-identical, never a reason to reload");
   // Recovery reads these registrations back and must keep accepting them.
   const record = readRegistration("work.relay.companion.pill", { homeDir: runtime.homeDir });
-  assert.equal(record.executable, path.join(runtime.macos, "Relay"));
+  assert.equal(record.executable, path.join(stable, "Contents", "MacOS", "Relay"));
   assert.equal(record.packageRoot, runtime.packageRoot);
 });
 
@@ -187,7 +190,7 @@ test("the pill agent keeps MacOS/Electron for a runtime built before the rename"
   });
   assert.equal(result.ok, true, result.reason);
   const plist = plistJson(path.join(runtime.homeDir, "Library", "LaunchAgents", "work.relay.companion.pill.plist"));
-  assert.equal(plist.ProgramArguments[0], path.join(runtime.macos, "Electron"));
+  assert.equal(plist.ProgramArguments[0], path.join(runtime.homeDir, ".relay", "runtime", "Relay.app", "Contents", "MacOS", "Electron"));
 });
 
 test("the daemon agent is associated with Relay.app and still reads back as a recoverable registration", { skip: MAC_ONLY }, (t) => {
@@ -228,4 +231,30 @@ test("the update worker job is associated with Relay.app", { skip: MAC_ONLY }, (
   const plist = plistJson(file);
   assert.deepEqual(plist.AssociatedBundleIdentifiers, ["work.relay.application"]);
   assert.deepEqual(plist.ProgramArguments, ["/node", "/worker.cjs", "--worker", "payload"]);
+});
+
+// macOS 26 VM, 2026-10-08: a new ProgramArguments[0] path re-posts "Relay can
+// run in the background"; the same path re-pointed at another binary does not.
+test("an update re-points the pill's one stable path instead of naming a new one", (t) => {
+  const { stablePillExecutable } = require("../bootstrap/mac-background-identity.cjs");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-stable-pill-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const release = (name) => {
+    const macos = path.join(root, "releases", name, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS");
+    fs.mkdirSync(macos, { recursive: true });
+    fs.writeFileSync(path.join(macos, "Relay"), name);
+    return path.join(macos, "Relay");
+  };
+  const home = path.join(root, "home");
+  const first = stablePillExecutable(release("0.1.1"), { homeDir: home });
+  const second = stablePillExecutable(release("0.1.2"), { homeDir: home });
+  assert.equal(first, second, "the launch path survives the update");
+  assert.equal(fs.readFileSync(second, "utf8"), "0.1.2", "and now runs the new release");
+  // Never replaces a real directory, and falls back to the release path.
+  const other = path.join(root, "other-home");
+  fs.mkdirSync(path.join(other, ".relay", "runtime", "Relay.app"), { recursive: true });
+  const fallback = release("0.1.3");
+  assert.equal(stablePillExecutable(fallback, { homeDir: other }), fallback);
+  // A path that is not inside an app bundle is left alone.
+  assert.equal(stablePillExecutable("/usr/bin/true", { homeDir: home }), "/usr/bin/true");
 });

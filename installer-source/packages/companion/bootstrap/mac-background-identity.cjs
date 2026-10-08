@@ -63,8 +63,44 @@ function preferredMacElectronExecutable(electronPath, { existsSync = fs.existsSy
   return electronPath;
 }
 
+// Background Task Management also keys a legacy agent on the PATH at
+// ProgramArguments[0]: a new path is a new item, and macOS posts "Relay can run
+// in the background" again. The pill's path named its release folder, so every
+// update re-posted the notice. Measured in a macOS 26 VM (2026-10-08): a new
+// path posts it; the same path re-pointed at a differently signed binary, or
+// with different later arguments, does not. The pill therefore launches
+// through one link, ~/.relay/runtime/Relay.app, that each install re-points at
+// its own Electron bundle. Any failure falls back to the release path (the old
+// behaviour), and a real directory at the link path is never replaced.
+const STABLE_PILL_BUNDLE = Object.freeze([".relay", "runtime", "Relay.app"]);
+
+function stablePillExecutable(electronExecutable, { homeDir, fsImpl = fs, pid = process.pid } = {}) {
+  const value = String(electronExecutable || "");
+  if (!homeDir || !value) return electronExecutable;
+  const bundle = path.resolve(value, "..", "..", "..");
+  if (path.extname(bundle) !== ".app" || path.basename(path.dirname(value)) !== "MacOS") return electronExecutable;
+  const link = path.join(homeDir, ...STABLE_PILL_BUNDLE);
+  try {
+    const existing = fsImpl.lstatSync(link, { throwIfNoEntry: false });
+    if (existing && !existing.isSymbolicLink()) return electronExecutable;
+    if (!existing || fsImpl.readlinkSync(link) !== bundle) {
+      fsImpl.mkdirSync(path.dirname(link), { recursive: true });
+      const temporary = `${link}.${pid}.tmp`;
+      try { fsImpl.unlinkSync(temporary); } catch {}
+      fsImpl.symlinkSync(bundle, temporary, "dir");
+      fsImpl.renameSync(temporary, link);
+    }
+    const stable = path.join(link, "Contents", "MacOS", path.basename(value));
+    return fsImpl.statSync(stable).isFile() ? stable : electronExecutable;
+  } catch {
+    return electronExecutable;
+  }
+}
+
 module.exports = {
   LEGACY_MAC_EXECUTABLE_NAME,
+  STABLE_PILL_BUNDLE,
+  stablePillExecutable,
   RELAY_MAC_ASSOCIATED_BUNDLE_IDENTIFIERS,
   RELAY_MAC_EXECUTABLE_NAME,
   associatedBundleIdentifiersPlist,
