@@ -539,6 +539,9 @@ function writePillStatus(reopenNonce = "") {
     pillHidden: Boolean(pillHidden),
     soundsMuted: Boolean(soundsMuted),
     notifyStyle,
+    // Relay.app reads this to stay in the Dock as Relay's one icon, whose
+    // click opens the full app (tools/relay-application/app/pill-status.cjs).
+    fullAppExpand: currentProductFeatures().fullAppExpand === true,
     reopenNonce: lastReopenNonce,
     presentedReopens: [...presentedReopens],
     terminalClaudeCodeRunning,
@@ -1127,6 +1130,16 @@ function reopenNonceFromArgs(argv) {
   return "";
 }
 pendingReopenNonce = reopenNonceFromArgs(process.argv);
+// RELAY IN THE DOCK (David, Shane and Sven, 2026-10-08): opening Relay from
+// its Dock icon is Expand: the full app, in front. `relay pill --expand` asks
+// for it, and an open the native Relay.app makes (its Dock icon, Spotlight,
+// Cmd-Tab) is marked --relay-from-application by the CLI. Dev-gated
+// (features.fullAppExpand); with it off such an open is the ordinary reopen.
+function expandRequestedByArgs(argv) {
+  const args = Array.isArray(argv) ? argv.map(String) : [];
+  return args.includes("--relay-expand") || args.includes("--relay-from-application");
+}
+let pendingAppExpand = expandRequestedByArgs(process.argv);
 // Test seam: an isolated userData dir gives the e2e harness its own single-instance
 // lock, so a sandboxed overlay can run beside the real pill without fighting it.
 if (process.env.RELAY_OVERLAY_USER_DATA) {
@@ -5885,8 +5898,9 @@ function reportAttachmentDownload(event) {
 // ---- window placement / visibility ---------------------------------------
 
 function anchorTopRight() {
-  // The full app's home is its screen; re-showing it never shrinks it.
-  if (appSurface) return { ...appSurface.workArea };
+  // The full app's home is its screen; re-showing it never shrinks it, and a
+  // screen that changed (Dock shown, resolution, unplugged) is refitted.
+  if (appSurface) return { ...appSurfaceRefit() };
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
   const wa = display.workArea;
   // AppKit needs one stable compositor surface because it does not present an
@@ -6176,15 +6190,25 @@ function enterAppSurface() {
   if (appSurface || !win || win.isDestroyed()) return appSurface;
   let restore;
   try { restore = win.getBounds(); } catch { return null; }
-  const display = screen.getDisplayMatching(restore) || screen.getPrimaryDisplay();
+  // The full app opens on the screen you are looking at: the one under the
+  // pointer, which is how it moves to another screen (collapse, expand
+  // there). The pill's own screen is the fallback.
+  let display = null;
+  try { display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()); } catch {}
+  display = display || screen.getDisplayMatching(restore) || screen.getPrimaryDisplay();
   const wa = display.workArea;
+  const onThisScreen = restore.x >= wa.x && restore.x + restore.width <= wa.x + wa.width
+    && restore.y >= wa.y && restore.y < wa.y + wa.height;
   appSurface = {
     restore,
+    displayId: display.id,
     workArea: { x: wa.x, y: wa.y, width: wa.width, height: wa.height },
-    inset: {
+    // Where the small card sits inside the grown surface. A pill on another
+    // screen grows from this screen's top-right corner instead.
+    inset: onThisScreen ? {
       top: Math.max(0, restore.y - wa.y),
       right: Math.max(0, wa.x + wa.width - (restore.x + restore.width)),
-    },
+    } : { top: 0, right: 0 },
     returnBundle: null,
   };
   // Whoever was in front gets the screen back on Collapse.
@@ -6210,6 +6234,23 @@ function enterAppSurface() {
     try { win.focus(); } catch {}
   }
   return appSurface;
+}
+// The full app's screen as it is now: its work area moves when the Dock
+// appears or the resolution changes, and an unplugged screen hands the app to
+// the nearest one. The renderer refits the card on the window's resize.
+function appSurfaceRefit() {
+  if (!appSurface) return null;
+  let display = null;
+  try { display = screen.getAllDisplays().find((d) => d.id === appSurface.displayId) || null; } catch {}
+  if (!display) {
+    try { display = screen.getDisplayMatching(appSurface.workArea) || screen.getPrimaryDisplay(); } catch {}
+  }
+  if (display) {
+    const wa = display.workArea;
+    appSurface.displayId = display.id;
+    appSurface.workArea = { x: wa.x, y: wa.y, width: wa.width, height: wa.height };
+  }
+  return appSurface.workArea;
 }
 function exitAppSurface() {
   if (!appSurface || !win || win.isDestroyed()) { appSurface = null; return; }
@@ -6522,6 +6563,7 @@ function createWindow() {
     pollHosts();
     if (pendingReopenNonce) requestExternalReopen(pendingReopenNonce);
     else writePillStatus();
+    if (pendingAppExpand) requestAppExpand();
   });
 
   try {
@@ -8659,6 +8701,18 @@ function requestExternalReopen(reopenNonce = "") {
   showFromTray(nonces[0] || "");
   for (const nonce of nonces.slice(1)) win.webContents.send("openFull", nonce);
   return pillIsOnScreen();
+}
+
+// Expand and come to the front. The renderer unfolds the card first if it
+// was folded, then switches the app to Expand (inbox.html onExpandApp).
+function requestAppExpand() {
+  if (currentProductFeatures().fullAppExpand !== true) { pendingAppExpand = false; return false; }
+  if (!pillReady || !win || win.isDestroyed()) { pendingAppExpand = true; return false; }
+  pendingAppExpand = false;
+  win.webContents.send("relay:expandApp");
+  try { win.moveTop(); win.focus(); } catch {}
+  if (process.platform === "darwin") { try { app.focus({ steal: true }); } catch {} }
+  return true;
 }
 
 // Whether the pill card is actually on screen right now.
@@ -10919,6 +10973,7 @@ if (!gotSingleInstanceLock) {
     if (!nonce) return;
     pollHosts();
     requestExternalReopen(nonce);
+    if (expandRequestedByArgs(argv)) requestAppExpand();
   });
 
   // LaunchServices may reactivate the existing process instead of executing the

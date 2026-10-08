@@ -737,6 +737,16 @@ async function cmdOpen(positional, flags) {
 }
 
 /** Launch (or signal) the desktop Relay companion pill and verify it is visible. */
+// Whether this `relay pill` was started by the installed Relay.app (macOS),
+// which spawns the CLI with its own main process as the parent.
+function launchedByRelayApplication({ platform = process.platform, ppid = process.ppid, run = spawnSync } = {}) {
+  if (platform !== "darwin" || !ppid) return false;
+  try {
+    const result = run("/bin/ps", ["-o", "comm=", "-p", String(ppid)], { encoding: "utf8", timeout: 2_000 });
+    return /\/Relay[^/]*\.app\/Contents\/MacOS\/[^/]+$/.test(String(result.stdout || "").trim());
+  } catch { return false; }
+}
+
 async function cmdPill(flags = {}, positional = []) {
   createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").resumeUnlessHeld();
   migratePersistedContentFields({ log: (message) => console.log(`[relay] ${message}`) });
@@ -798,13 +808,22 @@ async function cmdPill(flags = {}, positional = []) {
     if (!supervised) throw new Error("Relay's registered Linux pill service did not become ready. Run `relay doctor` for details.");
   }
   const reopenNonce = `cli-${process.pid}-${randomUUID()}`;
+  // `relay pill --expand relay://…` parses the link as the flag's value.
+  if (typeof flags.expand === "string") positional = [...positional, flags.expand];
   const deepLinks = positional
     .map((value) => String(value || ""))
     .filter((value) => value.startsWith("relay://"));
+  // --expand opens the full app (the pill decides, behind its dev gate). An
+  // open made by the native Relay.app (its Dock icon, Spotlight) is marked so
+  // the pill can treat it the same way: Relay from the Dock is the full app.
+  const expandArgs = [
+    ...(flags.expand ? ["--relay-expand"] : []),
+    ...(launchedByRelayApplication() ? ["--relay-from-application"] : []),
+  ];
   let spawnError = null;
   const child = spawn(
     electronPath,
-    [overlayMain, ...deepLinks, "--relay-reopen", reopenNonce],
+    [overlayMain, ...deepLinks, ...expandArgs, "--relay-reopen", reopenNonce],
     {
       detached: true,
       stdio: "ignore",
@@ -1450,7 +1469,7 @@ async function main() {
           "  relay open <id> --host claude|codex [--fresh]        Materialize a staged Relay row into a native agent session (--fresh forces a new one)",
           "  relay open --task <taskId> --host claude|codex        Materialize a developer Request into a native agent session",
           "  relay daemon [--interval MS]                          Run Relay delivery; developer accounts also receive Requests",
-          "  relay pill                                            Launch the Relay pill",
+          "  relay pill [--expand]                                 Launch the Relay pill (--expand: open the full app)",
           "  relay review-onboarding                               Start an isolated local onboarding rehearsal (no real sends)",
           "  relay mcp                                             Run tools allowed by the signed-in account",
           "  relay update                                          Update Relay",

@@ -29,4 +29,13 @@ function pillIsUp({ file = pillStatusPath(), since = 0, visible = false, runId =
   return alive(status.pid);
 }
 
-module.exports = { pillStatusPath, pillIsUp };
+// Whether the running pill offers the full app (its fullAppExpand feature).
+// Relay.app then stays in the Dock as Relay's one icon: a click on it, or
+// Cmd-Tab onto it, opens the full app.
+function pillOffersFullApp({ file = pillStatusPath(), alive = processAlive } = {}) {
+  let status;
+  try { status = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return false; }
+  return status?.fullAppExpand === true && Number.isInteger(status.pid) && status.pid > 0 && alive(status.pid);
+}
+
+module.exports = { pillStatusPath, pillIsUp, pillOffersFullApp };

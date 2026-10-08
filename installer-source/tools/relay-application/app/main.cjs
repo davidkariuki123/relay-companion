@@ -8,7 +8,7 @@ const { spawn } = require("node:child_process");
 const { inspectInstallation, planMigration } = require("./migration.cjs");
 const { parseRelayDeepLink } = require("./deep-link.cjs");
 const { integrationStatus } = require("./integration-status.cjs");
-const { pillIsUp } = require("./pill-status.cjs");
+const { pillIsUp, pillOffersFullApp } = require("./pill-status.cjs");
 const { createRelayOpener } = require("./open-relay.cjs");
 const { relocationPlan } = require("./relocation.cjs");
 // Standard local origin lets sandboxed education frames load bundled assets
@@ -70,11 +70,18 @@ function watchPillTakingOver({ pollMs = 250 } = {}) {
   return () => clearInterval(timer);
 }
 let pendingHandoff;
+// RELAY'S ONE DOCK ICON (David, Shane and Sven, 2026-10-08). Where the pill
+// offers the full app, this application stays running after the hand-off,
+// windowless, as Relay's single place in the Dock and the app switcher: a
+// click on it, or Cmd-Tab onto it, opens the full app (`relay pill --expand`).
+// The pill itself never takes a Dock slot. Elsewhere it leaves, as before.
+let dockResident = false;
 function handoffToRelay() {
   if (pendingHandoff) return pendingHandoff;
   pendingHandoff = openRelay().then(() => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
-    setTimeout(() => app.quit(), 250);
+    if (process.platform === "darwin" && pillOffersFullApp()) dockResident = true;
+    else setTimeout(() => app.quit(), 250);
     return { opened: true };
   }).finally(() => { pendingHandoff = null; });
   return pendingHandoff;
@@ -96,12 +103,15 @@ function installationState() {
 function alreadySetUp() {
   return installationState().setUp;
 }
+let expandNextOpen = false;
 const openPill = createRelayOpener({
   launch: () => {
     const bootstrap = require(path.join(process.resourcesPath, "installer", "bootstrap", "relay-setup.cjs"));
     const target = bootstrap.activeCanonicalCli();
     if (!target) throw new Error("Finish Relay setup first");
-    return spawn(target.node, [target.bin, "pill", ...pendingLinks.splice(0)], {
+    const expand = expandNextOpen ? ["--expand"] : [];
+    expandNextOpen = false;
+    return spawn(target.node, [target.bin, "pill", ...pendingLinks.splice(0), ...expand], {
       windowsHide: true, detached: true, stdio: "ignore",
     });
   },
@@ -120,6 +130,13 @@ if (application) {
   if (!ownsApplication) app.quit();
   app.on("open-url", (event, url) => { event.preventDefault(); queueLink(url); if (app.isReady()) { openOrShowFailure(); } });
   app.on("second-instance", (_event, argv) => { for (const arg of argv) queueLink(arg); openOrShowFailure(); });
+  // The Dock icon clicked, or Relay chosen in the app switcher, while this
+  // application keeps Relay's place there: the full app, in front.
+  app.on("activate", () => {
+    if (!dockResident || setupRunning) return;
+    expandNextOpen = true;
+    openOrShowFailure();
+  });
 }
 app.whenReady().then(() => {
   if (!ownsApplication) return;

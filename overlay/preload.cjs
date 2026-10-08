@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("relay", {
   // say why inline instead of letting the spinner just stop.
   onOpenError: (cb) => ipcRenderer.on("openError", (_e, id, message) => cb(id, message || "")),
   onOpenFull: (cb) => ipcRenderer.on("openFull", (_event, nonce) => cb(nonce)),
+  onExpandApp: (cb) => ipcRenderer.on("relay:expandApp", () => cb()),
   onSurfaceInset: (cb) => ipcRenderer.on("relay:surfaceInset", (_event, inset) => cb(inset || {})),
   reopenPresented: (nonce) => ipcRenderer.send("relay:reopenPresented", nonce), // status-area icon clicked
   onOpenRelay: (cb) => ipcRenderer.on("relay:openReader", (_e, input) => cb(input || {})),

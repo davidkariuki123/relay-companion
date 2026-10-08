@@ -4724,9 +4724,15 @@
   // two thirds was too big to work beside and too small to be the app. The
   // native window grows to the screen's work area to hold it (main.cjs,
   // "THE FULL APP").
+  // Dev-gated (fullAppExpand): everyone else keeps the two-thirds card, never
+  // wider or taller than the screen that holds it, which never grows the
+  // native surface.
   function wideSize() {
     const aw = Number(window.screen?.availWidth) || WIDE.w;
     const ah = Number(window.screen?.availHeight) || WIDE.h;
+    if (payload.features?.fullAppExpand !== true) {
+      return { w: Math.max(READER.w, Math.min(WIDE.w, aw - 48)), h: Math.max(EXPANDED.h, Math.min(WIDE.h, ah - 48)) };
+    }
     return { w: Math.max(READER.w, Math.round(aw)), h: Math.max(EXPANDED.h, Math.round(ah)) };
   }
   // The frame the open card wears: the app expanded, else the reader's page,
@@ -24025,6 +24031,14 @@
     surfaceInset = { top:Math.max(0, Number(inset.top) || 0), right:Math.max(0, Number(inset.right) || 0) };
     paintSurfaceInset();
   });
+  // The full app follows its screen: when the screen's usable area changes
+  // (the Dock, a resolution change) main refits the window, and the card
+  // refits to it.
+  window.addEventListener("resize", () => {
+    if (!appExpanded || !wideLayoutActive() || payload.features?.fullAppExpand !== true) return;
+    const size = wideSize();
+    if (Math.abs(W.t - size.w) > 1 || Math.abs(H.t - size.h) > 1) snapSize(size.w, size.h);
+  });
   function syncWideDom() {
     const wide = wideLayoutActive();
     cardEl.classList.toggle("wide", wide);
@@ -24796,6 +24810,22 @@
     requestAnimationFrame(() => requestAnimationFrame(() => {
       window.relay.notificationPresented?.(ids);
     }));
+  });
+  // Relay opened from its Dock icon: the full app, in front (main.cjs,
+  // requestAppExpand). The reopen that comes with it unfolds the card first;
+  // Expand waits for that, briefly, and is a no-op once already expanded.
+  if (window.relay.onExpandApp) window.relay.onExpandApp(() => {
+    if (payload.features?.fullAppExpand !== true) return;
+    const deadline = performance.now() + 1500;
+    (function expandWhenOpen() {
+      if (cardEl.classList.contains("signup")) return;
+      if (collapsed || peeking || ghost || cardEl.classList.contains("offstage")) {
+        if (collapsed && !peeking && !ghost) trayOpen();
+        if (performance.now() < deadline) setTimeout(expandWhenOpen, 50);
+        return;
+      }
+      if (!appExpanded) setAppExpanded(true);
+    })();
   });
   let lastExternalOpenAt = 0;
   if (window.relay.onOpenFull) window.relay.onOpenFull((nonce) => {

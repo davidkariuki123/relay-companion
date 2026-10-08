@@ -23,7 +23,19 @@ function harness() {
     webContents: { send: (channel, value) => calls.push(["send", channel, value]) },
   };
   const app = { dock: { show: () => { calls.push(["dock", "show"]); return Promise.resolve(); }, hide: () => calls.push(["dock", "hide"]), setIcon: () => {} }, focus: () => calls.push(["appFocus"]) };
-  const screen = { getDisplayMatching: () => ({ workArea: { x: 0, y: 33, width: 1512, height: 894 } }), getPrimaryDisplay: () => null };
+  const displays = [
+    { id: 1, workArea: { x: 0, y: 33, width: 1512, height: 894 } },
+    { id: 2, workArea: { x: 1512, y: 0, width: 2560, height: 1415 } },
+  ];
+  const pointer = { x: 1400, y: 60 };
+  const on = (p) => displays.find((d) => p.x >= d.workArea.x && p.x < d.workArea.x + d.workArea.width) || displays[0];
+  const screen = {
+    getCursorScreenPoint: () => ({ ...pointer }),
+    getDisplayNearestPoint: (p) => on(p),
+    getDisplayMatching: (b) => on({ x: b.x + 1, y: b.y + 1 }),
+    getAllDisplays: () => displays,
+    getPrimaryDisplay: () => displays[0],
+  };
   const run = Function("win", "app", "screen", "calls", `
     const CARD_MAX = { w: 900, h: 800 };
     const FIXED_OVERLAY_SURFACE = true;
@@ -51,9 +63,10 @@ function harness() {
       active: () => Boolean(appSurface),
       elevated: () => overlayElevated,
       front: (b) => { frontmost = b; },
+      refit: () => appSurfaceRefit(),
     };
   `);
-  return { calls, bounds, api: run(win, app, screen, calls) };
+  return { calls, bounds, displays, pointer, api: run(win, app, screen, calls) };
 }
 
 test("Expand grows the pill's surface to the screen and makes Relay an ordinary app", () => {
@@ -99,5 +112,27 @@ test("the renderer sizes the expanded app to the screen and places the card at t
   assert.match(html, /position:absolute; top:var\(--surface-top, 0px\); right:var\(--surface-right, 0px\);/);
   assert.match(html, /window\.relay\.onSurfaceInset\?\.\(/);
   assert.match(main, /if \(appSurface\) next = false;/, "the full app is never re-elevated by the frontmost poll");
-  assert.match(main, /if \(appSurface\) return \{ \.\.\.appSurface\.workArea \};/, "re-showing the full app never shrinks it");
+  assert.match(main, /if \(appSurface\) return \{ \.\.\.appSurfaceRefit\(\) \};/, "re-showing the full app never shrinks it");
+  assert.match(html, /if \(payload\.features\?\.fullAppExpand !== true\) \{\n\s+return \{ w: Math\.max\(READER\.w, Math\.min\(WIDE\.w, aw - 48\)\)/, "without the developer gate Expand keeps the two-thirds card");
+});
+
+test("the full app opens on the screen under the pointer, and a pill elsewhere grows from that screen's corner", () => {
+  const { calls, bounds, pointer, api } = harness();
+  pointer.x = 2000; pointer.y = 400; // looking at the second screen
+  api.size(2560, 1415);
+  assert.deepEqual(bounds, { x: 1512, y: 0, width: 2560, height: 1415 });
+  const inset = calls.find((c) => c[0] === "send" && c[1] === "relay:surfaceInset");
+  assert.deepEqual(inset[2], { top: 0, right: 0 });
+  api.size(344, 524, true);
+  assert.deepEqual(bounds, { x: 604, y: 41, width: 900, height: 800 }, "Collapse puts the pill back on its own screen");
+});
+
+test("a screen that changes under the full app refits it, and an unplugged one hands it to another", () => {
+  const { displays, api } = harness();
+  api.size(1512, 894);
+  displays[0].workArea = { x: 0, y: 33, width: 1512, height: 830 }; // the Dock appeared
+  assert.deepEqual(api.refit(), { x: 0, y: 33, width: 1512, height: 830 });
+  displays.splice(0, 1); // unplugged
+  const moved = api.refit();
+  assert.deepEqual(moved, { x: 1512, y: 0, width: 2560, height: 1415 });
 });

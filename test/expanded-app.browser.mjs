@@ -29,7 +29,7 @@ try {
     window.fixture = {
       account:{paired:true,userId:'self',name:'Test User',email:'self@example.test',hasSentRelay:true},
       ui:{canDismiss:true,onboardingRequired:false,completedOnboardingVersion:1},
-      features:{requests:false,todo:false,slack:false,replyThreads:true,topics:true},
+      features:{requests:false,todo:false,slack:false,replyThreads:true,topics:true,fullAppExpand:true},
       contacts:[{contactId:'c-sven',name:'Sven Wellmann',email:'sven@example.test'},{contactId:'c-shane',name:'Shane Acton',email:'shane@example.test'},{contactId:'c-kiara',name:'Kiara Moodley',email:'kiara@example.test'},{contactId:'c-aron',name:'Aron van Ammers',email:'aron@example.test'}],
       relays, sent:[], requests:[], chats:[], slackChats:[],
     };
@@ -170,6 +170,16 @@ try {
   await page.waitForFunction(() => !collapsed);
   await settle();
   assert.equal(await wide(), true);
+  assert.equal(await width(), FULL.w);
+
+  // Without the developer gate, Expand keeps the two-thirds card.
+  await page.evaluate(() => { payload.features.fullAppExpand = false; });
+  await page.locator('#wideToggle').click(); await page.waitForFunction(() => !appExpanded); await settle();
+  await page.locator('#wideToggle').click(); await page.waitForFunction(() => appExpanded); await settle();
+  assert.equal(await width(), Math.min(900, FULL.w - 48), 'the gated-off expanded card is two thirds, not the screen');
+  await page.evaluate(() => { payload.features.fullAppExpand = true; });
+  await page.locator('#wideToggle').click(); await page.waitForFunction(() => !appExpanded); await settle();
+  await page.locator('#wideToggle').click(); await page.waitForFunction(() => appExpanded); await settle();
   assert.equal(await width(), FULL.w);
 
   // The mode outlives a restart.

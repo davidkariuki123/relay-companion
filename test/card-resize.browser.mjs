@@ -21,7 +21,7 @@ try {
     window.fixture = {
       account:{paired:true,userId:'self',name:'Test User',email:'self@example.test',hasSentRelay:true},
       ui:{canDismiss:true,onboardingRequired:false,completedOnboardingVersion:1},
-      features:{requests:false,todo:false,slack:false,replyThreads:true,topics:false},
+      features:{requests:false,todo:false,slack:false,replyThreads:true,topics:false,fullAppExpand:true},
       contacts:[], sent:[], requests:[], chats:[], slackChats:[],
       relays:[{id:'relay-s1',threadId:'room-sven',state:'read',relayNotificationKind:'plain_relay',senderName:'Sven Wellmann',senderEmail:'sven@example.test',
         title:'',forHuman:'Shipping the share page fold tomorrow.',forAgent:'',createdAt:ago(30),attachments:[]}],
