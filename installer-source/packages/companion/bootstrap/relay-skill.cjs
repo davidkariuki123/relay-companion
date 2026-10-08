@@ -134,7 +134,7 @@ function configuredManifestUrl({ homeDir = os.homedir(), env = process.env, webO
   const api = config.apiUrl || agent.apiUrl;
   const knownOrigin = !api || api === "https://api.sendrelays.com" ? "https://sendrelays.com"
     : api === "https://dev-api.sendrelays.com" ? "https://dev.sendrelays.com"
-    : api === "https://cti37jd7vx.us-east-1.awsapprunner.com" ? "https://8epdrqim29.us-east-1.awsapprunner.com" : null;
+    : api === "https://staging-api.sendrelays.com" || api === "https://cti37jd7vx.us-east-1.awsapprunner.com" ? "https://staging.sendrelays.com" : null;
   const origin = webOrigin || env.RELAY_WEB_URL || config.webUrl || knownOrigin;
   if (!origin) throw new Error("Relay requires a configured web origin for this API environment's skill updates.");
   const url = new URL(origin);

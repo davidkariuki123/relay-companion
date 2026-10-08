@@ -41,23 +41,27 @@ function runProtocol(args, options) {
 }
 
 test("paired staging accounts use the helper without accepting arbitrary API origins", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-staging-agent-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const file = path.join(root, "agent-local.json");
-  const client = { identity: { userId: "usr_staging" }, accountDrift: () => ({ status: "same" }),
-    groups: async () => ({ groups: [{ id: "grp_staging" }] }) };
-  const server = await startAgentLocalServer({ client, accountId: "usr_staging", apiUrl: "https://cti37jd7vx.us-east-1.awsapprunner.com", file });
-  t.after(() => server.close());
-  const env = { RELAY_CONFIG_DIR: root, RELAY_AGENT_CONFIG: path.join(root, "agent-protocol.json"), RELAY_AGENT_LOCAL: file };
-  const groups = await runProtocol(["groups"], { env });
-  assert.equal(groups.code, 0, groups.stderr);
-  assert.equal(JSON.parse(groups.stdout).groups[0].id, "grp_staging");
-  const descriptor = JSON.parse(fs.readFileSync(file, "utf8"));
-  descriptor.apiUrl = "https://untrusted.example";
-  fs.writeFileSync(file, JSON.stringify(descriptor));
-  const refused = await runProtocol(["groups"], { env });
-  assert.equal(refused.code, 1);
-  assert.match(refused.stderr, /approved staging API host/);
+  // The stable staging hostname, and the retired App Runner identity a
+  // not-yet-switched staging server still advertises.
+  for (const apiUrl of ["https://staging-api.sendrelays.com", "https://cti37jd7vx.us-east-1.awsapprunner.com"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-staging-agent-"));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const file = path.join(root, "agent-local.json");
+    const client = { identity: { userId: "usr_staging" }, accountDrift: () => ({ status: "same" }),
+      groups: async () => ({ groups: [{ id: "grp_staging" }] }) };
+    const server = await startAgentLocalServer({ client, accountId: "usr_staging", apiUrl, file });
+    t.after(() => server.close());
+    const env = { RELAY_CONFIG_DIR: root, RELAY_AGENT_CONFIG: path.join(root, "agent-protocol.json"), RELAY_AGENT_LOCAL: file };
+    const groups = await runProtocol(["groups"], { env });
+    assert.equal(groups.code, 0, groups.stderr);
+    assert.equal(JSON.parse(groups.stdout).groups[0].id, "grp_staging");
+    const descriptor = JSON.parse(fs.readFileSync(file, "utf8"));
+    descriptor.apiUrl = "https://untrusted.example";
+    fs.writeFileSync(file, JSON.stringify(descriptor));
+    const refused = await runProtocol(["groups"], { env });
+    assert.equal(refused.code, 1);
+    assert.match(refused.stderr, /approved staging API host/);
+  }
 });
 
 test("an existing Companion account works without invite credentials and respects RELAY_CONFIG_DIR", async (t) => {

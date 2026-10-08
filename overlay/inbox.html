@@ -3674,8 +3674,11 @@
   .su-share-text { white-space:pre-wrap; overflow-wrap:anywhere; max-height:190px; overflow:auto; }
   .su-first-link .su-share-text + .su-copy { margin-top:14px; }
   .su-form-row { grid-template-columns:1fr 1fr; }
-  .su-body:has(.su-network) { justify-content:flex-start; overflow:hidden; }
-  .su-network { display:flex; flex-direction:column; flex:1; min-height:0; }
+  /* Centred like every other onboarding chapter; the two actions stay one
+     group (Copy invite link, then Open Relay 10pt below). Top-aligned, the
+     card's lower half sat empty (local run, 2026-10-08). */
+  .su-body:has(.su-network) { justify-content:center; overflow:hidden; }
+  .su-network { display:flex; flex-direction:column; flex:0 0 auto; min-height:0; }
   .su-network-content { flex:0 0 auto; min-height:0; }
   .su-body:has(.su-network) { overflow:auto; }
   .su-network > .su-form { margin-top:10px; }

@@ -21,9 +21,11 @@ export async function adoptAgentConnection({
   const agent = readAgent();
   const current = readCompanion();
   const expected = agent.account?.relayUserId;
-  const staging = agent.apiUrl === "https://cti37jd7vx.us-east-1.awsapprunner.com";
+  // Staging's stable hostname, and its retired App Runner identity for agent
+  // connections approved before the server switched.
+  const staging = ["https://staging-api.sendrelays.com", "https://cti37jd7vx.us-east-1.awsapprunner.com"].includes(agent.apiUrl);
   const updateChannel = agent.apiUrl === "https://dev-api.sendrelays.com" ? "dev" : staging ? "staging" : "stable";
-  const webUrl = staging ? "https://8epdrqim29.us-east-1.awsapprunner.com" : agent.apiUrl.replace("dev-api.", "dev.").replace("api.", "");
+  const webUrl = staging ? "https://staging.sendrelays.com" : agent.apiUrl.replace("dev-api.", "dev.").replace("api.", "");
   if (!expected || (agent.consentVersion ?? 1) < 2) throw new Error("Approve the updated Relay connection before installing Companion. The existing agent connection remains usable.");
   if (current.deviceToken) {
     if (current.user?.id !== expected || current.apiUrl !== agent.apiUrl) throw new Error("Companion is connected to another account or environment. Switch it explicitly before continuing.");

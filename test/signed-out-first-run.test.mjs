@@ -98,3 +98,12 @@ test("a verified email code finishes sign-in in the app", () => {
   assert.match(approve, /signupStage = "finishing"/);
   assert.match(html, /getElementById\("suApprove"\)\?\.addEventListener\("click", approveSignupAccount\);/);
 });
+
+// Local run (2026-10-08): Grow your network sat at the top of the card with
+// its lower half empty, unlike every other onboarding chapter. Its two actions
+// stay one group; the group is centred.
+test("Grow your network is centred like every onboarding chapter", () => {
+  assert.match(html, /\.su-body:has\(\.su-network\) \{ justify-content:center; overflow:hidden; \}/);
+  assert.match(html, /\.su-network \{ display:flex; flex-direction:column; flex:0 0 auto; min-height:0; \}/);
+  assert.match(html, /\.su-network > \.su-form \{ margin-top:10px; \}/, "the actions keep their 10pt grouping");
+});

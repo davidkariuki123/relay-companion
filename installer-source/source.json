@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "a9bb2d460090aa18757ffd7c6c6b515a223ba250",
+  "sourceSha": "be0b6e047c524a045536dedc5d08543000ff1782",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
     "packages/companion/bootstrap/application-handoff.cjs": "cc857469bd3e01c1c2bd00816e5f4338083f0aaa",
@@ -48,7 +48,7 @@
     "packages/companion/bootstrap/relay-rules-content.cjs": "d3c7f26b9d31ab07eb3e4478a28cad7d58a0ec1d",
     "packages/companion/bootstrap/relay-rules.cjs": "f0800157ce1ea019ca0a3ba485d59269d9022d2d",
     "packages/companion/bootstrap/relay-setup.cjs": "8b16a89ecc87726799a13ae9c4d29b6b91e390c6",
-    "packages/companion/bootstrap/relay-skill.cjs": "e7e368ccd3b5dda03382cc90dd0861db00b38302",
+    "packages/companion/bootstrap/relay-skill.cjs": "35895ff038a1bf58d61dd877ec768d247dbce6fa",
     "packages/companion/bootstrap/release-signature.cjs": "6209b683deafc37aa0d35c9f27d22d81fd79d5df",
     "packages/companion/bootstrap/runtime-executables.cjs": "e4ebbca71c0dad9a0e334b0f056bf570e3f446e3",
     "packages/companion/bootstrap/runtime-health.cjs": "088c8f83cdbc49ca9bcc8924eeafed1d9150869f",
@@ -61,7 +61,7 @@
     "packages/companion/overlay/fonts/newsreader-var.woff2": "8cd8effc477a72510cf1e0f8099a425dc87213cd",
     "packages/companion/overlay/fonts/plexmono-400.woff2": "52b6c7595dd5e2106676e7c52fcff18539607879",
     "packages/companion/overlay/fonts/plexmono-500.woff2": "3308bce2432c298817ed344eeac33007c83cecd0",
-    "packages/companion/overlay/inbox.html": "18f48c4e37b4bcf3eb822c2b17e818a12916e94c",
+    "packages/companion/overlay/inbox.html": "e9d051dc8e360b01c9bb2817e331c08437264b5f",
     "packages/companion/overlay/relay-anyone-tip.cjs": "4cec8b4a5eb232635b811aef04975c85461580f3",
     "packages/companion/overlay/relayAppIcon.svg": "cec4bcc14a3397cfb60048da2cad086aae66ad9c",
     "packages/companion/package.json": "90e119fecae0c6b66b0921a5f462345b5a119dfe",

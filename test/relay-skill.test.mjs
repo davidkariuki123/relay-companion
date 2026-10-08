@@ -35,8 +35,10 @@ test("skill updates follow the configured environment and reject cross-origin bu
   const options = { homeDir, env: { RELAY_CONFIG_DIR: configDir } };
   fs.writeFileSync(path.join(configDir, "agent-protocol.json"), JSON.stringify({ apiUrl: "https://dev-api.sendrelays.com" }));
   assert.equal(skill.configuredManifestUrl(options), "https://dev.sendrelays.com/skills/relay/manifest.json");
-  fs.writeFileSync(path.join(configDir, "agent-protocol.json"), JSON.stringify({ apiUrl: "https://cti37jd7vx.us-east-1.awsapprunner.com" }));
-  assert.equal(skill.configuredManifestUrl(options), "https://8epdrqim29.us-east-1.awsapprunner.com/skills/relay/manifest.json");
+  for (const apiUrl of ["https://staging-api.sendrelays.com", "https://cti37jd7vx.us-east-1.awsapprunner.com"]) {
+    fs.writeFileSync(path.join(configDir, "agent-protocol.json"), JSON.stringify({ apiUrl }));
+    assert.equal(skill.configuredManifestUrl(options), "https://staging.sendrelays.com/skills/relay/manifest.json");
+  }
   fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ apiUrl: "https://custom.example" }));
   assert.throws(() => skill.configuredManifestUrl(options), /configured web origin/);
   fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ webUrl: "https://sendrelays.com" }));

@@ -14,7 +14,11 @@ const DEFAULT_PENDING = path.join(os.homedir(), ".relay", "agent-authorization.j
 const TRUSTED_RELAY_HOSTS = new Map([
   ["https://api.sendrelays.com", "https://sendrelays.com"],
   ["https://dev-api.sendrelays.com", "https://dev.sendrelays.com"],
-  ["https://cti37jd7vx.us-east-1.awsapprunner.com", "https://8epdrqim29.us-east-1.awsapprunner.com"],
+  ["https://staging-api.sendrelays.com", "https://staging.sendrelays.com"],
+  // Staging's retired App Runner identity stays trusted so a helper shipped
+  // now still works against a staging server that has not switched yet. Its
+  // own web host is gone; staging approvals come from the stable web host.
+  ["https://cti37jd7vx.us-east-1.awsapprunner.com", "https://staging.sendrelays.com"],
 ]);
 const TUTORIAL_HUMAN = "Hi — I’ve just joined you on Relay.";
 const TUTORIAL_AGENT = "This is my first Relay after joining from your invite. Help the person reply if they want to welcome me.";
