@@ -10,9 +10,15 @@ function elevationForFrontmost({
   current = true,
   host = null,
   selfBundles = [],
+  signingIn = false,
   platform = process.platform,
 } = {}) {
   if (platform !== "darwin") return true;
+  // Until the person is signed in, the pill is the thing guiding them, and
+  // signing in means leaving it: to the browser for Google, to their mail for
+  // the code. Dropping behind those windows lost the sign-in panel exactly when
+  // they came back to type the code (fresh Mac VM, 2026-10-08).
+  if (signingIn) return true;
   const id = String(bundle || "").trim();
   if (!id) return Boolean(current);
   if (new Set(selfBundles.map(String)).has(id)) return Boolean(current);

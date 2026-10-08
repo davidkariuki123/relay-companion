@@ -68,3 +68,13 @@ test("Use email instead stays in the app", () => {
   assert.doesNotMatch(method, /"suSignIn"\)\?\.addEventListener\("click", startInstallationSignIn\)/);
   assert.match(html, /<h1 class="su-title">What’s your email\?<\/h1>/);
 });
+
+// Fresh Mac VM (2026-10-08): the in-app email screen told a brand-new person
+// "Your agent never sees it" and offered both Back and Cancel setup.
+test("the email and code screens speak to a new person and offer one way back", () => {
+  const screens = html.slice(html.indexOf('if (signupStage === "email") {'), html.indexOf('if (signupStage === "google") {'));
+  assert.match(screens, /New or returning, Relay emails you a 6-digit code\./);
+  assert.doesNotMatch(screens, /Your agent never sees it|cancelSetupButton|bindSignupCancel/);
+  assert.match(screens, /id="suEmailBack" type="button">Back</);
+  assert.match(screens, />Use another email</);
+});

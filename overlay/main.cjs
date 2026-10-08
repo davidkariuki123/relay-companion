@@ -4087,6 +4087,7 @@ function observeFrontmostBundle(bundle) {
     current: overlayElevated,
     host,
     selfBundles: RELAY_BUNDLE_IDS,
+    signingIn: !account().paired,
     platform: process.platform,
   }));
 }

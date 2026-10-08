@@ -71,3 +71,16 @@ test("clicking in the pill ends the grace, so the browser it opens comes in fron
   assert.deepEqual(step, { hold: null, keep: false });
   assert.equal(settleExplicitOpenHold(null), null);
 });
+
+test("until the person is signed in, the pill stays above the browser and mail they sign in with", () => {
+  assert.equal(elevationForFrontmost({ bundle: "com.apple.Safari", host: null, signingIn: true, platform: "darwin" }), true);
+  assert.equal(elevationForFrontmost({ bundle: "com.apple.mail", host: null, signingIn: true, current: false, platform: "darwin" }), true);
+  assert.equal(elevationForFrontmost({ bundle: "com.apple.Safari", host: null, signingIn: false, platform: "darwin" }), false);
+});
+
+test("the frontmost watcher tells the policy whether sign-in is still pending", async () => {
+  const fs = await import("node:fs");
+  const source = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+  const observe = source.slice(source.indexOf("function observeFrontmostBundle("), source.indexOf("// Bring the host app to the FOREGROUND"));
+  assert.match(observe, /signingIn: !account\(\)\.paired,/);
+});
