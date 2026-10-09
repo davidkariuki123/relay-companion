@@ -23,5 +23,12 @@ func startDetached(command string, args []string, env []string) error {
 	if err := child.Start(); err != nil {
 		return err
 	}
-	return child.Process.Release()
+	// Reap it. Release() only forgets the child: every broker launch that found
+	// a broker already running exited at once and stayed a zombie of this
+	// bridge, ~180 per bridge over two days, until David's Mac hit its 4000
+	// process limit and nothing could start (2026-10-09). A long-lived broker
+	// just keeps this goroutine waiting; if the bridge exits first, launchd
+	// inherits the broker as before.
+	go func() { _ = child.Wait() }()
+	return nil
 }

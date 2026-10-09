@@ -25363,7 +25363,7 @@
       // opens only to say why it could not.
       let handoff;
       try {
-        if (app === "conductor") {
+        if (app === "conductor" && conductorEnabled()) {
           handoff = await window.relay.openInConductor(messageId, conductorPromptFor(message()));
         } else if (app === "claude" || app === "codex") {
           const row = message();
@@ -25375,9 +25375,11 @@
           handoff = await openChatApp(app === "chatgpt" ? "chatgpt" : "claude", message());
         }
       } catch { handoff = { ok:false }; }
-      if (handoff && handoff.ok === false) {
+      // An app this pill cannot open from here (Conductor switched off or
+      // missing) lands in the reader instead of doing nothing.
+      if (!handoff || handoff.ok === false) {
         await showReader();
-        setRowNote(messageId, handoff.error || "Could not open this Relay there.", "err");
+        setRowNote(messageId, handoff?.error || "Could not open this Relay there.", "err");
       }
     } catch {}
   });
