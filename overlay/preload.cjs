@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld("relay", {
 
   // What the person does with the Five ways card; content-free.
   teachingEvent: (name, way) => ipcRenderer.send("relay:teachingEvent", String(name || ""), String(way || "")),
+  // Which view the card is in (pill, banner, card, wide, hidden) and why it changed.
+  viewState: (view, cause) => ipcRenderer.send("relay:viewState", String(view || ""), String(cause || "")),
 
   // Relay rows
   open: (id, host) => ipcRenderer.send("relay:open", id, host),

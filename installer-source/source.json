@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "f6f4852adb0e34b4ad39e453bf8091b74212c25f",
+  "sourceSha": "a16b5ed879f0accd97b04262518f8fffc126c707",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
     "packages/companion/bootstrap/application-handoff.cjs": "cc857469bd3e01c1c2bd00816e5f4338083f0aaa",
@@ -62,10 +62,10 @@
     "packages/companion/overlay/fonts/newsreader-var.woff2": "8cd8effc477a72510cf1e0f8099a425dc87213cd",
     "packages/companion/overlay/fonts/plexmono-400.woff2": "52b6c7595dd5e2106676e7c52fcff18539607879",
     "packages/companion/overlay/fonts/plexmono-500.woff2": "3308bce2432c298817ed344eeac33007c83cecd0",
-    "packages/companion/overlay/inbox.html": "e46d3b238c65fdf2fa7a691ef2e617922eec654e",
+    "packages/companion/overlay/inbox.html": "ca79ab0206335dd53fb07e9e38eb573b0139ae40",
     "packages/companion/overlay/relay-anyone-tip.cjs": "4cec8b4a5eb232635b811aef04975c85461580f3",
     "packages/companion/overlay/relayAppIcon.svg": "cec4bcc14a3397cfb60048da2cad086aae66ad9c",
-    "packages/companion/package.json": "90e119fecae0c6b66b0921a5f462345b5a119dfe",
+    "packages/companion/package.json": "90487827ef91e207a1c9e4db16b7a447692a3478",
     "packages/companion/scripts/prepare-linux-electron-sandbox.mjs": "3034031ebe105a8e5e101fbf30b83a123c97630c",
     "packages/companion/scripts/verify-runtime-manifest.mjs": "6d791b9f8ec5db3c3cd444e976ae751f2e7d0744",
     "tools/relay-application/app/activate.cjs": "f0dfe6e08a26d7c0bd6bfca91f15f2fc887ed477",

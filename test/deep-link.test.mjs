@@ -111,11 +111,13 @@ test("a Slack card click by this account opens the Relay in the pill, once, what
   assert.match(main, /onChange: async \(\) => \{\s*claimSlackOpens\(\);/);
   assert.match(main, /queueRelayDeepLink\(\{ messageId: String\(request\.messageId\), host: request\.host, viaSlack: true/);
   // Claude Code and Codex too, opened from their chat (a channel message has no legacy packet).
-  assert.match(main, /\["relay", "conductor", "claude", "codex"\]\.includes\(request\.host\)/);
+  assert.match(main, /\["relay", "conductor", "claude", "codex", "claude-app", "chatgpt"\]\.includes\(request\.host\)/);
+  // An app hand-off lands the person in that app; only Open Relay brings the pill forward.
+  assert.match(main, /if \(parsed\.host === "relay"\) requestExternalReopen\(randomUUID\(\)\);/);
   assert.match(main, /parsed\.host === "relay" \|\| parsed\.host === "conductor" \|\| parsed\.viaSlack\) \{/);
   assert.match(main, /\.\.\.\(parsed\.host !== "relay" \? \{ app: parsed\.host \} : \{\}\)/);
   // The browser's relay:// link and the server's word are one click: the second only answers the browser.
-  assert.match(main, /\["relay", "conductor", "claude", "codex"\]\.includes\(parsed\.host\) && !freshRelayOpen\(parsed\)/);
+  assert.match(main, /\["relay", "conductor", "claude", "codex", "claude-app", "chatgpt"\]\.includes\(parsed\.host\) && !freshRelayOpen\(parsed\)/);
   assert.match(main, /const RELAY_OPEN_DEDUPE_MS = 15_000;/);
 });
 

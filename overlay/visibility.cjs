@@ -117,6 +117,20 @@ function recoverInterruptedAttentionPrefs(input = {}) {
   };
 }
 
+// The ✕ snoozes every relay already queued when it was pressed; only a genuinely
+// new arrival brings the pill back. Every update restarts the pill, and a snooze
+// kept only in memory made the queued relays look new to the restarted pill, so a
+// put-away pill reopened itself after each update. The snooze is persisted with
+// the dismissal and restored here, limited to what is still queued. Prefs from a
+// pill that predates the persisted snooze carry only `dismissed`: everything
+// queued then was already there when the person put the pill away.
+function restoredDismissSnooze(prefs = {}, queuedIds = []) {
+  if (!prefs || prefs.dismissed !== true) return new Set();
+  const queued = new Set(Array.from(queuedIds || [], String));
+  if (!Array.isArray(prefs.dismissSnoozedIds)) return queued;
+  return new Set(prefs.dismissSnoozedIds.map(String).filter((id) => queued.has(id)));
+}
+
 // ---- adaptive poll cadences (the anti-spawn-storm rules) -------------------
 // Host detection spawns real processes (lsappinfo/ps on macOS, tasklist on
 // Windows — expensive there and AV-scanned). Poll fast only while the user is
@@ -176,4 +190,5 @@ module.exports = {
   shouldIgnoreDismiss,
   boundedPresentedRelayIds,
   recoverInterruptedAttentionPrefs,
+  restoredDismissSnooze,
 };

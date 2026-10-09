@@ -317,8 +317,8 @@ const SETTINGS = [
   },
   appSwitch({ id: "open_with_claude", app: "Claude", list: CHAT_APPS, key: "chatApps", label: "Open Relays with Claude", where: "You › Your AIs › Open Relays in", description: "Offer Claude (the Claude app or claude.ai) when the person opens a Relay." }),
   appSwitch({ id: "open_with_chatgpt", app: "ChatGPT", list: CHAT_APPS, key: "chatApps", label: "Open Relays with ChatGPT", where: "You › Your AIs › Open Relays in", description: "Offer ChatGPT when the person opens a Relay." }),
-  appSwitch({ id: "open_with_claude_code", app: "Claude Code", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Claude Code", where: "You › Your AIs › Open Relays in", description: "Offer Claude Code when the person opens a Relay. Takes effect only where Claude Code is installed; the first app switched on starts Tasks." }),
-  appSwitch({ id: "open_with_codex", app: "Codex", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Codex", where: "You › Your AIs › Open Relays in", description: "Offer Codex when the person opens a Relay. Takes effect only where Codex is installed." }),
+  appSwitch({ id: "open_with_claude_code", app: "Claude Code", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Claude Code", where: "You › Your AIs › Open Relays in", description: "Offer Claude Code when the person opens a Relay, and as a button to run a Task on its card. Takes effect only where Claude Code is installed." }),
+  appSwitch({ id: "open_with_codex", app: "Codex", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Codex", where: "You › Your AIs › Open Relays in", description: "Offer Codex when the person opens a Relay, and as a button to run a Task on its card. Takes effect only where Codex is installed." }),
   {
     id: "open_with_conductor",
     label: "Open Relays with Conductor",

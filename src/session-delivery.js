@@ -23,7 +23,7 @@ import { sendClaudeSocket } from "./session-controller.js";
 import { startAcpRun, acpPermissionMode } from "./acp-session.js";
 import { acpMcpServers } from "./acp-client.js";
 import { relayMcpLaunchSpec } from "./runtime.js";
-import { focusTerminalSession, launchMacAgentTerminal, terminalProcessState } from "./terminal-sessions.js";
+import { focusTerminalSession, launchAgentTerminal, terminalProcessState } from "./terminal-sessions.js";
 import { withJsonLockStrict } from "./state-lock.cjs";
 
 const DEFAULT_TIMEOUT_MS = 12 * 60 * 60 * 1000;
@@ -825,13 +825,16 @@ export async function deliverRelayToSession({
 export async function focusSession(target, {
   notifyCodex = notifyCodexDesktopThreads,
   focusTerminal = focusTerminalSession,
-  launchTerminal = launchMacAgentTerminal,
+  launchTerminal = launchAgentTerminal,
 } = {}) {
   if (!target?.provider || !target?.nativeId) throw new Error("An exact native destination is required");
   if (target.surface === "terminal" || target.terminalRef) {
-    if (target.terminalRef?.tty) {
+    // A terminal tab on macOS; a console process on Windows (no TTY there).
+    if (target.terminalRef?.tty || (target.terminalRef?.platform === "win32" && target.terminalRef?.pid)) {
       const focused = focusTerminal(target.terminalRef);
-      if (focused.ok) {
+      // Windows can refuse to bring a window forward. The session is still
+      // running there, so a second copy must not be started beside it.
+      if (focused.ok || focused.reason === "terminal-focus-refused") {
         return {
           openedInHost: true,
           skipExternalOpen: true,

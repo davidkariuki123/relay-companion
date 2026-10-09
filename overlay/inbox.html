@@ -4330,6 +4330,7 @@
 .su-local-prompt .su-form{margin-top:20px}.desktop-prompt-wait{font-size:11px;line-height:1.6;color:var(--muted);margin-top:13px}
 </style>
 <link rel="stylesheet" href="./relay-anyone-tip.css" />
+<link rel="stylesheet" href="./inbox-pages.css" />
 </head>
 <body>
   <svg width="0" height="0" viewBox="0 0 0 0" aria-hidden="true" focusable="false">
@@ -4636,6 +4637,8 @@
 <script src="./relay-anyone-tip.cjs"></script>
 <script src="./reader-status-motion.cjs"></script>
 <script src="./link-tooltip.js"></script>
+<script src="./page-physics.js"></script>
+<script src="./inbox-pages.js"></script>
 <script>
   // Theme, two layers (Sven, round 5): the pill FOLLOWS the OS appearance by
   // default; the moon/sun button is the override — an explicit pick persists
@@ -5056,6 +5059,28 @@
     }
   }
   new MutationObserver(reconcileSurfaceActivity).observe(cardEl, { attributes:true, attributeFilter:["class"] });
+  // VIEW TELEMETRY (overlay/view-telemetry.cjs): which view the card is in,
+  // reported to main on every change. A person's action names itself just
+  // before it changes the view; main explains the opens and hides it causes.
+  let viewCause = null;
+  let reportedView = "";
+  function noteViewCause(cause) { viewCause = { cause, at: performance.now() }; }
+  function cardViewNow() {
+    if (cardEl.classList.contains("offstage") || cardEl.classList.contains("bye")) return "hidden";
+    if (ghost || peeking) return "banner";
+    if (collapsed) return "pill";
+    return appExpanded ? "wide" : "card";
+  }
+  function reportView() {
+    let view;
+    try { view = cardViewNow(); } catch { return; } // before the card's state exists
+    if (view === reportedView) return;
+    reportedView = view;
+    const cause = viewCause && performance.now() - viewCause.at < 3000 ? viewCause.cause : "";
+    viewCause = null;
+    try { window.relay.viewState?.(view, cause); } catch {}
+  }
+  new MutationObserver(reportView).observe(cardEl, { attributes:true, attributeFilter:["class"] });
   // The expanded app's two panes exist only on the open card: folding to the
   // pill, a banner, a hidden card or sign-up put every piece back home first.
   new MutationObserver(() => { if (wideDomReady) { syncWideDom(); syncPaneRoot(); paintWideSelection(); } })
@@ -5526,6 +5551,7 @@
   // notification. It emerges at banner size (no pill morph — there is no pill), and
   // when done it fades away instead of folding back into anything.
   function ghostArrival(row, meta) {
+    noteViewCause("arrival");
     if (ghostTimer) { clearTimeout(ghostTimer); ghostTimer = null; }
     cancelBye(); // a banner arriving mid-exit must not be torn down by the old exit
     clearPeek();
@@ -5612,6 +5638,7 @@
   // transient banner. Medium and reader-size cards retain their current view,
   // including the initial expanded card before any explicit open gesture.
   function notifyArrival(rows, meta) {
+    noteViewCause("arrival");
     // The full app behind another app (Cmd+Tab back to Claude) hears nothing
     // it can show. A full app the person cannot see folds back to the pill,
     // and the arrival takes the banner every other message takes. One still
@@ -5700,6 +5727,7 @@
   closeXEl.addEventListener("click", (e) => {
     e.stopPropagation();
     if (closeXEl.disabled) return;
+    noteViewCause("close");
     dismissOverlay();
   });
 
@@ -5720,7 +5748,7 @@
   });
   minimizeBtnEl.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (!collapsed) requestToggle();
+    if (!collapsed) { noteViewCause("minimise_button"); requestToggle(); }
   });
 
   // ---------- drag the lockup to move, tap it to fold ----------
@@ -5759,7 +5787,8 @@
     const wasTap = moved <= 3;
     dragging = false;
     if (!wasTap) return;
-    if (peeking) { openFull(); return; }
+    if (peeking) { noteViewCause("banner_tap"); openFull(); return; }
+    noteViewCause("pill_tap");
     requestToggle();
   });
 
@@ -8212,6 +8241,21 @@
   const relaysFilterEl = document.getElementById("relaysFilter");
   const RELAYS_LAYOUTS = ["chats", "received", "sent"];
   const RELAYS_FILTERS = ["relays", "tasks"];
+  // Inbox pages (dev-gated, 2026-10-09): Chats and, to its right, Relays and
+  // Tasks as two pages moved by two fingers. With the gate on, the Chats ·
+  // Tasks · Relays rows step aside and the Inbox is Chats. See inbox-pages.js.
+  const inboxPages = window.RelayInboxPages.create({
+    cardEl, scrollEl,
+    payload: () => payload, accountKey: () => signupAccountKey(),
+    pref: protoPref, setPref: setProtoPref,
+    isTaskRow, taskIsOver, relayRowHtml, sentRowsHtml, esc, wireTaskCards,
+    revealHoverRow, foldHoverRow, renderRelays, openReader,
+    taskDone: (id) => submitTaskClose(id, "done", renderRelays),
+    peeking: () => peeking, activeView: () => activeView, requestInboxOpen: () => requestInboxOpen,
+    wideLayoutActive, wideSideTab,
+    showInbox: () => { activeView = "relays"; commitNavigation(); },
+    readerId: () => (activeView === "reader" ? readerId : null),
+  });
   function syncRelaysLayout() {
     const account = signupAccountKey();
     if (account !== relaysLayoutAccount) {
@@ -8223,6 +8267,7 @@
       relaysFilter = RELAYS_FILTERS.includes(savedFilter) ? savedFilter : "relays";
       renderedThreadCount = 0;
     }
+    if (payload.features?.inboxPages === true && relaysLayout !== "chats") relaysLayout = "chats";
     for (const button of relaysLayoutEl.querySelectorAll("[data-inbox-type]")) {
       const selected = button.dataset.inboxType === (relaysLayout === "chats" ? "chats" : relaysFilter);
       button.classList.toggle("active", selected);
@@ -10120,7 +10165,7 @@
   }
   // Independent agent switches (David, 2026-09-08). Preserve earlier choices,
   // but keep new choices account-scoped and never replace an unavailable app
-  // with another one. The first selected app is only the Task default.
+  // with another one. The same switches choose the Task card's run buttons.
   const AGENT_APPS_PREF = "proto.agentApps.v2";
   function agentAppsPreferenceKey() { return `proto.agentApps.v3:${signupAccountKey()}`; }
   // settings.json (through main) is the truth once it holds a choice: the
@@ -10178,8 +10223,8 @@
   // other two tiles: they reach a Relay through the Relay connector, not an
   // app on this Mac, so there is nothing to detect and each is a plain switch,
   // on until the person turns it off. Their own key: the desktop selection
-  // above also names the Task default and the opening preference, and a chat
-  // app is neither.
+  // above also chooses the Task card's run buttons and the opening preference,
+  // and a chat app is neither.
   const CHAT_APP_OPTIONS = ["Claude", "ChatGPT"];
   function chatAppsPreferenceKey() { return `proto.chatApps.v1:${signupAccountKey()}`; }
   function chatAppSelection() {
@@ -18966,7 +19011,9 @@
     row = row || readerRow(id) || relayById(id)
       || (payload.sent || []).find((item) => String(item.relayId || item.id || "") === id) || message || {};
     const subject = String(row.title || row.displayTitle || "").trim() || relaySubject(row) || String(message?.title || "").trim() || "Relay";
-    const mine = (message && message.direction === "out") || row.direction === "out" || Boolean(row.recipient && !row.senderEmail);
+    // A chat or channel message you sent is outbound: true with no direction
+    // (readerRow); missing it gave "Pull You’s relay" (2026-10-09).
+    const mine = (message && (message.direction === "out" || message.outbound === true)) || row.direction === "out" || row.outbound === true || Boolean(row.recipient && !row.senderEmail);
     const first = mine ? "" : String(relaySender(row) || message?.party || "their").trim().split(/\s+/)[0];
     const whose = mine ? "my sent" : `${first}${/s$/i.test(first) ? "’" : "’s"}`;
     return `Pull ${whose} relay “${subject}” from Relay and tell me what’s happening.`;
@@ -20675,6 +20722,9 @@
   }
   function syncExpandButton() {
     syncWideToggle();
+    // Expand and Collapse change no class of their own. After the caller has
+    // finished, so a fold that also collapses reports one change, to the pill.
+    queueMicrotask(reportView);
     // See info follows the frame: re-run its gate on every toggle, not just
     // on room open (setThreadHeader runs the same expression).
     if (typeof thGroupInfoEl !== "undefined" && thGroupInfoEl) {
@@ -20712,6 +20762,7 @@
   }
   document.getElementById("wideToggle").addEventListener("click", (e) => {
     e.stopPropagation();
+    noteViewCause("expand_button");
     setAppExpanded(!appExpanded);
   });
   // ⌘⇧E expands and collapses from anywhere. In the expanded app ⌥↑ / ⌥↓
@@ -20720,6 +20771,7 @@
     if (e.defaultPrevented || e.isComposing) return;
     if (e.metaKey && e.shiftKey && !e.altKey && !e.ctrlKey && e.code === "KeyE") {
       e.preventDefault();
+      noteViewCause("shortcut");
       setAppExpanded(!appExpanded);
       return;
     }
@@ -21641,15 +21693,20 @@
         : run?.status === "connected" && !Array.isArray(setupSnapshot?.connections) ? `<div class="setup-tray-status" role="status">${setupDotHtml("ok")}Connected</div>`
         // Only leftovers here: connecting again is the way back.
         : !live.length ? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="${surface}">Connect</button>`
-        // Claude's connector already covers every Claude chat: nothing to add.
-        : connections.length && surface !== "claude" && !appConnects ? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="${surface}">Connect another chat</button>`
+        // ChatGPT is connected ONCE (David, 2026-10-09: "you want users to
+        // connect each chat instead of connecting ChatGPT once?"): setup saves
+        // Relay in the ChatGPT Library, which every new Work chat reads. Setting
+        // up again is only for when that stops working. Claude's connector
+        // already covers every Claude chat: nothing to add.
+        : connections.length && surface !== "claude" && !appConnects ? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="${surface}">Set up again</button>`
         // A ChatGPT connected only by a setup code can still add Relay's app, which covers every chat.
         : appConnects && !appConnector ? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="${surface}">Add Relay’s ChatGPT app</button>`
         : "";
       // Claude's connector belongs to the Claude account, not to claude.ai:
       // the Claude app and Claude Code load it too (measured).
       const whose = surface === "claude" && connections.length ? `<div class="setup-tray-copy">Your Claude account’s connector: claude.ai, the Claude app and Claude Code all use it.</div>`
-        : appConnector ? `<div class="setup-tray-copy">Relay’s app in your ChatGPT account: every ChatGPT chat can use it.</div>` : "";
+        : appConnector ? `<div class="setup-tray-copy">Relay’s app in your ChatGPT account: every ChatGPT chat can use it.</div>`
+        : surface === "chatgpt" && connections.length ? `<div class="setup-tray-copy">Saved in your ChatGPT Library: every new chat in Work mode can use it.</div>` : "";
       // Nothing left to show (the last chat was disconnected): fold away.
       tray = items || request ? `<div class="open-actions setup-tray">${whose}${items}${request}</div>` : "";
       if (!tray) setTimeout(() => { if (setupTray === surface) { setupTray = ""; renderSettings(); } }, 0);
@@ -25003,6 +25060,7 @@
       const wideSide = wideLayoutActive() ? wideSideTab() : null;
       if (activeView === "chat") renderChat();
       if (activeView === "relays" || wideSide === "relays") renderRelays();
+      inboxPages.sync();
       if (wideSide === "topics" && activeView !== "topics") renderTopics();
       if (activeView === "relays") { /* painted above */ }
       else if (activeView === "threads") renderThreads();
@@ -25292,20 +25350,34 @@
       const chat = result?.chat || result;
       if (!chat?.chatId) return;
       storeCanonicalChatDetail(chat);
+      const message = () => readerRow(messageId) || relayById(messageId) || { id:messageId };
       // A Slack button is a deliberate open, just like clicking the menu-bar
       // mark. Never leave the requested reader clipped inside the 244×44 pill.
-      openFull();
-      await openReader(messageId, "threads");
-      // "Open in Conductor" from Slack: the same hand-off as the Conductor
-      // chip in this reader, so Conductor gets the sentence it always gets.
-      if (input?.app === "conductor") openInConductor(messageId, readerRow(messageId) || relayById(messageId) || { id:messageId });
-      // "Open in Claude Code" / "Open in Codex" from Slack: a new session with
-      // this Relay, exactly what the reader's own tile starts.
-      if (input?.app === "claude" || input?.app === "codex") {
-        const message = readerRow(messageId) || relayById(messageId) || { id:messageId };
-        const tile = document.querySelector(`.rd-host-actions [data-host-open="${CSS.escape(messageId)}"][data-host="${input.app}"]`)
-          || document.createElement("span");
-        openNewSessionFromBubble(tile, messageId, input.app, message.direction === "out" ? "sent" : "relay");
+      const showReader = async () => { openFull(); await openReader(messageId, "threads"); };
+      const app = String(input?.app || "");
+      if (!app) { await showReader(); return; }
+      // Any app from a Slack card: exactly what this pill's own Open in button
+      // does, and the person lands in that app, not in the pill (David,
+      // 2026-10-09): a new Claude Code / Codex session in the desktop app, the
+      // Claude app or ChatGPT with the short sentence, Conductor. The reader
+      // opens only to say why it could not.
+      let handoff;
+      try {
+        if (app === "conductor") {
+          handoff = await window.relay.openInConductor(messageId, conductorPromptFor(message()));
+        } else if (app === "claude" || app === "codex") {
+          const row = message();
+          handoff = await window.relay.deliverToSession(messageId, {
+            provider: app, mode: "new", source: row.direction === "out" ? "sent" : "relay",
+            surface: agentSurfacePreference(app === "codex" ? "Codex" : "Claude Code"),
+          });
+        } else if (app === "claude-app" || app === "chatgpt") {
+          handoff = await openChatApp(app === "chatgpt" ? "chatgpt" : "claude", message());
+        }
+      } catch { handoff = { ok:false }; }
+      if (handoff && handoff.ok === false) {
+        await showReader();
+        setRowNote(messageId, handoff.error || "Could not open this Relay there.", "err");
       }
     } catch {}
   });
@@ -25331,11 +25403,11 @@
     (function expandWhenOpen() {
       if (cardEl.classList.contains("signup")) return;
       if (collapsed || peeking || ghost || cardEl.classList.contains("offstage")) {
-        if (collapsed && !peeking && !ghost) trayOpen();
+        if (collapsed && !peeking && !ghost) { noteViewCause("dock"); trayOpen(); }
         if (performance.now() < deadline) setTimeout(expandWhenOpen, 50);
         return;
       }
-      if (!appExpanded) setAppExpanded(true);
+      if (!appExpanded) { noteViewCause("dock"); setAppExpanded(true); }
     })();
   });
   let lastExternalOpenAt = 0;
@@ -25352,7 +25424,7 @@
     // Dock ("app") opens the full app through relay:expandApp instead.
     if (mode === "mini" && !collapsed) {
       if (activeView === "reader") closeReader();
-      if (appExpanded) setAppExpanded(false);
+      if (appExpanded) { noteViewCause("menu_bar"); setAppExpanded(false); }
       requestAnimationFrame(() => requestAnimationFrame(() => {
         if (collapsed || peeking || ghost || appExpanded || activeView === "reader" || cardViewTransition) return;
         const mini = smallSize();

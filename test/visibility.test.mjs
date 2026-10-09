@@ -9,6 +9,7 @@ const {
   shouldIgnoreDismiss,
   boundedPresentedRelayIds,
   recoverInterruptedAttentionPrefs,
+  restoredDismissSnooze,
   hostPollDelayMs,
   sentRefreshDelayMs,
 } = require("../overlay/visibility.cjs");
@@ -172,6 +173,33 @@ test("attention recovery is idempotent and normalizes persisted ids", () => {
   assert.deepEqual(first.prefs.presentedRelayIds, ["relay_seen"]);
   assert.deepEqual(second.interruptedAttentionIds, []);
   assert.deepEqual(second.prefs, first.prefs);
+});
+
+// ---- the ✕ snooze survives a restart (every update restarts the pill) ----
+
+test("a put-away pill restarted by an update keeps its queued relays snoozed", () => {
+  const snoozed = restoredDismissSnooze(
+    { dismissed: true, dismissSnoozedIds: ["relay_queued", "relay_read_since"] },
+    ["relay_queued", "relay_arrived_while_restarting"],
+  );
+  assert.deepEqual([...snoozed], ["relay_queued"], "only what is still queued stays snoozed");
+});
+
+test("prefs from before the snooze was persisted snooze the whole queue of a dismissed pill", () => {
+  assert.deepEqual([...restoredDismissSnooze({ dismissed: true }, ["relay_a", "relay_b"])], ["relay_a", "relay_b"]);
+});
+
+test("a pill that was not put away restores no snooze", () => {
+  assert.equal(restoredDismissSnooze({ dismissed: false, dismissSnoozedIds: ["relay_a"] }, ["relay_a"]).size, 0);
+  assert.equal(restoredDismissSnooze({}, ["relay_a"]).size, 0);
+  assert.equal(restoredDismissSnooze(null, ["relay_a"]).size, 0);
+});
+
+test("the overlay persists the snooze with the dismissal and restores it at boot", () => {
+  const main = require("node:fs").readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+  assert.match(main, /let dismissSnoozedIds = restoredDismissSnooze\(overlayPrefs, attentionQueue\.keys\(\)\);/);
+  const writer = main.slice(main.indexOf("function writeOverlayPrefs()"), main.indexOf("function setDismissed("));
+  assert.match(writer, /dismissSnoozedIds: \[\.\.\.dismissSnoozedIds\]\.filter\(\(id\) => attentionQueue\.has\(id\)\)/);
 });
 
 // ---- host-running debounce: no blink when a host restarts or a poll misreads ----

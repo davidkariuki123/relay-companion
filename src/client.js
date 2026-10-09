@@ -425,6 +425,11 @@ export class RelayClient {
     return this.#req("POST", "/v1/onboarding/events", { event, surface, ...(context ? { context } : {}) }, { timeoutMs: 8000 });
   }
 
+  /** Content-free totals of which view the app was in and how it switched (overlay/view-telemetry.cjs). */
+  appViewUsage(report) {
+    return this.#req("POST", "/v1/devices/app-view-usage", report, { timeoutMs: 8000 });
+  }
+
   // The server holds healthy waits for 25 seconds. The ordinary request's
   // 15-second deadline must not interrupt them; reconnect belongs to the receiver.
   waitForAccountChange(since, signal) {

@@ -37,3 +37,9 @@ test("with the ChatGPT app on, the ChatGPT row connects by the app and waits for
   assert.match(start, /if \(surface === "claude" \|\| \(surface === "chatgpt" && setupChatGptApp\(\)\)\)/);
   assert.match(start, /window\.relay\[surface === "claude" \? "setupConnectClaude" : "setupConnectChatGptApp"\]\(setupUserId\(\)\)/);
 });
+
+test("ChatGPT is connected once: the verb is Set up again, never another chat", () => {
+  assert.doesNotMatch(inbox, /Connect another chat/);
+  assert.match(row, /data-setup-web-connect="\$\{surface\}">Set up again<\/button>/);
+  assert.match(row, /Saved in your ChatGPT Library: every new chat in Work mode can use it\./);
+});

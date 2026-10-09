@@ -6,8 +6,12 @@ import path from "node:path";
 import test from "node:test";
 import {
   discoverTerminalSessionBindings,
+  discoverWindowsTerminalSessionBindings,
+  focusTerminalSession,
   launchMacAgentTerminal,
+  launchWindowsAgentTerminal,
   macTerminalInventory,
+  parseWindowsProcessRows,
   terminalProcessState,
 } from "../src/terminal-sessions.js";
 
@@ -77,7 +81,7 @@ test("only the foreground CLI process on a selected terminal tab is current", ()
 
 test("process preflight recognizes suspended sessions", () => {
   assert.deepEqual(
-    terminalProcessState(77, { runImpl: () => "T+ ttys003\n" }),
+    terminalProcessState(77, { platform: "darwin", runImpl: () => "T+ ttys003\n" }),
     { alive: true, suspended: true, zombie: false, pid: 77, state: "T+", tty: "ttys003" },
   );
 });
@@ -117,4 +121,75 @@ test("Codex terminal launch uses the supported remote resume command", async () 
     if (previous.CODEX_CLI_PATH === undefined) delete process.env.CODEX_CLI_PATH;
     else process.env.CODEX_CLI_PATH = previous.CODEX_CLI_PATH;
   }
+});
+
+// ---------- Windows (2026-10-09) ----------
+
+test("Windows: only the CLIs a person runs in a console are terminal sessions", () => {
+  const rows = parseWindowsProcessRows([
+    `101\t9\tC:\\Users\\me\\.local\\bin\\claude.exe\t"C:\\Users\\me\\.local\\bin\\claude.exe" --resume ${CLAUDE_ID}`,
+    `102\t9\tC:\\Users\\me\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe\tcodex --remote ws://127.0.0.1:45123 resume ${CODEX_ID}`,
+    // The Claude app's Code tab, the Codex app's app-server, and Relay's headless runs are not.
+    `201\t9\tC:\\Users\\me\\AppData\\Roaming\\Claude\\claude-code\\2.1.293\\83cb0bd7fed4\\claude.exe\tclaude.exe --output-format stream-json`,
+    `202\t9\tC:\\Users\\me\\AppData\\Local\\OpenAI\\Codex\\bin\\9691020b546a15b2\\codex.exe\tcodex.exe app-server`,
+    `203\t9\tC:\\Users\\me\\.local\\bin\\claude.exe\tclaude.exe -p "count the TODOs"`,
+    `204\t9\tC:\\Windows\\notepad.exe\tnotepad.exe`,
+  ].join("\r\n"));
+  assert.deepEqual(rows.map((row) => [row.provider, row.pid]), [["claude", 101], ["codex", 102]]);
+
+  const bindings = discoverWindowsTerminalSessionBindings({ processes: rows });
+  assert.equal(bindings.get(`claude:${CLAUDE_ID}`).pid, 101);
+  assert.equal(bindings.get(`claude:${CLAUDE_ID}`).platform, "win32");
+  assert.equal(bindings.get(`codex:${CODEX_ID}`).managedRemote, true);
+  assert.equal(bindings.get(`codex:${CODEX_ID}`).remoteEndpoint, "ws://127.0.0.1:45123");
+  assert.equal(bindings.get("pid:101").tty, "", "Windows has no TTY; the process id is the handle");
+});
+
+test("Windows: with no CLI running, discovery never starts PowerShell", () => {
+  const calls = [];
+  const bindings = discoverTerminalSessionBindings({ platform: "win32", runImpl: (command) => { calls.push(command); return "INFO: No tasks are running"; } });
+  assert.equal(bindings.size, 0);
+  assert.deepEqual(calls, ["tasklist", "tasklist"]);
+});
+
+test("Windows: a console process is alive or gone, never suspended", () => {
+  assert.deepEqual(terminalProcessState(77, { platform: "win32", isAlive: () => true }), { alive: true, suspended: false, zombie: false, pid: 77, state: "", tty: "" });
+  assert.equal(terminalProcessState(77, { platform: "win32", isAlive: () => false }).alive, false);
+});
+
+test("Windows: focusing a session asks for its window by process id", () => {
+  let script = "";
+  const ok = focusTerminalSession({ pid: 4242, platform: "win32" }, { platform: "win32", runImpl: (_command, args) => { script = args.at(-1); return "ok\r\n"; } });
+  assert.deepEqual(ok, { ok: true, app: "Terminal", pid: 4242 });
+  assert.match(script, /AttachConsole\(4242\)/);
+  assert.equal(focusTerminalSession({ pid: 4242 }, { platform: "win32", runImpl: () => "none" }).reason, "terminal-session-not-found");
+  assert.equal(focusTerminalSession({ pid: 4242 }, { platform: "win32", runImpl: () => "refused" }).reason, "terminal-focus-refused");
+  assert.equal(focusTerminalSession({}, { platform: "win32", runImpl: () => "ok" }).ok, false, "no process, nothing to focus");
+});
+
+test("Windows: a new terminal session opens through start, in the Task's folder", async () => {
+  let invocation = null;
+  const spawnImpl = (command, args, options) => {
+    invocation = { command, args, options };
+    const child = new EventEmitter();
+    queueMicrotask(() => child.emit("exit", 0));
+    return child;
+  };
+  const env = { ComSpec: String.raw`C:\Windows\System32\cmd.exe`, CODEX_CLI_PATH: String.raw`C:\Tools\codex.exe`, RELAY_CLAUDE_CLI_PATH: String.raw`C:\Users\me\.local\bin\claude.exe`, CLAUDECODE: "1" };
+  const codex = await launchWindowsAgentTerminal({ provider: "codex", nativeId: CODEX_ID, cwd: String.raw`C:\Users\me\Documents\relay`, remoteEndpoint: "ws://127.0.0.1:45123", spawnImpl, env });
+  assert.equal(codex.ok, true);
+  assert.deepEqual(codex.args, ["--remote", "ws://127.0.0.1:45123", "resume", CODEX_ID]);
+  assert.equal(invocation.command, String.raw`C:\Windows\System32\cmd.exe`);
+  assert.equal(invocation.args[0], `/d /c start "Relay" /D "C:\\Users\\me\\Documents\\relay" "C:\\Tools\\codex.exe" --remote ws://127.0.0.1:45123 resume ${CODEX_ID}`);
+  assert.equal(invocation.options.windowsVerbatimArguments, true);
+  assert.equal(invocation.options.env.CLAUDECODE, undefined, "a Claude session's own variables stay behind");
+
+  const claude = await launchWindowsAgentTerminal({ provider: "claude", nativeId: CLAUDE_ID, cwd: String.raw`C:\work`, spawnImpl, env });
+  assert.deepEqual(claude.args, ["--resume", CLAUDE_ID]);
+
+  // Anything cmd.exe would read as its own syntax is refused, never quoted around.
+  const unsafe = await launchWindowsAgentTerminal({ provider: "claude", nativeId: CLAUDE_ID, cwd: String.raw`C:\a & b`, spawnImpl, env });
+  assert.equal(unsafe.reason, "terminal-launch-unsafe-path");
+  const noCli = await launchWindowsAgentTerminal({ provider: "codex", nativeId: CODEX_ID, cwd: "C:\\work", spawnImpl, env: { PATH: "" } });
+  assert.equal(noCli.reason, "codex-cli-not-found");
 });

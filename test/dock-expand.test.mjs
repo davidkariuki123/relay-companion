@@ -29,7 +29,7 @@ test("an open from Relay.app or `relay pill --expand` asks the pill for the full
   assert.match(request, /currentProductFeatures\(\)\.fullAppExpand !== true/);
   assert.match(request, /win\.webContents\.send\("relay:expandApp"\)/);
   assert.match(preload, /onExpandApp: \(cb\) => ipcRenderer\.on\("relay:expandApp", \(\) => cb\(\)\)/);
-  assert.match(between(html, "window.relay.onExpandApp(", "let lastExternalOpenAt"), /if \(!appExpanded\) setAppExpanded\(true\);/);
+  assert.match(between(html, "window.relay.onExpandApp(", "let lastExternalOpenAt"), /if \(!appExpanded\) \{ noteViewCause\("dock"\); setAppExpanded\(true\); \}/);
 });
 
 test("the CLI marks an open made by the native Relay.app, and only that", () => {

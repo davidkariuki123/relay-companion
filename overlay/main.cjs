@@ -26,6 +26,7 @@ const { createAgentOnboarding } = require("./agent-onboarding.cjs");
 const { createAgentConnections } = require("./agent-connections.cjs");
 const { createNetworkOnboarding } = require("./network-onboarding.cjs");
 const { createTeachingTelemetry } = require("./teaching-telemetry.cjs");
+const { createViewTelemetry } = require("./view-telemetry.cjs");
 // What people do with the inbox's Five ways card, for engagement telemetry.
 const teachingTelemetry = createTeachingTelemetry({
   async send(event, context) {
@@ -108,7 +109,7 @@ function freshRelayOpen(parsed) {
 function queueRelayDeepLink(parsed) {
   if (!parsed) return false;
   if(parsed.setupIntent){pendingDesktopIntents.push(parsed);if(relayDeepLinksReady)void drainDesktopIntents();return true;}
-  if (["relay", "conductor", "claude", "codex"].includes(parsed.host) && !freshRelayOpen(parsed)) {
+  if (["relay", "conductor", "claude", "codex", "claude-app", "chatgpt"].includes(parsed.host) && !freshRelayOpen(parsed)) {
     // Still answer the browser, so its page says the Relay opened.
     if (parsed.handoffId) void acknowledgeRelayDeepLink(parsed);
     return true;
@@ -172,6 +173,7 @@ const {
   shouldIgnoreDismiss,
   boundedPresentedRelayIds,
   recoverInterruptedAttentionPrefs,
+  restoredDismissSnooze,
   quitRelayCommand,
   hostPollDelayMs,
   sentRefreshDelayMs,
@@ -185,7 +187,6 @@ const strayElectron = require("../src/stray-electron.cjs");
 const { readDeviceToken } = require("../src/credential-store.cjs");
 const { appendLocalTrace, appendLocalTraces } = require("../src/local-trace.cjs");
 const { canonicalInboxItemId, packetIdsForCanonicalItem } = require("../src/inbox-item-id.cjs");
-const claudeInject = require("../src/claude-inject.cjs");
 const { launchLinuxAgentTerminal } = require("./linux-terminal.cjs");
 const {
   reinforceSpacePresence,
@@ -303,6 +304,42 @@ let lastSig = "";
 // relay latches the pill visible until the user dismisses it again, so an arrival can
 // never spend seven seconds behind a lock screen and then disappear for good.
 const OVERLAY_PREFS_PATH = path.join(RELAY_HOME, "overlay-prefs.json");
+// Which view the app is in and how people switch (view-telemetry.cjs). Its
+// own file: overlay-prefs is rebuilt from a fixed list on every write.
+const VIEW_USAGE_PATH = path.join(RELAY_HOME, "view-usage.json");
+const viewTelemetry = createViewTelemetry({
+  load() {
+    try { return JSON.parse(fs.readFileSync(VIEW_USAGE_PATH, "utf8")); } catch { return null; }
+  },
+  save(state) { atomicWriteJsonSync(VIEW_USAGE_PATH, state); },
+  fullAppAvailable: () => currentProductFeatures().fullAppExpand === true,
+  async send(report) {
+    if (process.env.RELAY_OVERLAY_TEST === "1" || !deviceToken()) return { ok: false, retry: true };
+    try {
+      await (await relayClient()).appViewUsage(report);
+      return { ok: true };
+    } catch (error) {
+      // A malformed report would be refused again; an API without the route
+      // yet (404), or no network, keeps the totals for the next report.
+      return { ok: false, retry: !(error && error.status === 400) };
+    }
+  },
+});
+// The renderer's own view: the window being off screen overrides it.
+let rendererView = null;
+function currentAppView() {
+  if (!win || win.isDestroyed() || !win.isVisible()) return "hidden";
+  if (rendererView === "wide") return currentProductFeatures().fullAppExpand === true ? "full" : "expanded";
+  return rendererView;
+}
+function syncViewTelemetry(cause) {
+  const view = currentAppView();
+  if (view) viewTelemetry.view(view, cause);
+}
+// Asleep or locked: nobody is looking at any view.
+function syncViewTelemetryAway() {
+  viewTelemetry.away(systemSuspended || screenLocked, currentAppView());
+}
 let overlayPrefs = {};
 try {
   overlayPrefs = JSON.parse(fs.readFileSync(OVERLAY_PREFS_PATH, "utf8")) || {};
@@ -440,8 +477,9 @@ attention.enqueueUnseen(attentionQueue, recoveredAttentionPrefs.interruptedAtten
   presentedIds: presentedRelayIds,
 });
 // The ✕ snoozes what was already queued at dismiss time; genuinely new
-// arrivals and a return-from-away both cut through the snooze.
-let dismissSnoozedIds = new Set();
+// arrivals and a return-from-away both cut through the snooze. A restart does
+// not: the snooze is persisted, or every update would reopen a put-away pill.
+let dismissSnoozedIds = restoredDismissSnooze(overlayPrefs, attentionQueue.keys());
 let currentShow = null; // { ids, digest, startedAt, idleAtStart, inputSeen, sampler }
 let burstShown = 0; // sequential cards shown since the queue was last empty/away
 // FM-1 guard: main must never fire an arrival at a renderer that has not yet
@@ -530,6 +568,7 @@ function writeOverlayPrefs() {
       setupConnections,
       presentedRelayIds: [...presentedRelayIds],
       activeAttentionIds: [...activeAttentionIds],
+      dismissSnoozedIds: [...dismissSnoozedIds].filter((id) => attentionQueue.has(id)),
     });
     const serialized = `${JSON.stringify(prefs, null, 2)}\n`;
     if (serialized === lastPrefsSerialized) {
@@ -912,7 +951,10 @@ async function openRelayDeepLink(parsed) {
     await acknowledgeRelayDeepLink(parsed);
     await pushInbox(true);
     pendingRelayReader = { messageId: parsed.messageId, chatId, ...(parsed.host !== "relay" ? { app: parsed.host } : {}) };
-    requestExternalReopen(randomUUID());
+    // Open Relay is the pill. Any app (Claude Code, Codex, Claude, ChatGPT,
+    // Conductor) is that app: the person lands there, and the pill only comes
+    // forward if the hand-off fails and has something to say.
+    if (parsed.host === "relay") requestExternalReopen(randomUUID());
     // Hot Pills receive this immediately. Cold Pills keep it until the renderer
     // explicitly confirms that its openReader listener is installed.
     deliverPendingRelayReader();
@@ -2346,7 +2388,7 @@ function startSentLiveWakeForAccount() {
       client.claimSlackOpenRequests()
         .then((body) => {
           for (const request of Array.isArray(body?.requests) ? body.requests : []) {
-            if (!request?.messageId || !["relay", "conductor", "claude", "codex"].includes(request.host)) continue;
+            if (!request?.messageId || !["relay", "conductor", "claude", "codex", "claude-app", "chatgpt"].includes(request.host)) continue;
             queueRelayDeepLink({ messageId: String(request.messageId), host: request.host, viaSlack: true, ...(request.chatId ? { chatId: String(request.chatId) } : {}) });
           }
         })
@@ -3754,6 +3796,9 @@ function ackPackets(packetIds, { optimistic = false } = {}) {
 }
 
 app.on("before-quit", (event) => {
+  // Any stop that is not the person's Quit Relay (which recorded itself):
+  // an update, a restart, signing out of the computer.
+  viewTelemetry.stop("exit");
   if (stateAckFinalQuitPassThrough) {
     stopStateAckWorker();
     return;
@@ -4353,7 +4398,10 @@ const CLAUDE_COLD_LAUNCH_WAIT_POLLS = 45;
 function openClaudeDeepLinkVerified(url, onUnconfirmed, label, { freshlyForged = false, onError = null } = {}) {
   const fire = () =>
     shell.openExternal(url).catch((error) => console.error("[overlay] openExternal failed:", error && error.message));
-  if (process.platform !== "darwin") return fire();
+  // Windows too (2026-10-09): the Claude app there writes lastFocusedAt the
+  // same way, and a link fired the moment Relay creates a chat is dropped
+  // (measured: the second fire landed), so the nudge matters there as much.
+  if (process.platform !== "darwin" && process.platform !== "win32") return fire();
   const sessionId = claudeSessionIdFromUrl(url);
   if (!sessionId) return fire();
   const metaPath = claudeSessionMetaPath(sessionId);
@@ -4474,13 +4522,49 @@ function preferredSessionProvider() {
   }));
 }
 
+// The current-Claude-chat lookup walks Claude Desktop's session folder and
+// focus log synchronously (1.3 s cold on a laptop with hundreds of chats), and
+// the picker asks for it on open and every 2 s after. Run it on a worker so the
+// window keeps drawing; concurrent askers share one run, and a run that takes
+// longer than the picker's own refresh answers "no current chat", which the
+// picker already handles.
+const CURRENT_CLAUDE_SESSION_TIMEOUT_MS = 5_000;
+let currentClaudeSessionLookup = null;
+function findCurrentClaudeSessionOffThread(options) {
+  if (currentClaudeSessionLookup) return currentClaudeSessionLookup;
+  currentClaudeSessionLookup = new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      currentClaudeSessionLookup = null;
+      resolve(value || null);
+    };
+    let worker;
+    try {
+      worker = new Worker(path.join(__dirname, "current-claude-session-worker.cjs"), { workerData: { options } });
+    } catch {
+      return finish(null);
+    }
+    worker.unref();
+    timer = setTimeout(() => { finish(null); void worker.terminate().catch(() => {}); }, CURRENT_CLAUDE_SESSION_TIMEOUT_MS);
+    timer.unref?.();
+    worker.on("message", (result) => finish(result));
+    worker.on("error", () => finish(null));
+    worker.on("exit", () => finish(null));
+  });
+  return currentClaudeSessionLookup;
+}
+
 async function focusedNativeSession(provider, routing) {
   try {
     if (provider === "codex") {
       const current = routing.codexInject.resolveCurrentCodexThread();
       return current ? { nativeId: current.threadId } : null;
     }
-    const current = claudeInject.findCurrentClaudeSession({
+    const current = await findCurrentClaudeSessionOffThread({
       homeDir: RELAY_HOME,
       desktopSessionsDir: claudeDesktopSessionsDir(),
       includeRendezvous: false,
@@ -6720,7 +6804,15 @@ function createWindow() {
       resetWindowZoom(win);
     }
   });
+  // View telemetry: on or off screen, and whether the person is in Relay.
+  win.on("show", () => syncViewTelemetry());
+  win.on("hide", () => syncViewTelemetry());
+  win.on("focus", () => viewTelemetry.focus(true));
+  win.on("blur", () => viewTelemetry.focus(false));
   win.once("ready-to-show", () => {
+    // What the last run counted goes out shortly after start; then every half hour.
+    setTimeout(() => { viewTelemetry.flush().catch(() => {}); }, 2 * 60 * 1000).unref?.();
+    setInterval(() => { viewTelemetry.tick().catch(() => {}); }, 15 * 1000).unref?.();
     // First paint is instant: relays come from local state.json; the sent + contacts
     // background loads kicked off here each re-push when they land (buildPayload).
     try { if (reconcileStaleHandoffs()) pushInbox(false); } catch (error) { console.error("[overlay] stale hand-off sweep failed:", error && error.message); }
@@ -6737,6 +6829,8 @@ function createWindow() {
     // Relay is independently useful and searchable even when no host app happens to
     // be open. A normal login launch still respects the persisted dismissed preference.
     maybeShow({ force: true });
+    // A pill that starts hidden is counted as hidden from the start.
+    syncViewTelemetry("launch");
     pollHosts();
     if (pendingReopenNonce) requestExternalReopen(pendingReopenNonce);
     else writePillStatus();
@@ -8779,6 +8873,7 @@ function installActiveApplicationWatcher() {
 function installPowerAttentionLifecycle() {
   powerMonitor.on("suspend", () => {
     systemSuspended = true;
+    syncViewTelemetryAway();
     interruptChatReadPresence();
     requeueActiveAttention();
   });
@@ -8786,9 +8881,11 @@ function installPowerAttentionLifecycle() {
     systemSuspended = false;
     restartSentLiveWake();
     scheduleReturnReconciliation();
+    syncViewTelemetryAway();
   });
   powerMonitor.on("lock-screen", () => {
     screenLocked = true;
+    syncViewTelemetryAway();
     interruptChatReadPresence();
     requeueActiveAttention();
   });
@@ -8796,6 +8893,7 @@ function installPowerAttentionLifecycle() {
     screenLocked = false;
     restartSentLiveWake();
     scheduleReturnReconciliation();
+    syncViewTelemetryAway();
   });
   if (process.platform === "darwin") {
     powerMonitor.on("user-did-resign-active", () => {
@@ -8858,6 +8956,7 @@ let lastTrayShowAt = 0;
 // `relay pill`) opens the mini card even over the full app; "app" (the Dock,
 // Relay.app) leaves the renderer to the full app that relay:expandApp opens.
 function showFromTray(reopenNonce = "", mode = "mini") {
+  viewTelemetry.cause(mode === "app" ? "dock" : "menu_bar");
   lastTrayShowAt = Date.now();
   explicitOpenHold = startExplicitOpenHold({ now: lastTrayShowAt });
   setOverlayElevated(true);
@@ -8914,6 +9013,7 @@ function pillIsOnScreen() {
 // Persists the dismissal (like the card's ✕) so it stays hidden until the icon is
 // clicked again — reachable because the tray exists whenever this runs.
 function hideFromTray() {
+  viewTelemetry.cause("menu_bar");
   dismissed = true;
   explicitOpenHold = null;
   attentionLatched = false;
@@ -8981,6 +9081,7 @@ function syncTray() {
 // DETACHED shell (the second bootout kills this process, so the shell must
 // outlive us), then quit the app immediately for instant visual feedback.
 function quitRelayCompletely() {
+  viewTelemetry.stop("quit");
   try {
     require("../bootstrap/recovery-intent.cjs").setStopped(true);
     const uid = typeof process.getuid === "function" ? process.getuid() : 501;
@@ -9294,6 +9395,14 @@ ipcMain.on("relay:openInCurrent", (_e, id, host) => {
 ipcMain.on("relay:teachingEvent", (event, name, way) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
   teachingTelemetry.record(name, way);
+});
+// The card's own view (pill, banner, card, wide or hidden) and what caused
+// the change; main adds whether the window is on screen (view-telemetry.cjs).
+ipcMain.on("relay:viewState", (event, view, cause) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
+  if (!["pill", "banner", "card", "wide", "hidden"].includes(view)) return;
+  rendererView = view;
+  syncViewTelemetry(typeof cause === "string" ? cause : undefined);
 });
 ipcMain.on("relay:preview", (event, id) => {
   if (win && !win.isDestroyed() && event && event.sender !== win.webContents) return;

@@ -78,14 +78,20 @@ test("macOS: the app bundles, their own Claude Code and codex, and Conductor", (
   assert.equal(apps.claudeAppCodeCli, `${home}/Library/Application Support/Claude/claude-code/2.1.293/abc/claude.app/Contents/MacOS/claude`);
 });
 
-test("Open in on Windows: an installed app says Open in is not there yet, never that it is missing", () => {
+test("Open in on Windows: in the Claude app, the Codex app, or a terminal, like macOS", () => {
   const surfaces = detectAgentSurfaces(win());
-  for (const name of ["Claude Code", "Codex"]) {
-    assert.equal(surfaces[name].available, false);
-    assert.equal(surfaces[name].installed, true);
-    assert.equal(surfaces[name].reason, `Opening a Relay in ${name} isn’t available on Windows yet`);
-  }
+  for (const name of ["Claude Code", "Codex"]) assert.equal(surfaces[name].available, true, `${name} opens here`);
+  assert.equal(surfaces._claudeDesktop.available, true);
+  assert.equal(surfaces._codexDesktop.available, true);
+  assert.equal(surfaces._claudeCli.available, true, "Claude Code's CLI opens in a terminal");
+  assert.equal(surfaces._codexCli.available, false, "no Codex CLI on this computer");
+
+  // Only the CLI here: it opens in a terminal.
+  const cliOnly = detectAgentSurfaces(win([String.raw`C:\Users\me\.local\bin\claude.exe`]));
+  assert.equal(cliOnly["Claude Code"].available, true);
+  assert.equal(cliOnly._claudeDesktop.available, false);
+
   const empty = detectAgentSurfaces(win([]));
   assert.equal(empty["Claude Code"].reason, "Claude Code isn’t installed on this computer");
-  assert.equal(empty["Claude Code"].installed, false);
+  assert.equal(empty._claudeDesktop.reason, "Claude isn’t installed on this computer");
 });

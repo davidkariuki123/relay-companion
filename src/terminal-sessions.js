@@ -20,9 +20,11 @@ function run(command, args, options = {}) {
   }
 }
 
-export function terminalProcessState(pid, { runImpl = run } = {}) {
+export function terminalProcessState(pid, { runImpl = run, platform = process.platform, isAlive = processAlive } = {}) {
   const value = Number(pid || 0);
   if (!Number.isInteger(value) || value <= 0) return { alive: false, pid: value, tty: "", state: "" };
+  // Windows has no job-control states: a console process is alive or gone.
+  if (platform === "win32") return { alive: isAlive(value), suspended: false, zombie: false, pid: value, state: "", tty: "" };
   const output = runImpl("/bin/ps", ["-p", String(value), "-o", "state=", "-o", "tty="]);
   const match = String(output || "").trim().match(/^(\S+)\s+(\S+)$/);
   if (!match) return { alive: false, pid: value, tty: "", state: "" };
@@ -143,6 +145,7 @@ function codexSessionForProcess(row, runImpl = run) {
 }
 
 export function discoverTerminalSessionBindings({ runImpl = run, inventory = null, platform = process.platform } = {}) {
+  if (platform === "win32") return discoverWindowsTerminalSessionBindings({ runImpl });
   const bindings = new Map();
   const processes = terminalProcesses(runImpl);
   if (!processes.length) return bindings;
@@ -172,8 +175,9 @@ export function discoverTerminalSessionBindings({ runImpl = run, inventory = nul
   return bindings;
 }
 
-export function focusTerminalSession(terminalRef, { runImpl = run } = {}) {
-  if (process.platform !== "darwin" || !terminalRef?.tty) return { ok: false, reason: "terminal-session-unavailable" };
+export function focusTerminalSession(terminalRef, { runImpl = run, platform = process.platform } = {}) {
+  if (platform === "win32") return focusWindowsTerminalSession(terminalRef, { runImpl });
+  if (platform !== "darwin" || !terminalRef?.tty) return { ok: false, reason: "terminal-session-unavailable" };
   const tty = String(terminalRef.tty).replace(/^\/dev\//, "");
   const app = terminalRef.app === "iTerm2" ? "iTerm2" : "Terminal";
   const script = app === "iTerm2" ? `
@@ -243,4 +247,164 @@ export async function launchMacAgentTerminal({
       ? { ok: true, app: terminalApp, command, args }
       : { ok: false, reason: "terminal-launch-failed", detail: `open exited ${code}` }));
   });
+}
+
+// ---------- WINDOWS (2026-10-09) ----------
+// The same three things the macOS code above does, with Windows' own tools:
+// find the Claude Code and Codex CLIs running in a console, bring one's
+// window forward, and open a new console running `claude --resume <id>` or
+// `codex resume <id>`. Windows has no TTY, so a session is known by its
+// process id, and only the window (not a Windows Terminal tab) comes forward.
+
+export function processAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (error) { return error?.code === "EPERM"; }
+}
+
+function powershellPath() {
+  return path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+}
+
+function runPowerShell(script, runImpl) {
+  return runImpl(powershellPath(), ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { timeout: 6_000, windowsHide: true });
+}
+
+// The copies the Claude app (its Code tab) and the Codex app run are theirs,
+// not a terminal session: their own folders, the Store's, and Codex's
+// app-server. Relay's own headless runs print and exit, so they are not
+// sessions either.
+const WINDOWS_APP_OWNED = /\\(?:Claude\\claude-code|WindowsApps|Packages)\\|\\OpenAI\\Codex\\bin\\[0-9a-f]{16}\\/i;
+const HEADLESS = /(?:^|\s)(?:-p|--print|app-server|exec|mcp)(?:\s|$)|--output-format/;
+
+export function parseWindowsProcessRows(text) {
+  const rows = [];
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const [pid, ppid, exe, ...rest] = line.split("\t");
+    const command = rest.join("\t").trim();
+    const executable = path.win32.basename(String(exe || "")).toLowerCase();
+    const provider = executable === "claude.exe" ? "claude" : executable === "codex.exe" ? "codex" : "";
+    if (!provider || !Number(pid) || WINDOWS_APP_OWNED.test(exe) || HEADLESS.test(command)) continue;
+    rows.push({ provider, pid: Number(pid), parentPid: Number(ppid) || 0, executable: exe, command });
+  }
+  return rows;
+}
+
+function windowsTerminalProcesses(runImpl = run) {
+  // A quick look first: most of the time no CLI is running, and PowerShell
+  // costs far more than tasklist.
+  const quick = runImpl("tasklist", ["/FO", "CSV", "/NH", "/FI", "IMAGENAME eq claude.exe"], { windowsHide: true })
+    + runImpl("tasklist", ["/FO", "CSV", "/NH", "/FI", "IMAGENAME eq codex.exe"], { windowsHide: true });
+  if (!/"(?:claude|codex)\.exe"/i.test(quick)) return [];
+  const script = "Get-CimInstance Win32_Process -Filter \"Name='claude.exe' OR Name='codex.exe'\" | ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.ExecutablePath)`t$($_.CommandLine)\" }";
+  return parseWindowsProcessRows(runPowerShell(script, runImpl));
+}
+
+export function discoverWindowsTerminalSessionBindings({ runImpl = run, processes = null } = {}) {
+  const bindings = new Map();
+  for (const row of processes || windowsTerminalProcesses(runImpl)) {
+    const remoteEndpoint = row.provider === "codex" ? row.command.match(/(?:^|\s)--remote(?:=|\s+)(\S+)/)?.[1] || "" : "";
+    const terminalRef = {
+      pid: row.pid,
+      tty: "",
+      processState: "",
+      app: "Terminal",
+      platform: "win32",
+      windowIndex: null,
+      tabIndex: null,
+      selectedInWindow: false,
+      keyboardFocused: false,
+      managedRemote: Boolean(remoteEndpoint),
+      ...(remoteEndpoint ? { remoteEndpoint } : {}),
+    };
+    bindings.set(`pid:${row.pid}`, terminalRef);
+    const nativeId = row.command.match(UUID_RE)?.[0] || "";
+    if (nativeId) bindings.set(`${row.provider}:${nativeId}`, terminalRef);
+  }
+  return bindings;
+}
+
+// Bring the console window that hosts a CLI process to the front. Under
+// Windows Terminal the console is a pseudo window owned by the terminal
+// window, so its root owner is what comes forward. The Alt tap is what lets
+// a background process take the foreground.
+export function focusWindowsTerminalSession(terminalRef, { runImpl = run } = {}) {
+  const pid = Number(terminalRef?.pid || 0);
+  if (!Number.isInteger(pid) || pid <= 0) return { ok: false, reason: "terminal-session-unavailable" };
+  const script = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    "Add-Type -Namespace RelayFocus -Name Win -MemberDefinition '" + [
+      '[DllImport("kernel32.dll")] public static extern bool FreeConsole();',
+      '[DllImport("kernel32.dll")] public static extern bool AttachConsole(uint p);',
+      '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();',
+      '[DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint f);',
+      '[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);',
+      '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int n);',
+      '[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);',
+      '[DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);',
+    ].join(" ") + "'",
+    "$h = [IntPtr]::Zero",
+    "[RelayFocus.Win]::FreeConsole() | Out-Null",
+    `if ([RelayFocus.Win]::AttachConsole(${pid})) { $h = [RelayFocus.Win]::GetConsoleWindow(); [RelayFocus.Win]::FreeConsole() | Out-Null }`,
+    "if ($h -ne [IntPtr]::Zero) { $root = [RelayFocus.Win]::GetAncestor($h, 3); if ($root -ne [IntPtr]::Zero) { $h = $root } }",
+    `$p = ${pid}`,
+    "for ($i = 0; $h -eq [IntPtr]::Zero -and $p -and $i -lt 16; $i++) { $proc = Get-Process -Id $p; if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) { $h = $proc.MainWindowHandle; break }; $p = (Get-CimInstance Win32_Process -Filter \"ProcessId=$p\").ParentProcessId }",
+    "if ($h -eq [IntPtr]::Zero) { 'none'; exit }",
+    "if ([RelayFocus.Win]::IsIconic($h)) { [RelayFocus.Win]::ShowWindowAsync($h, 9) | Out-Null }",
+    "[RelayFocus.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [RelayFocus.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)",
+    "if ([RelayFocus.Win]::SetForegroundWindow($h)) { 'ok' } else { 'refused' }",
+  ].join("\n");
+  const answer = runPowerShell(script, runImpl).trim().split(/\r?\n/).pop();
+  return answer === "ok"
+    ? { ok: true, app: "Terminal", pid }
+    : { ok: false, reason: answer === "none" ? "terminal-session-not-found" : "terminal-focus-refused" };
+}
+
+// Characters a path may hold that cmd.exe would read as its own syntax.
+const CMD_UNSAFE = /["%^&|<>!\r\n]/;
+
+export async function launchWindowsAgentTerminal({
+  provider,
+  nativeId,
+  cwd = process.cwd(),
+  remoteEndpoint = "",
+  spawnImpl = spawn,
+  env = process.env,
+} = {}) {
+  const command = provider === "codex" ? codexCliPath({ env }) : claudeCliPath({ env });
+  if (!command) return { ok: false, reason: `${provider}-cli-not-found` };
+  const args = provider === "codex"
+    ? [...(remoteEndpoint ? ["--remote", remoteEndpoint] : []), "resume", nativeId]
+    : ["--resume", nativeId];
+  const dir = cwd || os.homedir();
+  if (CMD_UNSAFE.test(command) || CMD_UNSAFE.test(dir) || args.some((arg) => !/^[A-Za-z0-9._:/=-]+$/.test(String(arg)))) {
+    return { ok: false, reason: "terminal-launch-unsafe-path" };
+  }
+  // `start` opens a new console window, and Windows hands it to the
+  // person's default terminal app (Windows Terminal, where it is the default).
+  // A Claude or Codex session's own variables must not leak into the new one.
+  const childEnv = { ...env };
+  for (const key of Object.keys(childEnv)) {
+    if (/^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_SESSION_ID|CODEX_THREAD_ID|CODEX_SESSION_ID|ELECTRON_RUN_AS_NODE)/.test(key)) delete childEnv[key];
+  }
+  const line = `/d /c start "Relay" /D "${dir}" "${command}" ${args.join(" ")}`;
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawnImpl(env.ComSpec || "cmd.exe", [line], { cwd: dir, env: childEnv, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true, detached: true });
+    } catch (error) {
+      resolve({ ok: false, reason: "terminal-launch-failed", detail: error?.message || String(error) });
+      return;
+    }
+    child.once("error", (error) => resolve({ ok: false, reason: "terminal-launch-failed", detail: error?.message || String(error) }));
+    child.once("exit", (code) => resolve(code === 0
+      ? { ok: true, app: "Terminal", command, args }
+      : { ok: false, reason: "terminal-launch-failed", detail: `start exited ${code}` }));
+    // No unref: `start` exits at once, and its exit is the answer awaited here.
+  });
+}
+
+/** Open a new terminal session for a native session, on this computer's platform. */
+export function launchAgentTerminal(options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform === "win32") return launchWindowsAgentTerminal(options);
+  return launchMacAgentTerminal(options);
 }
