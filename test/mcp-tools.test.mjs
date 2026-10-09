@@ -1366,7 +1366,7 @@ test("relay_message_edit exposes either payload independently", () => {
   const edit = TOOLS.find((tool) => tool.name === "relay_message_edit");
   assert.ok(edit);
   assert.deepEqual(edit.inputSchema.required, ["relayId", "idempotencyKey"]);
-  assert.deepEqual(edit.inputSchema.anyOf, [{ required:["forHuman"] }, { required:["forAgent"] }, { required:["nature"] }, { required:["asks"] }]);
+  assert.equal(edit.inputSchema.anyOf, undefined, "the API rejects top-level combinators; the server refuses an empty edit");
   assert.ok(edit.inputSchema.properties.forHuman);
   assert.ok(edit.inputSchema.properties.forAgent);
 });

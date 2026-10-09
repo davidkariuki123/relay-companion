@@ -127,3 +127,8 @@ test("after sleep or unlock the pill reopens its account-change wait at once and
   // Reopening runs the reconcile, which claims before it waits.
   assert.match(overlay, /claimSlackOpens\(\);\s*sentLiveWake = startSentLiveWake\(/);
 });
+
+test("a chat or channel message hands off to Claude Code / Codex: staged from the server when this device never received it", () => {
+  assert.match(overlay, /async function stageServerRelayForDelivery\(id\) \{[\s\S]*?client\.fetchRelay\(id\)[\s\S]*?state: "read"[\s\S]*?return rowById\(id\);/);
+  assert.match(overlay, /const row = rowById\(id\) \|\| await stageServerRelayForDelivery\(id\)\.catch\(\(\) => null\);\s*if \(!row\) throw new Error\("That Relay is no longer available on this device"\);/);
+});

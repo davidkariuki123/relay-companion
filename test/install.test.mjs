@@ -4,6 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+
+// No test probes this machine's own Codex binaries unless it names them.
+process.env.RELAY_CODEX_CONFIG_READERS = "";
 import {
   claudeAppearsPresent,
   claudeSettingsPath,
@@ -718,6 +721,80 @@ test("writeCodexMcpConfig replaces only the Relay MCP table", () => {
   assert.match(text, /\[mcp_servers\.relay\.tools\.relay_topic_post\]\napproval_mode = "approve"/);
   assert.match(text, /\[mcp_servers\.relay\.tools\.relay_topic_edit\]\napproval_mode = "approve"/);
   assert.doesNotMatch(text, /command = "old"/);
+});
+
+// Measured 2026-10-09: Conductor 0.61 bundled Codex 0.130.0, which refused
+// the whole config over the two keys Relay writes. These stand-ins print the
+// exact errors that binary printed.
+function fakeCodex(dir, name, script) {
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  return file;
+}
+const OLD_CODEX = [
+  'cfg="$CODEX_HOME/config.toml"',
+  'if grep -q "^\\[features\\.code_mode\\]" "$cfg"; then echo "Error: failed to load configuration"; echo; echo "Caused by:"; echo "    0: $cfg:9:1: invalid type: map, expected a boolean"; echo "       in \\`features\\`"; exit 1; fi',
+  'if grep -q "^default_tools_approval_mode = \\"writes\\"" "$cfg"; then echo "Error: failed to load configuration"; echo "    1: unknown variant \\`writes\\`, expected one of \\`auto\\`, \\`prompt\\`, \\`approve\\`"; echo "       in \\`mcp_servers.relay.default_tools_approval_mode\\`"; exit 1; fi',
+  'echo "Name  Command"; echo "relay /relay"; exit 0',
+].join("\n");
+
+test("an older Codex reading the config gets the shape it can parse", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-compat-"));
+  const configPath = path.join(dir, "config.toml");
+  fs.writeFileSync(configPath, 'model = "gpt-test"\n');
+  const newer = fakeCodex(dir, "codex-new", 'echo "relay /relay"; exit 0');
+  const older = fakeCodex(dir, "codex-old", OLD_CODEX);
+
+  const res = writeCodexMcpConfig("/relay/bin/relay.js", "/usr/local/bin/node", configPath, { readers: [newer, older] });
+  const text = fs.readFileSync(configPath, "utf8");
+
+  assert.equal(res.ok, true);
+  assert.equal(res.compat, true);
+  assert.deepEqual(res.olderCodex, [older]);
+  assert.doesNotMatch(text, /\[features\.code_mode\]/);
+  assert.doesNotMatch(text, /default_tools_approval_mode/);
+  assert.match(text, /\[mcp_servers\.relay\]\ncommand = "\/usr\/local\/bin\/node"/);
+  assert.match(text, /\[mcp_servers\.relay\.tools\.relay_topic_post\]\napproval_mode = "approve"/);
+  assert.match(text, /model = "gpt-test"/);
+  // The older Codex now loads it.
+  assert.equal(spawnSync(older, ["mcp", "list"], { env: { ...process.env, CODEX_HOME: dir } }).status, 0);
+});
+
+test("compat keeps a person's own direct-tool namespaces and drops only Relay's", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-compat-own-"));
+  const configPath = path.join(dir, "config.toml");
+  fs.writeFileSync(configPath, '[features.code_mode]\ndirect_only_tool_namespaces = ["mcp__notes", "mcp__relay"]\n');
+  const older = fakeCodex(dir, "codex-old", OLD_CODEX);
+
+  const res = writeCodexMcpConfig("/relay/bin/relay.js", "/usr/local/bin/node", configPath, { readers: [older] });
+  const text = fs.readFileSync(configPath, "utf8");
+
+  assert.equal(res.compat, true);
+  assert.match(text, /\[features\.code_mode\]\ndirect_only_tool_namespaces = \["mcp__notes"\]/);
+});
+
+test("a Codex that fails on someone else's key does not change what Relay writes", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-compat-other-"));
+  const configPath = path.join(dir, "config.toml");
+  fs.writeFileSync(configPath, 'service_tier = "default"\n');
+  const picky = fakeCodex(dir, "codex-picky", 'echo "Error: failed to load configuration"; echo "    1: unknown variant \\`default\\`, expected \\`fast\\` or \\`flex\\`"; echo "       in \\`service_tier\\`"; exit 1');
+
+  const res = writeCodexMcpConfig("/relay/bin/relay.js", "/usr/local/bin/node", configPath, { readers: [picky] });
+  const text = fs.readFileSync(configPath, "utf8");
+
+  assert.equal(res.ok, true);
+  assert.equal(res.compat, undefined);
+  assert.match(text, /\[features\.code_mode\]\ndirect_only_tool_namespaces = \["mcp__relay"\]/);
+  assert.match(text, /default_tools_approval_mode = "writes"/);
+});
+
+test("a Codex that cannot be started is not a reason to degrade", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-codex-compat-missing-"));
+  const configPath = path.join(dir, "config.toml");
+  const res = writeCodexMcpConfig("/relay/bin/relay.js", "/usr/local/bin/node", configPath, { readers: [path.join(dir, "no-such-codex")] });
+  assert.equal(res.ok, true);
+  assert.equal(res.compat, undefined);
+  assert.match(fs.readFileSync(configPath, "utf8"), /default_tools_approval_mode = "writes"/);
 });
 
 test("Topic tool policy preserves host choices and unrelated Claude settings", () => {

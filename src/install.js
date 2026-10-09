@@ -20,6 +20,7 @@ import { brokerIdentity, removeMcpBrokerProvisioning } from "./mcp-broker-state.
 import { canonicalOwnershipGuard, verifyCanonicalCandidate } from "./canonical-runtime.js";
 import { ensureStableHookLauncher, removeStableHookLauncher, stableHookLauncherPath, stableWindowsHookScriptPath } from "./hook-launcher.js";
 import { readConfig, writeConfig } from "./config.js";
+import { codexCliPath } from "./capabilities.js";
 import { READ_ONLY_RELAY_TOOL_NAMES } from "./tool-permissions.js";
 import { deleteInstallationAuthorizationCredentials } from "./installation-authorization.js";
 import applicationOwnership from "../bootstrap/application-owner.cjs";
@@ -2063,7 +2064,8 @@ export function codexRelayMcpTomlSection(
     "tool_timeout_sec = 300",
     // Read-only MCP tools use their annotations; the two Topic writes reach
     // Relay's first-post consent gate without a host prompt on every post.
-    `default_tools_approval_mode = ${tomlQuote(approvalMode)}`,
+    // An older Codex rejects the key's newer values, so compat omits it.
+    ...(approvalMode ? [`default_tools_approval_mode = ${tomlQuote(approvalMode)}`] : []),
     "",
   ].join("\n");
 }
@@ -2110,10 +2112,56 @@ export function removeTomlTable(text, tableName) {
   return `${before}${before && after ? "\n\n" : ""}${after}${before || after ? "\n" : ""}`;
 }
 
+// Every Codex that reads ~/.codex/config.toml, not just the newest. Conductor
+// ships its own Codex and updates it only with the app: Conductor 0.61's
+// bundled 0.130.0 refused the whole file over two keys Relay writes
+// ([features.code_mode] as a table, approval mode "writes"), so every Codex
+// session there failed before its first turn (measured 2026-10-09).
+export function codexConfigReaders({ env = process.env, homedir = os.homedir() } = {}) {
+  // Test seam: a colon-separated list stands in for this Mac's own binaries.
+  if (env.RELAY_CODEX_CONFIG_READERS !== undefined) return String(env.RELAY_CODEX_CONFIG_READERS).split(":").filter(Boolean);
+  const candidates = [
+    codexCliPath({ env }),
+    path.join(homedir, ".local", "bin", "codex"),
+    "/opt/homebrew/bin/codex",
+    "/usr/local/bin/codex",
+    "/Applications/ChatGPT.app/Contents/Resources/codex",
+    "/Applications/Codex.app/Contents/Resources/codex",
+    path.join(homedir, "Library", "Application Support", "com.conductor.app", "bin", "codex"),
+  ];
+  const seen = new Set();
+  const readers = [];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    let real;
+    try { real = fs.realpathSync(candidate); } catch { continue; }
+    if (seen.has(real)) continue;
+    seen.add(real);
+    readers.push(candidate);
+  }
+  return readers;
+}
+
+/** Ask one Codex to load the config the way it will at launch; `mcp list` only parses it. */
+export function probeCodexConfig(codex, configDir, { runCommand = spawnSync, env = process.env } = {}) {
+  const res = runCommand(codex, ["mcp", "list"], {
+    encoding: "utf8", timeout: 8000, windowsHide: true, env: { ...env, CODEX_HOME: configDir },
+  });
+  if (res.error) return { codex, ok: true, skipped: res.error.code || "spawn_failed" };
+  const out = `${res.stdout || ""}${res.stderr || ""}`;
+  return { codex, ok: res.status === 0, error: res.status === 0 ? "" : out.trim().split("\n").slice(0, 6).join("\n") };
+}
+
+/** Whether a Codex refused a key that Relay itself writes, as opposed to someone else's. */
+export function codexRejectedRelayKeys(error) {
+  return /in `features`|features\.code_mode|default_tools_approval_mode/.test(String(error || ""));
+}
+
 export function writeCodexMcpConfig(
   bin = relayBinPath(),
   node = stableNodePath(),
   configPath = codexConfigPath(),
+  { readers = codexConfigReaders(), probe = probeCodexConfig } = {},
 ) {
   const configDir = path.dirname(configPath);
   if (!fs.existsSync(configPath) && !fs.existsSync(configDir)) {
@@ -2145,17 +2193,28 @@ export function writeCodexMcpConfig(
     const previousApprovalMode = parseTomlStringAssignment(previousRelayTable, "default_tools_approval_mode");
     const approvalMode = new Set(["auto", "prompt", "writes", "approve"]).has(previousApprovalMode)
       ? previousApprovalMode : "writes";
-    const withDirectRelay = updateTomlStringArray(
-      existing,
-      "features.code_mode",
-      "direct_only_tool_namespaces",
-      RELAY_CODEX_DIRECT_NAMESPACE,
-    );
-    writeTextAtomic(
-      configPath,
-      `${withCodexTopicToolPolicy(replaceTomlTable(withDirectRelay, "mcp_servers.relay", codexRelayMcpTomlSection(registeredBin, node, approvalMode))).trimEnd()}\n`,
-    );
-    return { ok: true, method: "config", configPath };
+    const compose = (compat) => {
+      // Compat is the shape Relay wrote before 2026-08-17: no direct-tools
+      // namespace and no approval default, which every Codex reads.
+      let base = updateTomlStringArray(
+        existing,
+        "features.code_mode",
+        "direct_only_tool_namespaces",
+        RELAY_CODEX_DIRECT_NAMESPACE,
+        compat ? { remove: true } : undefined,
+      );
+      const codeMode = tomlTableBounds(base, "features.code_mode");
+      if (compat && codeMode && !codeMode.table.split(/\r?\n/).slice(1).some((line) => line.trim() && !line.trim().startsWith("#"))) {
+        base = removeTomlTable(base, "features.code_mode");
+      }
+      const relay = codexRelayMcpTomlSection(registeredBin, node, compat ? null : approvalMode);
+      return `${withCodexTopicToolPolicy(replaceTomlTable(base, "mcp_servers.relay", relay)).trimEnd()}\n`;
+    };
+    writeTextAtomic(configPath, compose(false));
+    const refused = readers.map((codex) => probe(codex, configDir)).filter((result) => !result.ok && codexRejectedRelayKeys(result.error));
+    if (!refused.length) return { ok: true, method: "config", configPath };
+    writeTextAtomic(configPath, compose(true));
+    return { ok: true, method: "config", configPath, compat: true, olderCodex: refused.map((result) => result.codex) };
   } catch (error) {
     return {
       ok: false,

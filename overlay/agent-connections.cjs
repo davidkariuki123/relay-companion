@@ -80,6 +80,8 @@ function createAgentConnections({
       const known = key ? server.get(key) : null;
       return {
         hosts: local?.hosts || null,
+        // Per place a person opens: what proves Relay worked there.
+        places: local?.places || null,
         scannedAt: local?.scannedAt || 0,
         connections: known?.connections ?? null,
         connectionsError: known?.error || "",

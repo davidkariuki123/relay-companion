@@ -10,6 +10,16 @@
 //   live        a Relay MCP bridge is running under that app at this moment
 //   started     (Claude app) its own mcp.log says Relay started after launch
 //
+// And, per PLACE a person opens (2026-10-09, `places`): Claude Code in the
+// Claude app and in Terminal share one config but are two places, as are the
+// ChatGPT app and the Codex CLI. A place is green only from proof that Relay
+// worked THERE: a bridge under it now, a session it opened (host-evidence.js),
+// or its own transcripts (host-history.js). Registered and never seen is
+// "unproven", not connected. For Codex, the binary each place runs is asked to
+// read the config itself (`codex mcp get relay --json`): an older Codex that
+// cannot parse it (Conductor's bundled one, measured) is broken there,
+// whatever the file says.
+//
 // The Claude app reads its config once, at launch, so a registration it has
 // not loaded yet is "restart", not "connected". Codex (the ChatGPT app and the
 // CLI) and Claude Code start their tools per chat, so a new chat picks a fresh
@@ -24,6 +34,8 @@ import os from "node:os";
 import path from "node:path";
 import { claudeCliPath, codexCliPath } from "./capabilities.js";
 import { claudeDesktopConfigDirs, claudeDesktopConfigPathIn } from "./desktop-hosts.js";
+import { HOST_PLACES, placeOfAncestry, readHostEvidence } from "./host-evidence.js";
+import { readHostHistory } from "./host-history.js";
 
 export const AGENT_HOST_IDS = Object.freeze(["claude-app", "chatgpt-app", "claude-code", "codex", "conductor"]);
 
@@ -145,6 +157,10 @@ export function inspectAgentHosts({
   processes = null,
   // { claude, codex }: CLI paths found ahead of time (inspectAgentHostsAsync).
   cli = null,
+  // Proof, per place (see the header). null = not read yet.
+  evidence = null,
+  history = null,
+  hostChecks = null,
   now = Date.now(),
 } = {}) {
   const mac = platform === "darwin";
@@ -195,11 +211,21 @@ export function inspectAgentHosts({
     return !insideApp(head) && /(^|[/\\])codex$/.test(head);
   };
   const live = new Set();
+  // place -> when its oldest running Relay session started.
+  const livePlaces = new Map();
+  const apps = { claude: claudeApp, chatgpt: chatgptApp, conductor: conductorApp };
   // A bridge of this home's Relay (~/.relay/bin), or Relay's own CLI.
   const ownBridge = (command) => BRIDGE.test(command)
     && (!/[/\\]\.relay[/\\]bin[/\\]/.test(command) || command.includes(path.join(homeDir, ".relay", "bin")));
   for (const row of table) {
     if (!ownBridge(row.command)) continue;
+    const chain = [];
+    for (let cursor = byPid.get(row.ppid), depth = 0; cursor && depth < 16; depth += 1, cursor = byPid.get(cursor.ppid)) {
+      chain.push(cursor.command);
+      if (cursor.pid <= 1) break;
+    }
+    const place = placeOfAncestry(chain, { apps });
+    if (place) livePlaces.set(place, Math.min(livePlaces.get(place) ?? Infinity, row.startedAt || 0));
     let nearest = "";
     let cursor = byPid.get(row.ppid);
     for (let depth = 0; cursor && depth < 16; depth += 1, cursor = byPid.get(cursor.ppid)) {
@@ -280,7 +306,64 @@ export function inspectAgentHosts({
     hosts.push({ id: "conductor", installed, where: conductorApp, registered, valid,
       running: Boolean(conductorMain), live: live.has("conductor"), state, configPath: "", startedAt: conductorMain?.startedAt || 0 });
   }
-  return { hosts, scannedAt: now };
+
+  // PLACES: what a person opens. Each says one thing, Connected or not, and
+  // says Connected only when that place's own app confirms Relay (its own
+  // `mcp get relay`, or the Claude app's own log) and nothing has failed
+  // there since. Past tool calls and the API refusing Relay's tools are kept
+  // underneath as the evidence; the person never has to read them.
+  const conductorBin = (name) => path.join(homeDir, "Library", "Application Support", "com.conductor.app", "bin", name);
+  const claudeHost = hosts[0];
+  const code = { registered: Boolean(codeEntry), valid: codeValid };
+  const codex = { registered: Boolean(codexEntry), valid: codexValid };
+  const defs = {
+    "claude-chat": { installed: Boolean(claudeApp), registered: Boolean(desktopEntry), valid: desktopValid, host: "claude-app" },
+    "claude-code:app": { installed: exists(claudeDesktopCode), ...code, host: "claude-code" },
+    "claude-code:terminal": { installed: Boolean(claudeCli), ...code, host: "claude-code" },
+    "claude-code:conductor": { installed: Boolean(conductorApp) && exists(conductorBin("claude")), ...code, host: "conductor" },
+    "codex:chatgpt-app": { installed: Boolean(chatgptApp), ...codex, host: "chatgpt-app" },
+    "codex:terminal": { installed: Boolean(codexCli), ...codex, host: "codex" },
+    "codex:conductor": { installed: Boolean(conductorApp) && exists(conductorBin("codex")), ...codex, host: "conductor" },
+  };
+  const places = {};
+  for (const place of HOST_PLACES) {
+    const def = defs[place];
+    const record = evidence?.[place] || null;
+    const past = history?.[place] || null;
+    const usedAt = Math.max(Number(record?.calledAt) || 0, Number(past?.usedAt) || 0);
+    const refusedAt = Number(past?.refusedAt) || 0;
+    const check = hostChecks?.[place];
+    // connected: true | false | null (not known yet; never a guess)
+    let connected = false;
+    let action = "";
+    let reason = "";
+    if (!def.installed) { connected = false; }
+    else if (!def.registered) { action = "connect"; }
+    else if (!def.valid) { action = "fix"; reason = "registration_missing_files"; }
+    else if (place === "claude-chat" && claudeHost.state === "restart") { action = "restart"; reason = claudeHost.stopped ? "stopped" : "not_loaded"; }
+    else if (place === "claude-chat" && claudeHost.state === "broken") { action = "fix"; reason = "failed_to_start"; }
+    else if (check?.ok === false) { action = "fix"; reason = check.reason || "app_check_failed"; }
+    // Measured: Claude Code 2.1.156's API refused Relay's tool list; nothing
+    // Relay can rewrite fixes an old app, so the words say what will.
+    else if (refusedAt > usedAt) { reason = "app_too_old"; }
+    else if (check?.ok === true || (place === "claude-chat" && claudeHost.state === "connected")) { connected = true; }
+    // The app has not answered yet: a Relay call in a session open right now
+    // is proof enough; otherwise wait rather than guess.
+    else if (livePlaces.has(place) && usedAt > 0 && usedAt >= livePlaces.get(place) - 60_000) { connected = true; }
+    else { connected = null; }
+    places[place] = {
+      installed: def.installed,
+      host: def.host,
+      connected,
+      ...(action ? { action } : {}),
+      ...(reason ? { reason } : {}),
+      ...(check?.detail ? { detail: check.detail } : {}),
+      ...(check?.version || (reason === "app_too_old" && past?.refusedVersion) ? { version: check?.version || past.refusedVersion } : {}),
+      live: livePlaces.has(place),
+      usedAt,
+    };
+  }
+  return { hosts, places, scannedAt: now };
 }
 
 // The pill's main process must never block on a child process (a frozen pill
@@ -310,5 +393,157 @@ export async function inspectAgentHostsAsync(options = {}) {
     cliCache = { at: now, value: { claude, codex } };
   }
   const processes = (options.platform || process.platform) === "win32" ? [] : parseProcessTable(await run("/bin/ps", ["-axo", "uid=,pid=,ppid=,lstart=,command="]));
-  return inspectAgentHosts({ ...options, processes, cli: cliCache.value });
+  const store = evidenceHome(env, homeDir);
+  const appsDir = options.appsDir ?? env.RELAY_OVERLAY_TEST_APPS_DIR ?? "";
+  let history = options.history !== undefined ? options.history : historyFor({ homeDir, store, now });
+  let checks = options.hostChecks !== undefined ? { results: options.hostChecks, pending: [] }
+    : hostChecksFor({ homeDir, env, appsDir, cli: cliCache.value, now });
+  // The first scan waits for the apps' answers (the page says "Looking…"
+  // meanwhile), so no row ever shows a provisional state; later scans use
+  // what is known and refresh in the background.
+  if (!primed && (checks.pending.length || (history === null && historyState.pending))) {
+    const cap = new Promise((resolve) => setTimeout(resolve, FIRST_SCAN_WAIT_MS).unref?.());
+    await Promise.race([Promise.all([...checks.pending, historyState.pending].filter(Boolean)), cap]);
+    if (options.history === undefined) history = historyState.value;
+    if (options.hostChecks === undefined) checks = hostChecksFor({ homeDir, env, appsDir, cli: cliCache.value, now: Date.now() });
+  }
+  primed = true;
+  const evidence = options.evidence !== undefined ? options.evidence : readHostEvidence(store);
+  return inspectAgentHosts({ ...options, processes, cli: cliCache.value, evidence, history, hostChecks: checks.results });
+}
+
+/** Where Relay's own record lives: the companion store (host-paths.storeDir). */
+function evidenceHome(env, homeDir) {
+  return env.RELAY_HOME || env.RELAY_COMPANION_HOME || path.join(homeDir, ".relay-companion");
+}
+
+// The apps' own transcripts, read in the background at most once a minute
+// (awaited only by the first scan): they say where Relay was last used, and
+// where an app's API refused Relay's tools.
+const HISTORY_TTL_MS = 60_000;
+const FIRST_SCAN_WAIT_MS = 12_000;
+let primed = false;
+const historyState = { at: 0, value: null, pending: null, files: null, home: "" };
+function historyFor({ homeDir, store, now }) {
+  if (historyState.home !== homeDir) Object.assign(historyState, { at: 0, value: null, pending: null, files: null, home: homeDir });
+  const cacheFile = path.join(store, "host-evidence", "history-cache.json");
+  if (!historyState.files) historyState.files = readJson(cacheFile) || {};
+  if (!historyState.pending && (!historyState.value || now - historyState.at > HISTORY_TTL_MS)) {
+    historyState.pending = readHostHistory({ homeDir, now, cache: historyState.files })
+      .then((value) => {
+        Object.assign(historyState, { value, at: Date.now() });
+        try {
+          fs.mkdirSync(path.dirname(cacheFile), { recursive: true, mode: 0o700 });
+          fs.writeFileSync(`${cacheFile}.tmp`, JSON.stringify(historyState.files), { mode: 0o600 });
+          fs.renameSync(`${cacheFile}.tmp`, cacheFile);
+        } catch {}
+      })
+      .catch(() => {})
+      .finally(() => { historyState.pending = null; });
+  }
+  return historyState.value;
+}
+
+// Each place's own app, asked whether it has Relay, the way it will be when a
+// chat starts there. Claude Code's `mcp get relay` really connects to Relay
+// ("Status: ✔ Connected"); Codex's `mcp get relay --json` parses the whole
+// config (measured: Conductor's old Codex could not) and says if Relay is on.
+// Asked in the background, again when the app or its Relay entry changes, and
+// every few minutes, since a connection can stop working with nothing edited.
+const HOST_CHECK_TTL_MS = 5 * 60_000;
+const hostCheckCache = new Map(); // key -> { result, at } | { pending }
+function statMtime(file) {
+  try { return fs.statSync(file).mtimeMs; } catch { return 0; }
+}
+export function codexCheckFromOutput(code, stdout, stderr) {
+  if (code === 0) {
+    try {
+      const entry = JSON.parse(stdout);
+      if (entry?.enabled === false) return { ok: false, reason: "turned_off", detail: String(entry?.disabled_reason || "") };
+      return { ok: true };
+    } catch { return null; }
+  }
+  const text = `${stderr}\n${stdout}`;
+  if (/failed to load configuration|error loading config|invalid type|unknown variant|unknown field/i.test(text)) {
+    const line = text.split("\n").map((entry) => entry.trim().replace(/^\d+:\s*/, "")).find((entry) => /invalid|unknown|expected/i.test(entry)) || "";
+    // "<path>:497:1: invalid type…" → "line 497: invalid type…"
+    return { ok: false, reason: "settings_unreadable", detail: line.replace(/^.*?config\.toml:(\d+):\d+:\s*/, "line $1: ").slice(0, 200) };
+  }
+  // A Codex too old for --json, or no answer: not known, never assumed.
+  return null;
+}
+export function claudeCheckFromOutput(code, stdout, stderr) {
+  const text = `${stdout}\n${stderr}`;
+  const status = /Status:\s*(.+)/.exec(text)?.[1]?.trim() || "";
+  if (/✔|connected/i.test(status) && !/fail|not connected|✘|✗/i.test(status)) return { ok: true };
+  if (status) return { ok: false, reason: "app_check_failed", detail: status.replace(/^[✘✗]\s*/, "").slice(0, 200) };
+  return null;
+}
+/** The Claude Code the Claude app's Code tab runs: the newest one it downloaded. */
+function claudeAppCli(homeDir) {
+  const root = path.join(homeDir, "Library", "Application Support", "Claude", "claude-code");
+  let versions = [];
+  try { versions = fs.readdirSync(root).filter((name) => /^\d+\.\d+\.\d+/.test(name)); } catch { return ""; }
+  const order = (a, b) => a.split(/[.-]/).map(Number).reduce((diff, part, i) => diff || part - (Number(b.split(/[.-]/)[i]) || 0), 0);
+  for (const version of versions.sort(order).reverse()) {
+    let builds = [];
+    try { builds = fs.readdirSync(path.join(root, version)); } catch {}
+    for (const build of builds) {
+      const bin = path.join(root, version, build, "claude.app", "Contents", "MacOS", "claude");
+      if (exists(bin)) return bin;
+    }
+  }
+  return "";
+}
+function hostChecksFor({ homeDir, env, appsDir, cli, now }) {
+  if (appsDir) return { results: {}, pending: [] };
+  const support = path.join(homeDir, "Library", "Application Support");
+  const chatgpt = ["ChatGPT", "Codex"].map((name) => path.join("/Applications", `${name}.app`, "Contents", "Resources", "codex")).find(exists) || "";
+  const codexConfig = env.CODEX_CONFIG || path.join(env.CODEX_HOME || path.join(homeDir, ".codex"), "config.toml");
+  const claudeConfig = env.CLAUDE_CODE_CONFIG || path.join(homeDir, ".claude.json");
+  // Claude rewrites ~/.claude.json constantly; only its Relay entry matters.
+  const claudeEntry = JSON.stringify(jsonRelayEntry(claudeConfig) || null);
+  const checks = {
+    "claude-code:app": { bin: claudeAppCli(homeDir), kind: "claude" },
+    "claude-code:terminal": { bin: cli?.claude || "", kind: "claude" },
+    "claude-code:conductor": { bin: path.join(support, "com.conductor.app", "bin", "claude"), kind: "claude" },
+    "codex:chatgpt-app": { bin: chatgpt, kind: "codex" },
+    "codex:terminal": { bin: cli?.codex && !/\.app[/\\]/.test(cli.codex) ? cli.codex : "", kind: "codex" },
+    "codex:conductor": { bin: path.join(support, "com.conductor.app", "bin", "codex"), kind: "codex" },
+  };
+  // A clean environment: never a Claude session's own variables.
+  const childEnv = { ...env, HOME: homeDir };
+  for (const key of Object.keys(childEnv)) if (/^(CLAUDECODE|CLAUDE_CODE_|CLAUDE_SESSION_ID|ANTHROPIC_BASE_URL)/.test(key)) delete childEnv[key];
+  const results = {};
+  const pending = [];
+  for (const [place, { bin, kind }] of Object.entries(checks)) {
+    if (!bin || !exists(bin)) continue;
+    let real = bin;
+    try { real = fs.realpathSync(bin); } catch {}
+    const key = kind === "codex"
+      ? `${real}|${statMtime(real)}|${codexConfig}|${statMtime(codexConfig)}`
+      : `${real}|${statMtime(real)}|${claudeEntry}`;
+    const known = hostCheckCache.get(key);
+    if (known?.result) results[place] = known.result;
+    if (known?.pending) { pending.push(known.pending); continue; }
+    if (known?.result && now - known.at < HOST_CHECK_TTL_MS) continue;
+    const version = /[/\\](?:codex|claude)(?:-code)?[/\\](\d+\.\d+\.\d+[^/\\]*)[/\\]/.exec(real)?.[1] || "";
+    const args = kind === "codex" ? ["mcp", "get", "relay", "--json"] : ["mcp", "get", "relay"];
+    const promise = new Promise((resolve) => {
+      execFile(bin, args, { encoding: "utf8", timeout: 20_000, cwd: homeDir, env: childEnv }, (error, stdout, stderr) => {
+        if (error?.killed) return resolve(null);
+        const code = error ? (typeof error.code === "number" ? error.code : 1) : 0;
+        const parse = kind === "codex" ? codexCheckFromOutput : claudeCheckFromOutput;
+        const result = parse(code, String(stdout || ""), String(stderr || ""));
+        resolve(result ? { ...result, ...(version ? { version } : {}) } : null);
+      });
+    }).then((result) => {
+      if (result) hostCheckCache.set(key, { result, at: Date.now() });
+      else if (known?.result) hostCheckCache.set(key, known);
+      else hostCheckCache.delete(key);
+    });
+    hostCheckCache.set(key, { ...(known?.result ? { result: known.result, at: known.at } : {}), pending: promise });
+    pending.push(promise);
+  }
+  return { results, pending };
 }

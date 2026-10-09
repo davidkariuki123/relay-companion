@@ -20,6 +20,7 @@ import { CHAT_READ_TOOLS, recordReadTiming, withReadContext } from "./read-conte
 import { accountDriftMessage } from "./account.js";
 import { apiUrl, readConfig } from "./config.js";
 import { storeDir } from "./host-paths.js";
+import { createHostWitness } from "./host-evidence.js";
 import { resolveAccountProductFeatures, retryAccountProductFeatures } from "./product-features.js";
 import { recordOutboundTaskOrigin } from "./task-completion-wake.js";
 import { READ_ONLY_RELAY_TOOL_NAMES } from "./tool-permissions.js";
@@ -82,7 +83,6 @@ const CHAT_SEND_INPUT_SCHEMA = {
     idempotencyKey: { type: "string", description: "A unique key of at least 8 characters for this send." },
   },
   required: ["forHuman", "idempotencyKey"],
-  anyOf: [{ required: ["chatId"] }, { required: ["threadId"] }],
 };
 
 // The one thing an agent sends unasked, said next to the send gate so the two
@@ -275,6 +275,13 @@ const ALWAYS_LOAD_META = Object.freeze({ "anthropic/alwaysLoad": true });
 // Codex's `writes` approval mode uses this annotation before a call reaches
 // Companion. Session updates only advance this agent session's notice cursor;
 // they do not change a person's read state or anything shared with others.
+//
+// No inputSchema has a top-level anyOf/allOf/oneOf (David, 2026-10-09): the
+// Anthropic API rejects them ("input_schema does not support oneOf, allOf, or
+// anyOf at the top level"), and only newer Claude Code flattens them first.
+// Conductor 0.61's bundled Claude Code 2.1.156 sent ours as-is, so every
+// session there died on its first turn. "This or that" rules live in the
+// field descriptions and the handler, like relay_send's.
 export const TOOLS = [
   ...TOPIC_EXTRA_TOOLS,
   {
@@ -297,14 +304,6 @@ export const TOOLS = [
         maxCharsPerItem: { type: "number", description: "Maximum characters returned for one message or tool record; defaults to 12,000 and maxes at 40,000." },
       },
       required: ["action"],
-      allOf: [
-        {
-          if: { properties: { action: { enum: ["get", "read", "search", "agents"] } } },
-          then: { required: ["aiSessionId"] },
-        },
-        { if: { properties: { action: { const: "operation" } } }, then: { required: ["operationId"] } },
-        { if: { properties: { action: { const: "search" } } }, then: { required: ["query"] } },
-      ],
     },
   },
   {
@@ -327,10 +326,6 @@ export const TOOLS = [
         idempotencyKey: { type: "string", description: "Unique key for this exact start or send." },
       },
       required: ["action", "message", "idempotencyKey"],
-      allOf: [
-        { if: { properties: { action: { const: "send" } } }, then: { required: ["aiSessionId"] } },
-        { if: { properties: { action: { const: "start" } } }, then: { required: ["provider"] } },
-      ],
     },
   },
   {
@@ -1087,7 +1082,6 @@ export const TOOLS = [
             "Opaque internal reply-chain key from a Relay. Resolves to its enclosing direct conversation or channel. Pass this or chatId.",
         },
       },
-      anyOf: [{ required: ["chatId"] }, { required: ["threadId"] }],
     },
   },
   {
@@ -1099,7 +1093,7 @@ export const TOOLS = [
   {
     name: "relay_message_edit",
     description:
-      `Edit the human-facing payload, agent-facing payload, or both on a message this human sent, when the human asks for the change. Use an exact relayId from relay_sent_list or relay_chat_fetch. Sender-only; only ordinary messages can be edited. A message published at a share link keeps its url and the page shows the new text. Every recipient sees the edit and it counts as unread for them again. Omit a payload to leave it unchanged; pass an empty forAgent to remove the agent document. For group messages Relay updates every fan-out copy atomically. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
+      `Edit the human-facing payload, agent-facing payload, or both on a message this human sent, when the human asks for the change. Use an exact relayId from relay_sent_list or relay_chat_fetch. Sender-only; only ordinary messages can be edited. A message published at a share link keeps its url and the page shows the new text. Every recipient sees the edit and it counts as unread for them again. Change at least one of forHuman, forAgent, nature or asks; omit a payload to leave it unchanged, and pass an empty forAgent to remove the agent document. For group messages Relay updates every fan-out copy atomically. ${FOR_HUMAN_COMPOSITION_SUMMARY}`,
     inputSchema: {
       type: "object",
       properties: {
@@ -1112,7 +1106,6 @@ export const TOOLS = [
         idempotencyKey: { type: "string" },
       },
       required: ["relayId", "idempotencyKey"],
-      anyOf: [{ required: ["forHuman"] }, { required: ["forAgent"] }, { required: ["nature"] }, { required: ["asks"] }],
     },
   },
   {
@@ -2954,6 +2947,7 @@ export async function createRelayMcpSession({
   onClose = null,
   sessionDigestEnabled = true,
   profileRetryDelaysMs = undefined,
+  hostWitness = createHostWitness({ homeDir: storeDir(), bridgePid: sessionContext.bridgePid }),
 } = {}) {
   if (!transport) throw new Error("Relay MCP session requires a transport");
   const client = clientFactory();
@@ -3001,6 +2995,8 @@ export async function createRelayMcpSession({
   // so this wraps that handler and sets the text it will return.
   server.setRequestHandler(InitializeRequestSchema, async (request) => {
     rememberCallingClient(request?.params?.clientInfo, sessionContext);
+    // The proof the Setup page reads: this host really started Relay.
+    hostWitness.connected(request?.params?.clientInfo);
     server._instructions = instructionsForClient(startupInstructions, request?.params?.clientInfo, features);
     return server._oninitialize(request);
   });
@@ -3016,7 +3012,9 @@ export async function createRelayMcpSession({
     accountDriftRefusal(client);
     const surface = relayCallingSurface(sessionContext);
     const catalog = toolsForAccount(features, surface);
-    return { tools: withSessionUpdates(withSubscribedTopics(catalog, { accountScope: client.token || "" }), sessionContext) };
+    const tools = withSessionUpdates(withSubscribedTopics(catalog, { accountScope: client.token || "" }), sessionContext);
+    hostWitness.listed(tools.length);
+    return { tools };
   });
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     require("../bootstrap/installation-health.cjs").recordTransport("mcp");
@@ -3027,7 +3025,12 @@ export async function createRelayMcpSession({
     // before every call, check the account on disk against the one this server
     // was bound to, and refuse rather than answer for the wrong person.
     const refusal = accountDriftRefusal(client);
-    if (refusal) return refusal;
+    if (refusal) {
+      hostWitness.refused("account_drift");
+      return refusal;
+    }
+    // Answered at all (even a refused send) is the host reaching Relay.
+    hostWitness.called();
     let releaseAttachment = null;
     try {
       if (sessionContext.attachmentGate && hasAttachmentPayload(req.params.arguments || {})) {

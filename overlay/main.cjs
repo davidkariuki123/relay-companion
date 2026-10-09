@@ -4548,15 +4548,53 @@ async function cachedPickerRail(provider, routing) {
   return rows;
 }
 
+// A chat or channel message (msg_ id) lives on the server, not in this
+// device's received-packet store, so handing it to Claude Code or Codex found
+// no row ("That Relay is no longer available on this device": David, Open in
+// Claude Code from a Slack card, 2026-10-09). Stage it from the server the way
+// a remotely started session does (session-controller materializeRelayOperation),
+// as already read: opening it is not news.
+async function stageServerRelayForDelivery(id) {
+  if (!/^(msg|relay)_[A-Za-z0-9_]+$/.test(id)) return null;
+  const [client, stagePlainRelayItem] = await Promise.all([relayClient(), loadPlainStager()]);
+  const fetched = await client.fetchRelay(id);
+  const packet = fetched && fetched.packet;
+  if (!packet || packet.id !== id) return null;
+  stagePlainRelayItem({
+    item: {
+      relayId: packet.id,
+      state: "read",
+      createdAt: packet.createdAt,
+      updatedAt: packet.editedAt || packet.createdAt,
+      kind: packet.kind,
+      ...(packet.title ? { title: packet.title } : {}),
+      sender: packet.sender,
+      preview: packet.forHuman,
+      inReplyToRelayId: packet.inReplyToRelayId,
+      threadId: packet.threadId || packet.id,
+      recipientGroupId: packet.recipientGroupId,
+      recipientGroupName: packet.recipientGroupName,
+    },
+    packet,
+    attachmentUrls: fetched.attachmentUrls || {},
+  }, { statePath: STATE_PATH });
+  return rowById(id);
+}
+
 async function sessionDeliveryRow(packetId, source = "relay") {
   const id = String(packetId || "");
   if (source !== "sent") {
-    const row = rowById(id);
+    const row = rowById(id) || await stageServerRelayForDelivery(id).catch(() => null);
     if (!row) throw new Error("That Relay is no longer available on this device");
     return { packetId:id, row, originalId:id, source:"relay" };
   }
   const sentItem = (sentCache || []).find((item) => String(item.relayId || item.id || "") === id);
-  if (!sentItem) throw new Error("That sent Relay is no longer available on this device");
+  if (!sentItem) {
+    // A message you sent in a chat is a server message too.
+    const row = rowById(id) || await stageServerRelayForDelivery(id).catch(() => null);
+    if (row) return { packetId:id, row, originalId:id, source:"relay" };
+    throw new Error("That sent Relay is no longer available on this device");
+  }
   const stageSentRelayItem = await loadSentStager();
   const staged = stageSentRelayItem({ item:sentItem, sender:account() }, { statePath:STATE_PATH });
   const row = rowById(staged.itemId);

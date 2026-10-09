@@ -268,29 +268,36 @@ test("every human-message writing surface preserves the sender's intended speech
 
 });
 
-test("conditional schemas are used only where they do not erase critical writing fields", () => {
-  const sessions = byName.get("relay_ai_sessions").inputSchema;
-  assert.deepEqual(sessions.allOf, [
-    {
-      if: { properties: { action: { enum: ["get", "read", "search", "agents"] } } },
-      then: { required: ["aiSessionId"] },
-    },
-    { if: { properties: { action: { const: "operation" } } }, then: { required: ["operationId"] } },
-    { if: { properties: { action: { const: "search" } } }, then: { required: ["query"] } },
-  ]);
-  const session = byName.get("relay_ai_session").inputSchema;
-  assert.deepEqual(session.allOf, [
-    { if: { properties: { action: { const: "send" } } }, then: { required: ["aiSessionId"] } },
-    { if: { properties: { action: { const: "start" } } }, then: { required: ["provider"] } },
-  ]);
-  assert.deepEqual(byName.get("relay_chat_fetch").inputSchema.anyOf, [
-    { required: ["chatId"] },
-    { required: ["threadId"] },
-  ]);
-  assert.deepEqual(byName.get("relay_chat_send").inputSchema.anyOf, [
-    { required: ["chatId"] },
-    { required: ["threadId"] },
-  ]);
+// The Anthropic API rejects a tool whose input_schema has a top-level
+// anyOf/allOf/oneOf, and only newer Claude Code flattens them first. Conductor
+// 0.61's bundled Claude Code 2.1.156 sent ours as-is and every session died on
+// its first turn (2026-10-09). Every catalog, every surface, stays plain.
+test("no tool schema has a top-level combinator, on any surface", () => {
+  const features = { requests: true, aiSessions: true, agentMentions: true, connectors: true, messageMutations: true, topics: true };
+  for (const surface of ["claude_code", "codex", "unknown"]) {
+    for (const tool of [...TOOLS, ...toolsForAccount(features, surface)]) {
+      for (const key of ["anyOf", "allOf", "oneOf", "if", "then", "else", "not"]) {
+        assert.equal(tool.inputSchema?.[key], undefined, `${tool.name} (${surface}) has top-level ${key}`);
+      }
+      assert.equal(tool.inputSchema?.type, "object", `${tool.name} input schema is a plain object`);
+    }
+  }
+});
+
+test("the rules the schemas no longer carry are said where the agent reads them", () => {
+  const sessions = byName.get("relay_ai_sessions").inputSchema.properties;
+  assert.match(sessions.aiSessionId.description, /Required for get\/read\/search\/agents/);
+  assert.match(sessions.operationId.description, /Required for operation/);
+  assert.match(sessions.query.description, /Required for search/);
+  const session = byName.get("relay_ai_session").inputSchema.properties;
+  assert.match(session.aiSessionId.description, /Required when action='send'/);
+  assert.match(session.provider.description, /Required when action='start'/);
+  for (const name of ["relay_chat_fetch", "relay_chat_send"]) {
+    const props = byName.get(name).inputSchema.properties;
+    assert.match(props.chatId.description, /Pass this or threadId/);
+    assert.match(props.threadId.description, /Pass this or chatId/);
+  }
+  assert.match(byName.get("relay_message_edit").description, /Change at least one of forHuman, forAgent, nature or asks/);
   assert.equal(byName.get("relay_send").inputSchema.allOf, undefined,
     "relay_send keeps a plain object schema; the handler enforces conditional rules");
 });

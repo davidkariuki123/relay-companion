@@ -3819,7 +3819,14 @@
   .setup-page .cv-blocked-back { margin-left:10px; }
   .setup-page h2 { margin:10px 16px 6px; font:500 25px/1.2 var(--serif); color:var(--ink); }
   .setup-page .cv-blocked-copy { margin:0 16px 4px; }
-  .setup-page .sv-open-section { margin-top:20px; }
+  .setup-page .sv-open-section { margin-top:22px; }
+  /* A heading here is the caption of the card under it (David, 2026-10-09):
+     quiet, on the logos' line, with room above the card, never as loud as
+     the app names it labels. */
+  .setup-page .sv-open-title { padding:0 12px; margin-bottom:8px; font-size:12px; line-height:1.3; color:var(--muted); letter-spacing:.005em; }
+  .setup-page .sv-open-intro { padding:0 12px; }
+  .setup-page .sv-open-title + .sv-open-intro { margin-top:-3px; }
+  .setup-page .setup-all { font-size:12px; }
   .setup-row .sv-choose { min-width:76px; }
   /* One row per app a person opens; its modes (Chat, Code…) underneath. */
   .setup-app { align-items:flex-start; }
@@ -12818,6 +12825,7 @@
       const result = await commitReaction(id, emoji, "add");
       if (result && result.ok) clearRowNote(id);
       renderAll();
+      if (result && result.ok) revealReactions(id);
     });
     for (const undo of scope.querySelectorAll("[data-rx-undo]")) undo.addEventListener("click", async (event) => {
       event.stopPropagation();
@@ -13113,6 +13121,24 @@
     const under = bubble.nextElementSibling?.classList.contains("th-under") ? bubble.nextElementSibling : bubble;
     const covered = under.getBoundingClientRect().bottom + 8 - dock.getBoundingClientRect().top;
     if (covered > 0) roomScrollElement().scrollTop += covered;
+  }
+  // A reaction you just added hangs below its bubble, so on the newest message
+  // it lands under the composer dock. Glide it into view; never scroll up.
+  function revealReactions(id) {
+    const roomId = threadDetailId;
+    requestAnimationFrame(() => {
+      if (activeView !== "threads" || threadDetailId !== roomId) return;
+      const bubble = thHistoryEl?.querySelector(`[data-msg="${CSS.escape(String(id))}"]`);
+      const badges = bubble?.querySelector(".rx-badges");
+      const scroller = roomScrollElement();
+      if (!badges || !scroller) return;
+      const dock = thHistoryEl.querySelector(".th-composer-dock")?.getBoundingClientRect();
+      const bottom = Math.min(scroller.getBoundingClientRect().bottom, dock?.top ?? Infinity) - 8;
+      const covered = badges.getBoundingClientRect().bottom - bottom;
+      if (covered <= 0) return;
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      scroller.scrollBy({ top:covered, behavior:reduce ? "auto" : "smooth" });
+    });
   }
   // Ending an edit, saved or not, gives the composer back what it had.
   function endThreadEdit(stateKey) {
@@ -20146,6 +20172,7 @@
         const result = await commitReaction(id, emoji, action);
         if (result && result.ok && action === "remove") reactionNotes.delete(id);
         if (!result || !result.ok) { badge.disabled = false; renderThreadDetail(); }
+        else if (action === "add") revealReactions(id);
       });
     }
     wireReactionControls(newControls);
@@ -21415,7 +21442,8 @@
     // Connected, and how we know.
     if (host.live) return { dot:"live", text:`Connected · ${host.id === SETUP_RIDER ? "in use now" : "working now"}` };
     if (host.id === "claude-app") return { dot:"ok", text:host.running ? "Connected" : "Connected · ready when you open it" };
-    if (host.id === SETUP_RIDER) return { dot:"ok", text:"Connected · through Claude Code and Codex" };
+    // Never green on borrowed proof: Conductor runs its own Claude Code and Codex.
+    if (host.id === SETUP_RIDER) return { dot:"", text:"Uses its own Claude Code and Codex" };
     return { dot:"ok", text:host.id === "chatgpt-app" ? "Connected · new Codex chats have it" : "Connected · new chats have it" };
   }
   function setupDotHtml(dot) { return dot ? `<span class="setup-dot ${dot}" aria-hidden="true"></span>` : ""; }
@@ -21440,38 +21468,76 @@
   function setupAppGroups(hosts) {
     const by = Object.fromEntries(hosts.map((host) => [host.id, host]));
     const groups = [];
+    // Each mode names its PLACE (2026-10-09): Claude Code in the Code tab and
+    // in Terminal share a config but each is judged on its own proof.
     if (by["claude-app"]) groups.push({ key:"claude-app", name:"Claude app", mark:SETUP_LOCAL["claude-app"].mark,
-      modes:[{ label:"Chat", host:by["claude-app"] }, ...(by["claude-code"] ? [{ label:"Code", host:by["claude-code"] }] : [])] });
+      modes:[{ label:"Chat", host:by["claude-app"], place:"claude-chat" }, ...(by["claude-code"] ? [{ label:"Code", host:by["claude-code"], place:"claude-code:app" }] : [])] });
     if (by["chatgpt-app"]) groups.push({ key:"chatgpt-app", name:"ChatGPT app", mark:SETUP_LOCAL["chatgpt-app"].mark,
-      modes:[{ label:"Chat & Codex", host:by["chatgpt-app"] }] });
+      modes:[{ label:"Chat & Codex", host:by["chatgpt-app"], place:"codex:chatgpt-app" }] });
     const terminal = [
-      ...(by["claude-code"] && (by["claude-code"].where === "terminal" || !by["claude-app"]) ? [{ label:"Claude Code", host:by["claude-code"] }] : []),
-      ...(by.codex && (by.codex.where === "terminal" || !by["chatgpt-app"]) ? [{ label:"Codex", host:by.codex }] : []),
+      ...(by["claude-code"] && (by["claude-code"].where === "terminal" || !by["claude-app"]) ? [{ label:"Claude Code", host:by["claude-code"], place:"claude-code:terminal" }] : []),
+      ...(by.codex && (by.codex.where === "terminal" || !by["chatgpt-app"]) ? [{ label:"Codex", host:by.codex, place:"codex:terminal" }] : []),
     ];
     if (terminal.length) groups.push({ key:"terminal", name:"Terminal", mark:terminal[0].host.id === "codex" ? SETUP_LOCAL.codex.mark : SETUP_LOCAL["claude-code"].mark, modes:terminal });
-    if (by[SETUP_RIDER]) groups.push({ key:SETUP_RIDER, name:SETUP_LOCAL[SETUP_RIDER].name, mark:SETUP_LOCAL[SETUP_RIDER].mark, modes:[{ label:"", host:by[SETUP_RIDER] }] });
+    // Conductor runs its own Claude Code and Codex: one line each, never a
+    // borrowed "through Claude Code and Codex".
+    if (by[SETUP_RIDER]) {
+      const places = setupSnapshot?.places;
+      const modes = places
+        ? [["Claude", `claude-code:${SETUP_RIDER}`], ["Codex", `codex:${SETUP_RIDER}`]].filter(([, place]) => places[place]?.installed)
+          .map(([label, place]) => ({ label, host:by[SETUP_RIDER], place }))
+        : [];
+      groups.push({ key:SETUP_RIDER, name:SETUP_LOCAL[SETUP_RIDER].name, mark:SETUP_LOCAL[SETUP_RIDER].mark, modes: modes.length ? modes : [{ label:"", host:by[SETUP_RIDER] }] });
+    }
     return groups;
   }
   /** One mode's words: short, about what the person can do there now. */
-  function setupModeStatus(host) {
-    const status = setupLocalStatus(host);
-    if (status.disabled) return status;
-    if (status.action === "restart") {
-      const armed = setupArmed === `restart:${host.id}`;
-      return { ...status, text: host.stopped ? "Relay stopped" : "Restart to finish", verb: armed ? "Restart Claude?" : "Restart", armed };
+  // CONNECTED OR NOT (David, 2026-10-09: "the user wants to know if it's
+  // connected or not connected"). One word per place, from that place's own
+  // app confirming Relay (agent-host-status.js); the evidence stays
+  // underneath, in the row's tooltip. Not connected carries the one verb that
+  // fixes it, or the few words that say what will.
+  function setupPlaceWhy(place) {
+    const version = place.version ? ` ${place.version}` : "";
+    switch (place.reason) {
+      case "settings_unreadable": return `Its Codex${version} can’t read ~/.codex/config.toml${place.detail ? ` (${place.detail})` : ""}`;
+      case "turned_off": return "Relay is turned off in Codex’s settings";
+      case "app_check_failed": return `Its Claude Code says: ${place.detail || "failed to connect"}`;
+      case "app_too_old": return `Claude Code${version} can’t use Relay’s tools. A newer version can.`;
+      case "stopped": return "Relay stopped in Claude’s chats";
+      case "not_loaded": return "Claude hasn’t loaded Relay since it opened";
+      default: return place.reason ? "Relay’s setup here is broken" : "";
     }
-    if (status.action === "connect") return { ...status, text: host.state === "broken" ? "Needs a fix" : status.dot === "bad" ? status.text : "Not connected" };
-    if (host.live) return { ...status, text:"Working now" };
-    if (host.id === "claude-app") return { ...status, text: host.running ? "Connected" : "Ready when you open it" };
-    if (host.id === SETUP_RIDER) return { ...status, text:"Through Claude Code and Codex" };
-    return { ...status, text:"Ready in new chats" };
+  }
+  function setupPlaceStatus(place, host) {
+    if (place.connected === true) return { dot:"ok", text:"Connected" };
+    if (place.connected === null) return { dot:"", text:"Checking…" };
+    const title = setupPlaceWhy(place);
+    if (place.action === "restart") {
+      const armed = setupArmed === `restart:${host.id}`;
+      return { dot:"", text:"Not connected", verb: armed ? "Restart Claude?" : "Restart", action:"restart", armed, title };
+    }
+    if (place.action === "connect") return { dot:"", text:"Not connected", verb:"Connect", action:"connect", title };
+    if (place.action === "fix") return { dot:"", text:"Not connected", verb:"Fix", action:"connect", title };
+    // Nothing Relay can rewrite fixes an app that is too old: say what will.
+    const app = host.id === SETUP_RIDER ? SETUP_LOCAL[SETUP_RIDER].name : "Claude Code";
+    return { dot:"", text: place.reason === "app_too_old" ? `Not connected · update ${app}` : "Not connected", title };
+  }
+  function setupModeStatus(host, placeId = "") {
+    const status = setupLocalStatus(host);
+    // Connecting / restarting, and the outcome of a verb just used, are said as they are.
+    if (status.disabled || setupSnapshot?.notes?.[host.id]?.tone === "error") return status;
+    const place = placeId ? setupSnapshot?.places?.[placeId] : null;
+    if (place) return setupPlaceStatus(place, host);
+    if (status.action) return { ...status, text:"Not connected" };
+    return { ...status, dot: host.live ? "ok" : "", text: host.live ? "Connected" : "Checking…" };
   }
   function setupAppRowHtml(group) {
-    const allOk = group.modes.every(({ host }) => { const status = setupModeStatus(host); return !status.action && !status.disabled; });
-    const lines = group.modes.map(({ label, host }) => {
-      const status = setupModeStatus(host);
+    const allOk = group.modes.every(({ host, place }) => setupModeStatus(host, place).text === "Connected");
+    const lines = group.modes.map(({ label, host, place }) => {
+      const status = setupModeStatus(host, place);
       const verb = status.verb ? `<button class="sv-choose${status.warn ? " warn" : ""}${status.armed ? " armed" : ""}" type="button" data-setup-${status.action || "busy"}="${host.id}"${status.action === "restart" ? ` title="Quits and reopens the Claude app. Chats in progress there close."` : ""}${status.disabled ? " disabled" : ""}>${esc(status.verb)}</button>` : "<span></span>";
-      return `<span class="setup-mode">${label ? `<span class="setup-mode-name">${esc(label)}</span>` : "<span></span>"}<span class="setup-mode-state">${setupDotHtml(status.dot)}<span class="setup-why-text">${esc(status.text)}</span></span>${verb}</span>`;
+      return `<span class="setup-mode">${label ? `<span class="setup-mode-name">${esc(label)}</span>` : "<span></span>"}<span class="setup-mode-state"${status.title ? ` title="${esc(status.title)}"` : ""}>${setupDotHtml(status.dot)}<span class="setup-why-text">${esc(status.text)}</span></span>${verb}</span>`;
     }).join("");
     return `<div class="sv-open-row setup-row setup-app${allOk ? " ok" : ""}${group.modes.some(({ host }) => setupJust.has(host.id)) ? " just" : ""}" data-setup-row="${group.key}">
       <img class="sv-open-logo" src="${group.mark}" alt="" />
@@ -21611,7 +21677,14 @@
     // Codex's app and CLI share one config, so either one answers.
     const host = (app === "Codex" ? ["chatgpt-app", "codex"] : ["claude-code"]).map(setupHost).find((entry) => entry?.installed);
     if (!host) return "";
-    return host.state === "available" ? "Not connected" : host.state === "broken" ? "Needs a fix" : "";
+    // The same answer as Your AIs: connected where its own app says so.
+    const places = setupSnapshot?.places;
+    if (places) {
+      const mine = (app === "Codex" ? ["codex:chatgpt-app", "codex:terminal"] : ["claude-code:app", "claude-code:terminal"]).map((id) => places[id]).filter((place) => place?.installed);
+      if (mine.some((place) => place.connected === true) || mine.some((place) => place.connected === null)) return "";
+      if (mine.length) return "Not connected";
+    }
+    return host.state === "available" || host.state === "broken" ? "Not connected" : "";
   }
   /** Every app here that one click can connect (a restart is always its own click). */
   function setupConnectAllIds() {
@@ -21635,12 +21708,16 @@
     const shown = [...new Set(marks.length ? marks : hosts.map((host) => SETUP_LOCAL[host.id].mark))].slice(0, 3);
     const count = connectedLocal.length + webSurfaces.length;
     const first = todo[0];
+    // A place its own app says is not connected (Conductor only where offered).
+    const placeGap = !first && Object.entries(setupSnapshot?.places || {}).some(([id, place]) => place.installed && place.connected === false
+      && (place.host !== SETUP_RIDER || setupRiderOffered()) && setupHost(place.host)?.installed);
     const why = !setupSnapshot ? "Checking…"
+      : placeGap ? "Something here isn’t connected"
       : first?.state === "restart" ? (first.stopped ? "Relay stopped in Claude’s chats" : "Restart Claude to finish")
       : first ? `${SETUP_LOCAL[first.id].name} ${first.state === "broken" ? "needs a fix" : "isn’t connected yet"}${todo.length > 1 ? ` · ${todo.length - 1} more` : ""}`
       : count ? "Everything here is connected" : "Claude, ChatGPT and more";
     // Something to do reads as the row's line; otherwise the marks say it.
-    const attention = Boolean(setupSnapshot && (first || !count));
+    const attention = Boolean(setupSnapshot && (first || placeGap || !count));
     return `<button class="sv-row setup-entry" type="button" id="setupEntry">
         <span class="sv-row-copy"><span class="sv-row-name">Your AIs</span>${attention ? `<span class="sv-row-sub${first ? " warn" : ""}">${first ? setupDotHtml(first.state === "restart" ? "warn" : first.state === "broken" ? "bad" : "") : ""}${esc(why)}</span>` : ""}</span>
         ${!attention && shown.length ? `<span class="setup-marks" aria-hidden="true">${shown.map((mark) => `<img src="${mark}" alt="">`).join("")}</span>` : ""}
