@@ -46,7 +46,7 @@ test("a bare second instance cannot reopen the pill", () => {
   assert.notEqual(handlerEnd, -1);
   const handler = main.slice(handlerStart, handlerEnd);
   const guard = handler.indexOf("if (!nonce) return;");
-  const reopen = handler.indexOf("requestExternalReopen(nonce)");
+  const reopen = handler.indexOf("requestExternalReopen(nonce");
   assert.ok(guard >= 0, "bare second instances need an explicit-intent guard");
   assert.ok(reopen > guard, "the nonce guard must run before reopening the pill");
 });

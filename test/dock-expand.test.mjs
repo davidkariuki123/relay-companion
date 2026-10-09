@@ -17,7 +17,13 @@ test("an open from Relay.app or `relay pill --expand` asks the pill for the full
   assert.equal(expandRequestedByArgs(["main.cjs", "--relay-from-application", "--relay-reopen", "n"]), true);
   assert.equal(expandRequestedByArgs(["main.cjs", "--relay-reopen", "n"]), false);
   const second = between(main, 'app.on("second-instance"', "\n  });");
-  assert.match(second, /requestExternalReopen\(nonce\);\n\s+if \(expandRequestedByArgs\(argv\)\) requestAppExpand\(\);/);
+  // A Dock open is labelled "app" so the renderer never drops a full app to
+  // the mini card on the way; anything else ("mini") opens the mini card.
+  assert.match(second, /const expand = expandRequestedByArgs\(argv\) && currentProductFeatures\(\)\.fullAppExpand === true;\n\s+requestExternalReopen\(nonce, \{ mode: expand \? "app" : "mini" \}\);\n\s+if \(expand\) requestAppExpand\(\);/);
+  // A click on the pill's own Dock icon is the same open, but never the
+  // activate macOS sends as the app first launches.
+  assert.match(main, /const dockClick = pillReady && currentProductFeatures\(\)\.fullAppExpand === true;/);
+  assert.match(preload, /onOpenFull: \(cb\) => ipcRenderer\.on\("openFull", \(_event, nonce, mode\) => cb\(nonce, mode\)\)/);
   assert.match(main, /if \(pendingReopenNonce\) requestExternalReopen\(pendingReopenNonce\);\n\s+else writePillStatus\(\);\n\s+if \(pendingAppExpand\) requestAppExpand\(\);/);
   const request = between(main, "function requestAppExpand()", "\n}\n");
   assert.match(request, /currentProductFeatures\(\)\.fullAppExpand !== true/);

@@ -174,17 +174,29 @@ try {
   assert.equal(await width(), FULL.w, 'Back never collapses the expanded app');
   assert.equal(await page.locator('#wideEmpty').isVisible(), true);
 
-  // Folding to the pill and back keeps the mode; the pill is the pill.
+  // A click on the top bar folds the full app to the pill, and the pill has
+  // no memory of it: it opens to the mini card (David, 2026-10-09).
   await page.locator('#lockup .word').click();
   await page.waitForFunction(() => collapsed);
   await settle();
   assert.equal(await wide(), false, 'the folded pill never wears the two-pane grid');
   assert.equal(await width(), 244);
+  assert.equal(await page.evaluate(() => appExpanded), false, 'folding forgets the full app');
   await page.locator('#lockup .word').click();
   await page.waitForFunction(() => !collapsed);
   await settle();
-  assert.equal(await wide(), true);
-  assert.equal(await width(), FULL.w);
+  assert.equal(await wide(), false, 'the pill opens to the mini card');
+  assert.equal(await width(), 344);
+  // The menu-bar icon opens the mini card even over the full app; the Dock
+  // opens the full app.
+  await page.locator('#wideToggle').click(); await page.waitForFunction(() => appExpanded); await settle();
+  await page.evaluate(() => window.events.onOpenFull('', 'mini'));
+  await page.waitForFunction(() => !appExpanded); await settle();
+  assert.equal(await width(), 344, 'the menu-bar icon means the mini card');
+  await page.locator('#wideToggle').click(); await page.waitForFunction(() => appExpanded); await settle();
+  await page.evaluate(() => window.events.onOpenFull('', 'app'));
+  await settle();
+  assert.equal(await width(), FULL.w, 'a Dock open never drops the full app to mini');
 
   // Without the developer gate, Expand keeps the two-thirds card.
   await page.evaluate(() => { payload.features.fullAppExpand = false; });
@@ -196,8 +208,25 @@ try {
   await page.locator('#wideToggle').click(); await page.waitForFunction(() => appExpanded); await settle();
   assert.equal(await width(), FULL.w);
 
-  // The mode outlives a restart.
-  assert.equal(await page.evaluate(() => localStorage.getItem('relayAppExpanded')), '1');
+  // A message that arrives while the full app is in view shows there; one that
+  // arrives while another app covers it folds Relay back to its banner.
+  const arrive = (id) => page.evaluate((id) => { const r = { id, threadId:'room-' + id, state:'delivered', unread:true, relayNotificationKind:'plain_relay', senderName:'Shane Acton',
+    senderEmail:'shane@example.test', title:'', forHuman:'New ' + id, forAgent:'', createdAt:new Date().toISOString(), attachments:[] };
+    window.fixture.relays.push(r); window.events.onInbox(structuredClone(window.fixture)); window.events.onNewRelay([r], {}); }, id);
+  await arrive('relay-in-view'); await settle();
+  assert.deepEqual(await page.evaluate(() => [appExpanded, collapsed, peeking]), [true, false, false], 'a full app in view keeps its place');
+  await page.evaluate(() => Object.defineProperty(document, 'visibilityState', { configurable:true, get:() => 'hidden' }));
+  await arrive('relay-covered'); await settle();
+  await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable:true, get:() => 'visible' }); document.dispatchEvent(new Event('visibilitychange')); });
+  await settle();
+  assert.deepEqual(await page.evaluate(() => [appExpanded, peeking]), [false, true], 'a covered full app folds to the banner');
+  assert.ok(await page.locator('.relay-arrival').count() >= 1, 'the arrival is on the banner');
+  await page.evaluate(() => foldToPill()); await page.waitForFunction(() => collapsed && !peeking); await settle();
+  await page.locator('#lockup .word').click(); await page.waitForFunction(() => !collapsed); await settle();
+  await page.locator('#wideToggle').click(); await page.waitForFunction(() => appExpanded); await settle();
+
+  // Nothing about Expand is remembered across a restart.
+  assert.equal(await page.evaluate(() => localStorage.getItem('relayAppExpanded')), null);
 
   // Collapse is the one way out, and it keeps what is open.
   await page.locator('#relaysList .relay-row[data-party="Kiara Moodley"]').click();
@@ -209,7 +238,6 @@ try {
   assert.equal(await wide(), false);
   assert.deepEqual(await state(), { view:'threads', room:'room-kiara', expanded:false }, 'Collapse keeps the open chat');
   assert.equal(await page.locator('#relaysView').evaluate(el => el.closest('#scroll') !== null), true, 'the list went home to the small card');
-  assert.equal(await page.evaluate(() => localStorage.getItem('relayAppExpanded')), '0');
   assert.deepEqual(errors, []);
   console.log('expanded app: ok');
 } finally {

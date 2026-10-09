@@ -4782,7 +4782,10 @@
   const WIDE = { w: 900, h: 760 };
   const WIDE_SIDE = EXPANDED.w; // the sidebar IS the small card's list, at its own width
   let wideDomReady = false; // the expanded app's DOM helpers are defined further down
-  let appExpanded = (() => { try { return localStorage.getItem("relayAppExpanded") === "1"; } catch { return false; } })();
+  // Expand has no memory (David, 2026-10-09): the pill always opens to the
+  // mini card, after a fold or a restart alike. Only the Dock opens the full
+  // app; the Expand switch is the one way there from the card.
+  let appExpanded = false;
   // YOUR SIZE (ao1 feedback, 2026-10-08: "sometimes the chat box gets in the
   // way. Being able to drag to resize would help"). Drag the card's left or
   // bottom edge, or its bottom-left corner, and each frame keeps the size you
@@ -5387,6 +5390,13 @@
     // moves the room's scroller, so its place is anchored to a message.
     const inRoom = activeView === "threads" && Boolean(threadDetailId);
     if (v && inRoom) foldRoomScroll = { threadId:threadDetailId, scroll:captureRoomScroll() };
+    // Folding forgets the full app: the pill opens to the mini card again.
+    if (v && appExpanded) {
+      appExpanded = false;
+      compactRoomResizeReturn = null;
+      if (setupPaneAuto) { setupPageOpen = false; setupPaneAuto = false; stopSetupPolling(); }
+      syncExpandButton();
+    }
     collapsed = v;
     if (!collapsed) presented = true; // expanded on purpose: the reader is looking at it
     refreshCountLabel();
@@ -5602,6 +5612,13 @@
   // transient banner. Medium and reader-size cards retain their current view,
   // including the initial expanded card before any explicit open gesture.
   function notifyArrival(rows, meta) {
+    // The full app behind another app (Cmd+Tab back to Claude) hears nothing
+    // it can show. A full app the person cannot see folds back to the pill,
+    // and the arrival takes the banner every other message takes. One still
+    // in view (say on a second screen) keeps its place and shows it there.
+    if (typeof appExpanded !== "undefined" && appExpanded && !collapsed && !peeking && !ghost && document.visibilityState === "hidden") {
+      setCollapsed(true);
+    }
     const onStageFull = !collapsed && !peeking && !ghost
       && !cardEl.classList.contains("offstage") && !cardEl.classList.contains("bye");
     // Main defers setup notifications; also cover an arrival already in flight
@@ -20670,7 +20687,6 @@
       ? (appExpanded && compactRoomResizeReturn?.threadId === threadDetailId ? compactRoomResizeReturn.scroll : captureRoomScroll())
       : null;
     compactRoomResizeReturn = inRoom && next ? { threadId:threadDetailId, scroll:roomScroll } : null;
-    try { localStorage.setItem("relayAppExpanded", next ? "1" : "0"); } catch {}
     dismissReactionPickers();
     startCardViewTransition(() => {
       if (!next) sessionPickerState = null;
@@ -21551,6 +21567,22 @@
   function setupUsedWords(item) {
     return item.lastUsedAt ? `Used ${timeAgoWords(item.lastUsedAt)}` : `Connected ${timeAgoWords(item.createdAt)}`;
   }
+  // CONNECTED OR NOT, ON THE WEB TOO (David, 2026-10-09). The server marks a
+  // connection seen on every request it authenticates, so a Claude Code
+  // session starting (it loads the Claude account's connector too, measured)
+  // read as "used Claude on the web 29m ago". The row says only Connected or
+  // Not connected. A connection Claude or ChatGPT has not reached in 30 days
+  // is a leftover (removed or re-added there, never revoked here): it does
+  // not count, and its line says so, with Disconnect.
+  const SETUP_WEB_LIVE_MS = 30 * 24 * 60 * 60 * 1000;
+  function setupConnectionLive(item) {
+    const at = Date.parse(item.lastUsedAt || item.createdAt || "");
+    return Number.isFinite(at) && Date.now() - at < SETUP_WEB_LIVE_MS;
+  }
+  function setupShortDate(iso) {
+    const date = new Date(iso || "");
+    return Number.isFinite(date.getTime()) ? date.toLocaleDateString(undefined, { month:"short", day:"numeric" }) : "";
+  }
   function setupWebRowHtml(surface) {
     const meta = SETUP_WEB[surface];
     const connections = setupConnectionsFor(surface);
@@ -21558,12 +21590,12 @@
     const claudeWaiting = surface === "claude" && setupSnapshot?.claudeConnector?.started && !connections.length;
     const waiting = run?.status === "pending" || claudeWaiting;
     const open = setupTray === surface;
-    const newest = connections.slice().sort((a, b) => String(b.lastUsedAt || b.createdAt).localeCompare(String(a.lastUsedAt || a.createdAt)))[0];
+    const live = connections.filter(setupConnectionLive);
     const status = waiting ? { dot:"wait", text:`Waiting for ${meta.name}…` }
-      : connections.length ? { dot:"ok", text:`${connections.length > 1 ? `${connections.length} chats connected` : "Connected"} · ${setupUsedWords(newest).toLowerCase()}` }
-      : { dot:"", text:meta.web };
+      : live.length ? { dot:"ok", text:"Connected" }
+      : { dot:"", text:"Not connected" };
     const row = (inner, tag) => tag === "button"
-      ? `<button class="sv-open-row setup-row${connections.length ? " ok" : ""}${setupJust.has(surface) ? " just" : ""}" type="button" data-setup-web="${surface}" aria-expanded="${open ? "true" : "false"}">${inner}</button>`
+      ? `<button class="sv-open-row setup-row${live.length ? " ok" : ""}${setupJust.has(surface) ? " just" : ""}" type="button" data-setup-web="${surface}" aria-expanded="${open ? "true" : "false"}">${inner}</button>`
       : `<div class="sv-open-row setup-row" data-setup-row="${surface}">${inner}</div>`;
     const copy = `<img class="sv-open-logo" src="${meta.mark}" alt="" />
       <span class="sv-open-copy"><span class="sv-open-name">${meta.name}</span>
@@ -21574,8 +21606,9 @@
       : row(`${copy}<button class="sv-choose" type="button" data-setup-web-connect="${surface}">Connect</button>`, "div");
     let tray = "";
     if (open) {
+      // Each connection: which one (when it was added) and whether it still counts.
       const items = connections.map((item) => `<div class="setup-conn">
-          <span class="setup-conn-copy"><span class="setup-conn-name">${esc(item.kind === "connector" ? `${item.name} connector` : item.name)}</span><span class="setup-conn-when">${esc(setupUsedWords(item))}</span></span>
+          <span class="setup-conn-copy"><span class="setup-conn-name">${esc(item.kind === "connector" ? `${item.name} connector` : item.name)}</span><span class="setup-conn-when">${esc(`${setupConnectionLive(item) ? "Connected" : `Not used since ${setupShortDate(item.lastUsedAt || item.createdAt)}`} · added ${setupShortDate(item.createdAt)}`)}</span></span>
           <button class="sv-choose${setupArmed === item.id ? " armed" : ""}" type="button" data-setup-disconnect="${esc(item.id)}"${setupSnapshot?.busy?.[item.id] ? " disabled" : ""}>${setupSnapshot?.busy?.[item.id] ? "Disconnecting…" : setupArmed === item.id ? "Disconnect?" : "Disconnect"}</button>
         </div>`).join("");
       const request = claudeWaiting
@@ -21588,11 +21621,16 @@
         : setupPreparing === surface ? `<div class="setup-tray-status" role="status">${setupDotHtml("wait")}Preparing…</div>`
         // Redeemed, and the server's list not read yet: the code itself is the evidence.
         : run?.status === "connected" && !Array.isArray(setupSnapshot?.connections) ? `<div class="setup-tray-status" role="status">${setupDotHtml("ok")}Connected</div>`
+        // Only leftovers here: connecting again is the way back.
+        : !live.length ? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="${surface}">Connect</button>`
         // Claude's connector already covers every Claude chat: nothing to add.
         : connections.length && surface !== "claude" ? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="${surface}">Connect another chat</button>`
         : "";
+      // Claude's connector belongs to the Claude account, not to claude.ai:
+      // the Claude app and Claude Code load it too (measured).
+      const whose = surface === "claude" && connections.length ? `<div class="setup-tray-copy">Your Claude account’s connector: claude.ai, the Claude app and Claude Code all use it.</div>` : "";
       // Nothing left to show (the last chat was disconnected): fold away.
-      tray = items || request ? `<div class="open-actions setup-tray">${items}${request}</div>` : "";
+      tray = items || request ? `<div class="open-actions setup-tray">${whose}${items}${request}</div>` : "";
       if (!tray) setTimeout(() => { if (setupTray === surface) { setupTray = ""; renderSettings(); } }, 0);
     }
     return `<div class="setup-web${open ? " open" : ""}">${head}${tray}</div>`;
@@ -25190,13 +25228,16 @@
     })();
   });
   let lastExternalOpenAt = 0;
-  if (window.relay.onOpenFull) window.relay.onOpenFull((nonce) => {
+  if (window.relay.onOpenFull) window.relay.onOpenFull((nonce, mode) => {
     // macOS can deliver activate and second-instance for one human action.
     // Restore once, but acknowledge each caller after presentation.
     const now = performance.now();
     if (!lastExternalOpenAt || now - lastExternalOpenAt > 250
         || cardEl.classList.contains("offstage") || cardEl.classList.contains("bye") || collapsed) trayOpen();
     lastExternalOpenAt = now;
+    // The menu-bar icon opens the mini card, even over the full app; the Dock
+    // ("app") opens the full app through relay:expandApp.
+    if (mode === "mini" && appExpanded && !collapsed) setAppExpanded(false);
     if (!nonce) return;
     const deadline = performance.now() + 4000;
     // The entrance animation may still be transparent or above the viewport on

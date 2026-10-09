@@ -8771,7 +8771,10 @@ function createTrayIcon() {
 }
 
 let lastTrayShowAt = 0;
-function showFromTray(reopenNonce = "") {
+// `mode` says which Relay the person asked for: "mini" (the menu-bar icon,
+// `relay pill`) opens the mini card even over the full app; "app" (the Dock,
+// Relay.app) leaves the renderer to the full app that relay:expandApp opens.
+function showFromTray(reopenNonce = "", mode = "mini") {
   lastTrayShowAt = Date.now();
   explicitOpenHold = startExplicitOpenHold({ now: lastTrayShowAt });
   setOverlayElevated(true);
@@ -8783,7 +8786,7 @@ function showFromTray(reopenNonce = "") {
   // user reaches the Settings toggle that turns the preference off.
   explicitlyOpened = true;
   maybeShow({ force: true, userInitiated: true });
-  if (win && !win.isDestroyed()) win.webContents.send("openFull", reopenNonce);
+  if (win && !win.isDestroyed()) win.webContents.send("openFull", reopenNonce, mode);
   syncTray();
 }
 
@@ -8791,7 +8794,7 @@ function showFromTray(reopenNonce = "") {
 // Electron forwards that launch to this single-instance owner. Treat it exactly like
 // an explicit "Show Relay" action: revoke any old dismissal, open the full card, and
 // acknowledge the caller only after the OS window reports visible.
-function requestExternalReopen(reopenNonce = "") {
+function requestExternalReopen(reopenNonce = "", { mode = "mini" } = {}) {
   if (reopenNonce) {
     pendingReopens.add(String(reopenNonce));
     pendingReopenNonce = String(reopenNonce);
@@ -8802,8 +8805,8 @@ function requestExternalReopen(reopenNonce = "") {
   // A second launch must not overwrite another caller's pending receipt. Native
   // visibility alone is insufficient: the renderer acknowledges the restored card.
   const nonces = [...pendingReopens];
-  showFromTray(nonces[0] || "");
-  for (const nonce of nonces.slice(1)) win.webContents.send("openFull", nonce);
+  showFromTray(nonces[0] || "", mode);
+  for (const nonce of nonces.slice(1)) win.webContents.send("openFull", nonce, mode);
   return pillIsOnScreen();
 }
 
@@ -11076,13 +11079,21 @@ if (!gotSingleInstanceLock) {
     // KeepAlive job retries. Losing the lock must be silent and idempotent.
     if (!nonce) return;
     pollHosts();
-    requestExternalReopen(nonce);
-    if (expandRequestedByArgs(argv)) requestAppExpand();
+    const expand = expandRequestedByArgs(argv) && currentProductFeatures().fullAppExpand === true;
+    requestExternalReopen(nonce, { mode: expand ? "app" : "mini" });
+    if (expand) requestAppExpand();
   });
 
   // LaunchServices may reactivate the existing process instead of executing the
   // launcher again. Activation is still an explicit user request to restore Relay.
-  app.on("activate", () => requestExternalReopen());
+  // A click on Relay's own Dock icon opens the full app, like Relay.app's.
+  // macOS also sends activate as the app first launches: that one is not a
+  // click, and a pill must never boot into the full app.
+  app.on("activate", () => {
+    const dockClick = pillReady && currentProductFeatures().fullAppExpand === true;
+    requestExternalReopen("", { mode: dockClick ? "app" : "mini" });
+    if (dockClick) requestAppExpand();
+  });
 
   app.whenReady().then(async () => {
     if (installedFirstOnboarding) {
