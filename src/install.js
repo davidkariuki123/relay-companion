@@ -21,6 +21,7 @@ import { canonicalOwnershipGuard, verifyCanonicalCandidate } from "./canonical-r
 import { ensureStableHookLauncher, removeStableHookLauncher, stableHookLauncherPath, stableWindowsHookScriptPath } from "./hook-launcher.js";
 import { readConfig, writeConfig } from "./config.js";
 import { codexCliPath } from "./capabilities.js";
+import installedApps from "./installed-apps.cjs";
 import { READ_ONLY_RELAY_TOOL_NAMES } from "./tool-permissions.js";
 import { deleteInstallationAuthorizationCredentials } from "./installation-authorization.js";
 import applicationOwnership from "../bootstrap/application-owner.cjs";
@@ -2120,13 +2121,10 @@ export function removeTomlTable(text, tableName) {
 export function codexConfigReaders({ env = process.env, homedir = os.homedir() } = {}) {
   // Test seam: a colon-separated list stands in for this Mac's own binaries.
   if (env.RELAY_CODEX_CONFIG_READERS !== undefined) return String(env.RELAY_CODEX_CONFIG_READERS).split(":").filter(Boolean);
+  // The CLI and the ChatGPT app's own codex are installed-apps.cjs's answer.
   const candidates = [
-    codexCliPath({ env }),
-    path.join(homedir, ".local", "bin", "codex"),
-    "/opt/homebrew/bin/codex",
-    "/usr/local/bin/codex",
-    "/Applications/ChatGPT.app/Contents/Resources/codex",
-    "/Applications/Codex.app/Contents/Resources/codex",
+    codexCliPath({ env, homedir }),
+    installedApps.codexAppBinary({ env, homedir }),
     path.join(homedir, "Library", "Application Support", "com.conductor.app", "bin", "codex"),
   ];
   const seen = new Set();

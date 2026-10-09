@@ -6,7 +6,7 @@ import fs from "node:fs";
 const require = createRequire(import.meta.url);
 const { createAgentOnboarding } = require("../overlay/agent-onboarding.cjs");
 
-function harness({ schemes = {}, openFails = false } = {}) {
+function harness({ schemes = {}, openFails = false, chatGptApp = false } = {}) {
   const calls = [];
   let clock = Date.parse("2026-10-07T12:00:00Z");
   let status = "pending";
@@ -22,7 +22,7 @@ function harness({ schemes = {}, openFails = false } = {}) {
     async cancelAgentSetupRun(id) { calls.push(["cancel", id]); },
     async agentOnboarding() { calls.push(["onboarding"]); return { kind: "hello", inviter: { name: "Sam", relayUserId: "usr_sam" } }; },
     connectors: [],
-    async mcpBrowserHandoff(provider) { calls.push(["handoff", provider]); return { url: "https://sendrelays.com/connect/claude#handoff=mcp_handoff.x.y" }; },
+    async mcpBrowserHandoff(provider) { calls.push(["handoff", provider]); return { url: `https://sendrelays.com/connect/${provider}#handoff=mcp_handoff.x.y` }; },
     async agentConnections() { calls.push(["connections"]); return { connections: this.connectors }; },
   };
   const store = {};
@@ -33,6 +33,7 @@ function harness({ schemes = {}, openFails = false } = {}) {
     schemeOwner: (scheme) => schemes[scheme] || "",
     openExternal: async (url) => { if (openFails && url.startsWith("claude://")) throw new Error("refused"); opened.push(url); },
     writeClipboard: (text) => copied.push(text), now: () => clock,
+    chatGptApp: () => chatGptApp,
   });
   return { onboarding, calls, store, opened, copied, client, tick: (ms) => { clock += ms; }, setStatus: (value) => { status = value; } };
 }
@@ -117,7 +118,7 @@ test("the pill wires the chooser, the single handoff and the server's first-Rela
   assert.match(html, /Which AI do you use most\?/);
   assert.match(html, /Where do you use \$\{esc\(option\.name\)\}\?/);
   assert.match(html, /Paste this into<br>\$\{onboardingAgentTitleName\(agent\)\}\./);
-  assert.match(html, /if \(status !== "checking" && agent && \(!onboardingAgentConnected\(agent\) \|\| claudeCelebrating\)\) \{ renderAgentSetup\(agent\); return; \}/);
+  assert.match(html, /if \(status !== "checking" && agent && \(!onboardingAgentConnected\(agent\) \|\| connectorCelebrating\)\) \{ renderAgentSetup\(agent\); return; \}/);
   assert.match(html, /if \(option\.host === "claude"\) \{ renderClaudeConnect\(agent, option\); return; \}/, "Claude connects by connector, with no where screen");
   assert.match(html, /\[key\("Continue"\), `Scroll down <span class="su-wheel"[^`]*`, key\("Add"\), key\("Connect"\), key\("Allow"\)\]/, "the clicks are drawn as buttons, and scrolling to Add is a step of its own");
   assert.match(html, /Connected as \$\{who\}\. This screen updates when your/);
@@ -208,4 +209,83 @@ test("after connecting, Claude's Write/delete tools go to Always allow before th
 test("picking ChatGPT in the chooser goes straight to the browser, with no where-question", () => {
   const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
   assert.match(html, /chooseOnboardingAgent\(button\.dataset\.agentChoose, button\.dataset\.agentChoose === "chatgpt" \? "browser" : ""\)/);
+});
+
+// RELAY_CHATGPT_APP (2026-10-09): with the server's switch on, ChatGPT connects
+// by Relay's ChatGPT app, the hosted connector Claude uses, and its lesson
+// starts in an ordinary ChatGPT chat with the start sentence typed in.
+test("with the ChatGPT app on, ChatGPT connects by its app: no place, no code, one handoff to Relay's page in ChatGPT", async () => {
+  const h = harness({ chatGptApp: true });
+  const key = "user:usr_alex";
+  const chosen = h.onboarding.choose(key, "chatgpt", "browser");
+  assert.equal(chosen.place, "", "the app works wherever ChatGPT does");
+  assert.deepEqual(chosen.connector, { started: false, connected: false, checked: false, error: "" });
+  assert.equal((await h.onboarding.poll(key)).connector.checked, true);
+  assert.deepEqual(h.opened, [], "nothing opens by itself");
+  const started = await h.onboarding.connectChatGptApp(key);
+  assert.deepEqual(h.calls.filter(([name]) => name === "handoff"), [["handoff", "chatgpt"]]);
+  assert.equal(h.opened[0], "https://sendrelays.com/connect/chatgpt#handoff=mcp_handoff.x.y");
+  assert.equal(started.connector.started, true);
+  // A Claude connector is not ChatGPT's app.
+  h.client.connectors = [{ kind: "connector", surface: "claude", name: "Claude", createdAt: "2026-10-07T12:02:00.000Z" }];
+  assert.equal((await h.onboarding.poll(key)).connectedAt, "", "still waiting for ChatGPT");
+  h.client.connectors.push({ kind: "connector", surface: "chatgpt", name: "ChatGPT", createdAt: "2026-10-07T12:03:00.000Z" });
+  const opensBefore = h.opened.length;
+  const connected = await h.onboarding.poll(key);
+  assert.ok(connected.connectedAt);
+  assert.equal(connected.via, "connector");
+  assert.equal(h.opened.length, opensBefore, "nothing opens by itself");
+  assert.deepEqual(h.copied, [], "nothing is copied behind the person's back");
+  assert.equal(h.calls.some(([name]) => name === "create"), false, "the app never gets a setup code");
+  // The lesson: an ordinary chat (not Work), with the whole sentence typed in.
+  assert.equal(connected.startPrompt, "Help me get started with Relay.");
+  await h.onboarding.open(key);
+  assert.equal(h.opened.at(-1), "https://chatgpt.com/?q=Help%20me%20get%20started%20with%20Relay.");
+  assert.deepEqual(h.copied, [], "opening ChatGPT never touches the clipboard");
+  await h.onboarding.copyPrompt(key);
+  assert.equal(h.copied.at(-1), "Help me get started with Relay.", "Copy instead copies the same sentence");
+  // Choosing ChatGPT again keeps how it connected.
+  assert.equal(h.onboarding.choose(key, "chatgpt", "browser").via, "connector");
+});
+
+test("with the ChatGPT app off, ChatGPT keeps its setup code and cannot take the connector path", async () => {
+  const h = harness();
+  const key = "user:usr_alex";
+  const chosen = h.onboarding.choose(key, "chatgpt", "browser");
+  assert.equal(chosen.place, "browser");
+  assert.equal(chosen.connector, null);
+  await assert.rejects(() => h.onboarding.connectChatGptApp(key), /setup message/);
+  assert.deepEqual(h.opened, []);
+  assert.equal(h.calls.some(([name]) => name === "handoff"), false);
+});
+
+test("a ChatGPT connected by a setup code is not sent to an ordinary chat", async () => {
+  const h = harness();
+  const key = "user:usr_alex";
+  h.onboarding.choose(key, "chatgpt", "browser");
+  await h.onboarding.prepare(key);
+  h.setStatus("connected");
+  const connected = await h.onboarding.poll(key);
+  assert.ok(connected.connectedAt);
+  assert.equal(connected.via, "", "connected by its code, whose chat runs the lesson");
+});
+
+test("the pill draws ChatGPT's app screens with the steps as keys, and starts the lesson after it connects", () => {
+  const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+  const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+  const preload = fs.readFileSync(new URL("../overlay/preload.cjs", import.meta.url), "utf8");
+  assert.match(html, /if \(option\.host === "chatgpt" && agent\.connector\) \{ renderChatGptConnect\(agent, option\); return; \}/);
+  assert.match(html, /`Click <span class="su-key">Open ChatGPT<\/span>`,\n\s+`On Relay’s page in ChatGPT, click <span class="su-key">Connect<\/span>`,\n\s+`On Relay’s page, click <span class="su-key">Allow<\/span>`/);
+  assert.match(html, /Waiting for ChatGPT…/);
+  assert.match(html, /agent\?\.host === "chatgpt" && agent\.via === "connector" && agent\.connectedAt && !agent\.tutorialStarted\) \{ renderChatGptStart\(agent\); return; \}/);
+  // The whole sentence, never a shortened copy, and exactly what to press.
+  const start = html.slice(html.indexOf("function renderChatGptStart(agent)"), html.indexOf("async function connectOnboardingChatGpt()"));
+  assert.match(start, /<div class="su-first-message"><span>\$\{esc\(sentence\)\}<\/span><\/div>/);
+  assert.match(start, /Click <span class="su-key">Open ChatGPT<\/span> below/);
+  assert.match(start, /In ChatGPT, press <span class="su-key su-key-send chatgpt">/);
+  assert.match(main, /chatGptApp: \(\) => currentProductFeatures\(\)\.chatGptApp === true,/);
+  assert.match(main, /ipcMain\.handle\("relay:onboardingConnectChatGptApp", agentOnboardingIpc\(\(key\) => agentOnboarding\.connectChatGptApp\(key\)\)\)/);
+  assert.match(main, /ipcMain\.handle\("relay:setupConnectChatGptApp", setupIpc\(/);
+  assert.match(preload, /onboardingConnectChatGptApp: \(userId\) => ipcRenderer\.invoke\("relay:onboardingConnectChatGptApp"/);
+  assert.match(preload, /setupConnectChatGptApp: \(userId\) => ipcRenderer\.invoke\("relay:setupConnectChatGptApp"/);
 });

@@ -942,6 +942,53 @@ async function refuseTaskRun(client, operation) {
   } catch {}
 }
 
+// Publishing the entire native directory on every tick cost the server one
+// lookup and one upsert per session, hundreds of rows every few seconds per
+// device, when only a handful of sessions change between ticks. The server
+// reads a session as offline once the freshness window it names in each
+// publish response (freshForMs) passes, so the full inventory is still re-sent
+// inside half that window; between those heartbeats only rows whose
+// observation changed travel, and the controller heartbeat always does. The
+// on-disk copy of the published directory is merged across ticks so the pill
+// keeps every Relay-id to native-id binding, not just the rows sent last.
+const DEFAULT_SESSION_FRESH_FOR_MS = 15_000;
+export function createSessionPublishLedger() {
+  return { acknowledged: new Map(), sessions: new Map(), lastFullAt: 0, freshForMs: DEFAULT_SESSION_FRESH_FOR_MS };
+}
+const defaultSessionPublishLedger = createSessionPublishLedger();
+
+function observationKey(row) {
+  return `${row.provider}:${row.placement}:${row.placementId}:${row.nativeId}`;
+}
+function observationStamp(row) {
+  return createHash("sha1").update(JSON.stringify(row)).digest("hex");
+}
+
+export function selectObservationsToPublish(ledger, observations, nowMs = Date.now()) {
+  if (nowMs - ledger.lastFullAt >= ledger.freshForMs / 2) return { rows: observations, full: true };
+  return {
+    rows: observations.filter((row) => ledger.acknowledged.get(observationKey(row)) !== observationStamp(row)),
+    full: false,
+  };
+}
+
+export function recordPublishedObservations(ledger, { rows, full }, published, nowMs = Date.now()) {
+  for (const row of rows) ledger.acknowledged.set(observationKey(row), observationStamp(row));
+  if (full) {
+    // A session that left the inventory simply stops being refreshed, which is
+    // what the server already does with it; forgetting its stamp makes a
+    // return count as a change.
+    const live = new Set(rows.map(observationKey));
+    for (const key of [...ledger.acknowledged.keys()]) if (!live.has(key)) ledger.acknowledged.delete(key);
+    ledger.sessions = new Map();
+    ledger.lastFullAt = nowMs;
+  }
+  for (const session of published?.sessions || []) if (session?.id) ledger.sessions.set(session.id, session);
+  const freshForMs = Number(published?.freshForMs);
+  if (Number.isFinite(freshForMs) && freshForMs > 0) ledger.freshForMs = freshForMs;
+  return { ...published, sessions: [...ledger.sessions.values()] };
+}
+
 export async function runSessionDirectoryOnce({
   client,
   log = () => {},
@@ -953,6 +1000,9 @@ export async function runSessionDirectoryOnce({
   // Production developer accounts have Task runs but not AI sessions: answer
   // Task operations only, and publish this computer without scanning sessions.
   tasksOnly = false,
+  publishLedger = defaultSessionPublishLedger,
+  cache = cachePublishedSessions,
+  now = Date.now,
 } = {}) {
   // Owned chat agents are user-visible foreground work. Claim them before the
   // comparatively expensive local session scan/upload so a large native
@@ -989,12 +1039,17 @@ export async function runSessionDirectoryOnce({
   for (const operation of urgent) await claim(operation);
 
   const observations = tasksOnly ? [] : await discover();
-  const published = await client.publishSessionObservations(observations, controller());
-  cachePublishedSessions(published);
+  const batch = selectObservationsToPublish(publishLedger, observations, now());
+  // A failed upload leaves the ledger untouched, so the next tick resends the
+  // same rows (or the whole inventory) rather than trusting a publish that
+  // never landed.
+  const published = await client.publishSessionObservations(batch.rows, controller());
+  const directory = recordPublishedObservations(publishLedger, batch, published, now());
+  cache(directory);
   for (const operation of ordinary) {
     await claim(operation);
   }
-  return { sessions: published.sessions || [], queuedOperations: inbox.operations?.length || 0 };
+  return { sessions: directory.sessions || [], queuedOperations: inbox.operations?.length || 0 };
 }
 
 export function activeSessionOperationCount() {

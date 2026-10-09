@@ -10233,6 +10233,14 @@
     const selected = agentAppSelection();
     return ["Codex", "Claude Code"].filter((app) => selected.includes(app)).map(hostKeyFor);
   }
+  // The coding apps switched on in Your AIs, whether or not Relay can OPEN a
+  // Relay in them here (agentAppHosts asks that too). A Task card's Run block
+  // reads this: main already found which apps are installed and can run the
+  // Task, and on Windows they can run a Task though Open in is not there yet.
+  function agentAppsSwitchedOn() {
+    const requested = requestedAgentApps();
+    return ["Codex", "Claude Code"].filter((app) => requested.includes(app)).map(hostKeyFor);
+  }
   // Whether the chosen app takes a relay into a new chat, or only into a
   // terminal session. The letter's verb depends on it: an app opens the
   // relay; a session is told the sentence to say.
@@ -11099,7 +11107,7 @@
   };
   const TASK_RUN_FOLDER_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 4.2c0-.6.5-1 1-1h3.4l1.5 1.6h5.5c.6 0 1 .4 1 1v6.4c0 .6-.4 1-1 1H2.8c-.5 0-1-.4-1-1z"/></svg>';
   function taskRunProviders(plan) {
-    const on = agentAppHosts();
+    const on = agentAppsSwitchedOn();
     return (plan && plan.providers || []).filter((p) => TASK_RUN_APPS[p.provider]
       && (p.provider === "conductor" ? typeof conductorEnabled === "function" && conductorEnabled() : on.includes(p.provider)));
   }
@@ -18846,14 +18854,16 @@
   }
   // Where the sentence goes is main's call (overlay/chat-app-open.cjs): the
   // Claude app on this computer when the OS says it owns claude://, claude.ai
-  // otherwise; ChatGPT has no scheme on a computer and opens chatgpt.com.
+  // otherwise; ChatGPT has no scheme on a computer and opens chatgpt.com
+  // (an ordinary chat with Relay's ChatGPT app, Work without it).
   function openChatApp(app, message) {
     const key = app === "chatgpt" ? "chatgpt" : "claude";
     const prompt = chatAppPromptFor(message);
     if (window.relay.openChatApp) return window.relay.openChatApp(key, prompt);
     // A preload from before the bridge existed: the web app, as before.
     const q = encodeURIComponent(prompt);
-    window.relay.openUrl(key === "chatgpt" ? `https://chatgpt.com/work?q=${q}` : `https://claude.ai/new?q=${q}`);
+    const chatGpt = payload.features?.chatGptApp === true ? `https://chatgpt.com/?q=${q}` : `https://chatgpt.com/work?q=${q}`;
+    window.relay.openUrl(key === "chatgpt" ? chatGpt : `https://claude.ai/new?q=${q}`);
     return Promise.resolve({ ok: true, via: "web" });
   }
   // What Conductor's new workspace is told: the pull sentence every agent on
@@ -21586,9 +21596,14 @@
   function setupWebRowHtml(surface) {
     const meta = SETUP_WEB[surface];
     const connections = setupConnectionsFor(surface);
-    const run = surface !== "claude" && setupSnapshot?.run?.surface === surface && setupSnapshot.run.place === "browser" ? setupSnapshot.run : null;
+    // With the server's ChatGPT app switch on, ChatGPT connects by Relay's
+    // ChatGPT app, a hosted connector like Claude's, and never by a code.
+    const appConnects = surface === "chatgpt" && setupChatGptApp();
+    const run = surface !== "claude" && !appConnects && setupSnapshot?.run?.surface === surface && setupSnapshot.run.place === "browser" ? setupSnapshot.run : null;
     const claudeWaiting = surface === "claude" && setupSnapshot?.claudeConnector?.started && !connections.length;
-    const waiting = run?.status === "pending" || claudeWaiting;
+    const appConnector = connections.some((item) => item.kind === "connector");
+    const appWaiting = appConnects && setupSnapshot?.chatgptConnector?.started && !appConnector;
+    const waiting = run?.status === "pending" || claudeWaiting || appWaiting;
     const open = setupTray === surface;
     const live = connections.filter(setupConnectionLive);
     const status = waiting ? { dot:"wait", text:`Waiting for ${meta.name}…` }
@@ -21614,6 +21629,9 @@
       const request = claudeWaiting
         ? `<div class="setup-tray-copy">Relay is filled in there. Now:</div>${claudeKeysHtml(false)}
           <div class="setup-tray-actions" style="margin-top:10px"><button class="sv-choose" type="button" data-setup-web-connect="claude">Open Claude again</button></div>`
+        : appWaiting
+        ? `<div class="setup-tray-copy">Relay’s page is open in ChatGPT. Now:</div>${chatGptKeysHtml(false, true)}
+          <div class="setup-tray-actions" style="margin-top:10px"><button class="sv-choose" type="button" data-setup-web-connect="chatgpt">Open ChatGPT again</button></div>`
         : run && run.status !== "connected"
         ? `<div class="setup-tray-copy">${run.open ? `Opens a new ${meta.name} chat with Relay’s setup message. Send it, and this row turns to Connected.` : `Paste Relay’s setup message into a new ${meta.name} chat and send it.`}</div>
           <div class="setup-tray-actions">${run.open ? `<button class="sv-choose primary" type="button" data-setup-run-open="${surface}">Open ${meta.name}</button>` : ""}<button class="sv-choose${run.open ? "" : " primary"}" type="button" data-setup-run-copy="${surface}">${setupCopied ? "Copied" : "Copy message"}</button></div>
@@ -21624,11 +21642,14 @@
         // Only leftovers here: connecting again is the way back.
         : !live.length ? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="${surface}">Connect</button>`
         // Claude's connector already covers every Claude chat: nothing to add.
-        : connections.length && surface !== "claude" ? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="${surface}">Connect another chat</button>`
+        : connections.length && surface !== "claude" && !appConnects ? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="${surface}">Connect another chat</button>`
+        // A ChatGPT connected only by a setup code can still add Relay's app, which covers every chat.
+        : appConnects && !appConnector ? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="${surface}">Add Relay’s ChatGPT app</button>`
         : "";
       // Claude's connector belongs to the Claude account, not to claude.ai:
       // the Claude app and Claude Code load it too (measured).
-      const whose = surface === "claude" && connections.length ? `<div class="setup-tray-copy">Your Claude account’s connector: claude.ai, the Claude app and Claude Code all use it.</div>` : "";
+      const whose = surface === "claude" && connections.length ? `<div class="setup-tray-copy">Your Claude account’s connector: claude.ai, the Claude app and Claude Code all use it.</div>`
+        : appConnector ? `<div class="setup-tray-copy">Relay’s app in your ChatGPT account: every ChatGPT chat can use it.</div>` : "";
       // Nothing left to show (the last chat was disconnected): fold away.
       tray = items || request ? `<div class="open-actions setup-tray">${whose}${items}${request}</div>` : "";
       if (!tray) setTimeout(() => { if (setupTray === surface) { setupTray = ""; renderSettings(); } }, 0);
@@ -21873,13 +21894,19 @@
       renderSettings();
     }
   }
+  /** The server's RELAY_CHATGPT_APP switch, and a preload that can act on it. */
+  function setupChatGptApp() {
+    return payload.features?.chatGptApp === true && typeof window.relay?.setupConnectChatGptApp === "function";
+  }
   async function setupStartWeb(surface) {
     // Claude connects by connector: open its filled-in add screen at once and
-    // show the four keys to click while this row waits for it.
-    if (surface === "claude") {
+    // show the four keys to click while this row waits for it. ChatGPT's app
+    // (the server's switch on) is the same: Relay's page in ChatGPT, then keys.
+    if (surface === "claude" || (surface === "chatgpt" && setupChatGptApp())) {
+      const name = SETUP_WEB[surface].name;
       setupTray = surface; setupReveal = true; setupPreparing = surface; setupArmed = ""; renderSettings();
-      try { setupObserve(await window.relay.setupConnectClaude(setupUserId())); setupError = ""; }
-      catch (error) { setupError = String(error?.message || "").replace(/^Error invoking remote method '[^']+': (Error: )?/, "") || "Couldn’t open Claude. Try again."; }
+      try { setupObserve(await window.relay[surface === "claude" ? "setupConnectClaude" : "setupConnectChatGptApp"](setupUserId())); setupError = ""; }
+      catch (error) { setupError = String(error?.message || "").replace(/^Error invoking remote method '[^']+': (Error: )?/, "") || `Couldn’t open ${name}. Try again.`; }
       finally { setupPreparing = ""; }
       setupReveal = true;
       renderSettings();
@@ -23744,6 +23771,8 @@
       return;
     }
     if (option.host === "claude") { renderClaudeConnect(agent, option); return; }
+    // With the server's ChatGPT app switch on, ChatGPT connects the same way.
+    if (option.host === "chatgpt" && agent.connector) { renderChatGptConnect(agent, option); return; }
     if (option.chat && !agent.place) {
       stopOnboardingAgentPoll();
       signupBodyEl.innerHTML = `<div class="su-first-relay su-agent-screen"><p class="su-step">Your next step</p><h1 class="su-title">Where do you use ${esc(option.name)}?</h1>
@@ -23865,15 +23894,15 @@
       try {
         const before = payload.ui?.onboardingAgent;
         const snapshot = await onboardingAgentCall("onboardingPollAgent");
-        if (snapshot?.host === "claude") {
-          // Claude's connector arrived after Open Claude: tick the keys, then
-          // the handoff (main has already opened Claude's chat).
+        if (snapshot?.connector) {
+          // Claude's connector (or ChatGPT's app) arrived after Open: tick
+          // the keys, then the screen that starts the first chat.
           if (snapshot.connectedAt && !before?.connectedAt && before?.connector?.started) {
             stopOnboardingAgentPoll();
-            claudeJustConnected = Date.now() + 2000;
+            connectorJustConnected = Date.now() + 2000;
             payload.ui = { ...payload.ui, onboardingAgent: snapshot };
             renderSignup();
-            setTimeout(() => { claudeJustConnected = 0; renderSignup(); }, 2050);
+            setTimeout(() => { connectorJustConnected = 0; renderSignup(); }, 2050);
             return;
           }
           payload.ui = { ...payload.ui, onboardingAgent: snapshot };
@@ -23901,7 +23930,7 @@
   // account; the four clicks there are drawn as the buttons themselves. The
   // screen watches the server's list of connections, ticks the keys off when
   // Claude appears in it, and Claude's chat opens on its own.
-  let claudeJustConnected = 0;
+  let connectorJustConnected = 0;
   function claudeKeysHtml(done) {
     const tick = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.3l2.3 2.2L8.5 2.6"/></svg>';
     const key = (word) => `Click <span class="su-key">${word}</span>`;
@@ -23911,7 +23940,7 @@
   }
   function renderClaudeConnect(agent, option) {
     const connector = agent.connector || {};
-    const celebrating = claudeJustConnected > Date.now();
+    const celebrating = connectorJustConnected > Date.now();
     const signature = JSON.stringify(["claude", connector.started, connector.connected, connector.checked, connector.error, onboardingAgentBusy, onboardingAgentNote, celebrating]);
     if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-claude-connect")) return;
     signupBodyEl.dataset.firstRelaySignature = signature;
@@ -23948,6 +23977,85 @@
       signupBodyEl.dataset.firstRelaySignature = ""; renderSignup();
     });
     signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+  }
+  // CHATGPT CONNECTS BY ITS APP (2026-10-09), with the server's switch on.
+  // One button opens Relay's page in ChatGPT's plugin directory, through
+  // Relay's website carrying this app's account; the two clicks there are
+  // drawn as the buttons themselves, as Claude's are. The screen watches the
+  // server's list of connections and moves on when ChatGPT appears in it.
+  function chatGptKeysHtml(done, opened) {
+    const tick = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.3l2.3 2.2L8.5 2.6"/></svg>';
+    const rows = [
+      `Click <span class="su-key">Open ChatGPT</span>`,
+      `On Relay’s page in ChatGPT, click <span class="su-key">Connect</span>`,
+      `On Relay’s page, click <span class="su-key">Allow</span>`,
+    ].map((body, i) => `<div class="su-keys-row${i === 0 && opened && !done ? " is-done" : ""}"><span class="su-keys-n">${i + 1}${tick}</span><span>${body}</span></div>`);
+    return `<div class="su-keys${done ? " done" : ""}" role="img" aria-label="Click Open ChatGPT, then click Connect on Relay’s page in ChatGPT, then click Allow on Relay’s page">${rows.join("")}</div>`;
+  }
+  function renderChatGptConnect(agent, option) {
+    const connector = agent.connector || {};
+    const celebrating = connectorJustConnected > Date.now();
+    const signature = JSON.stringify(["chatgpt-app", connector.started, connector.connected, connector.checked, connector.error, onboardingAgentBusy, onboardingAgentNote, celebrating]);
+    if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-chatgpt-connect")) return;
+    signupBodyEl.dataset.firstRelaySignature = signature;
+    // Asks the server while this screen is up: once at first (ChatGPT may
+    // already have Relay's app), then every two seconds after Open ChatGPT.
+    if (!connector.checked || connector.started) startOnboardingAgentPoll(); else stopOnboardingAgentPoll();
+    // Once ChatGPT is open the person is there, so the way back steps down to secondary.
+    const primary = `<button class="${connector.started ? "su-secondary" : "su-primary"}" type="button" data-chatgpt-connect${onboardingAgentBusy ? " disabled" : ""}>${connector.started ? "Open ChatGPT again" : "Open ChatGPT"}</button>`;
+    const status = connector.error ? esc(connector.error)
+      : onboardingAgentNote ? esc(onboardingAgentNote)
+      : connector.started && !connector.connected ? `<span class="su-send-progress su-agent-live" style="margin:0"><span aria-hidden="true"></span></span>Waiting for ChatGPT…`
+      : "";
+    signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect su-chatgpt-connect"><div class="su-step">Your next step</div>
+      <h1 class="su-title">Add Relay to<br>${onboardingAgentTitleName(agent)}.</h1>
+      <p class="su-copy">${connector.started ? "Relay’s page is open in ChatGPT. Now:" : "Three clicks:"}</p>
+      ${chatGptKeysHtml(celebrating, connector.started)}
+      <div class="su-claude-tail">${celebrating ? `<p class="su-claude-done" role="status">ChatGPT is connected.</p>` : `<div class="su-form su-agent-actions">${primary}</div>
+      <div class="su-agent-quiet"><button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>
+      <div class="desktop-prompt-wait" role="status">${status}</div>`}</div></div>`;
+    signupBodyEl.querySelector("[data-chatgpt-connect]")?.addEventListener("click", connectOnboardingChatGpt);
+    signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+  }
+  // CONNECTED: OPEN CHATGPT WITH THE FIRST MESSAGE TYPED IN (2026-10-09).
+  // ChatGPT takes a prefilled link with no warning, so unlike Claude the chat
+  // opens with the sentence already in the composer: the screen shows the
+  // whole sentence, never a shortened copy, and the one key left to press.
+  // It opens an ordinary chat, not Work: Relay's app works in Chat.
+  function renderChatGptStart(agent) {
+    const signature = JSON.stringify(["chatgpt-start", onboardingAgentBusy, onboardingAgentNote, agent.startPrompt || ""]);
+    startOnboardingAgentPoll();
+    if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-chatgpt-start")) return;
+    signupBodyEl.dataset.firstRelaySignature = signature;
+    const tick = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.3l2.3 2.2L8.5 2.6"/></svg>';
+    const arrow = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5"/></svg>';
+    const sentence = agent.startPrompt || "Help me get started with Relay.";
+    signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect su-chatgpt-start"><div class="su-step">Connected</div>
+      <h1 class="su-title">Relay is in<br>${onboardingAgentTitleName(agent)}.</h1>
+      <p class="su-copy">Start your first chat. It opens with this message typed in:</p>
+      <div class="su-first-message"><span>${esc(sentence)}</span></div>
+      <div class="su-keys" role="img" aria-label="Click Open ChatGPT below, then press send in ChatGPT">
+        <div class="su-keys-row"><span class="su-keys-n">1${tick}</span>Click <span class="su-key">Open ChatGPT</span> below</div>
+        <div class="su-keys-row"><span class="su-keys-n">2${tick}</span>In ChatGPT, press <span class="su-key su-key-send chatgpt">${arrow}</span> to send</div>
+      </div>
+      <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-agent-open${onboardingAgentBusy ? " disabled" : ""}>Open ChatGPT</button></div>
+      <div class="su-agent-quiet"><button class="su-link" type="button" data-chatgpt-copy>Copy instead</button><span aria-hidden="true">·</span><button class="su-link" type="button" data-agent-reset>Use a different AI</button></div>
+      <div class="desktop-prompt-wait" role="status">${onboardingAgentNote ? esc(onboardingAgentNote) : `<span class="su-send-progress su-agent-live" style="margin:0"><span aria-hidden="true"></span></span>This moves on when ChatGPT starts.`}</div></div></div>`;
+    signupBodyEl.querySelector("[data-agent-open]")?.addEventListener("click", openOnboardingAgent);
+    signupBodyEl.querySelector("[data-chatgpt-copy]")?.addEventListener("click", async () => {
+      try { await onboardingAgentCall("onboardingCopyAgentRequest"); onboardingAgentNote = "Copied. Paste it into a new ChatGPT chat and press send."; }
+      catch { onboardingAgentNote = "Relay couldn’t copy it. Try again."; }
+      signupBodyEl.dataset.firstRelaySignature = ""; renderSignup();
+    });
+    signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+  }
+  async function connectOnboardingChatGpt() {
+    onboardingAgentBusy = true; onboardingAgentNote = ""; renderSignup();
+    try {
+      const snapshot = await onboardingAgentCall("onboardingConnectChatGptApp");
+      payload.ui = { ...payload.ui, onboardingAgent: snapshot };
+    } catch (error) { onboardingAgentNote = String(error?.message || "Couldn’t open ChatGPT. Try again.").replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
+    finally { onboardingAgentBusy = false; renderSignup(); }
   }
   // CONNECTED: COPY, THEN OPEN CLAUDE (David, 2026-10-07). The person copies
   // the first message themselves, sees it copied, and only then gets the
@@ -24128,12 +24236,14 @@
       // Until the send, the pill has nothing else to show, so this screen stays.
       if (status === "sent") { stopOnboardingAgentPoll(); renderFirstRelayChapter(); return; }
       const agent = payload.ui?.onboardingAgent;
-      // Claude's keys tick off for a moment before the handoff takes the screen.
-      const claudeCelebrating = agent?.host === "claude" && claudeJustConnected > Date.now();
-      if (status !== "checking" && agent && (!onboardingAgentConnected(agent) || claudeCelebrating)) { renderAgentSetup(agent); return; }
+      // The connect keys tick off for a moment before the next screen takes over.
+      const connectorCelebrating = Boolean(agent?.connector) && connectorJustConnected > Date.now();
+      if (status !== "checking" && agent && (!onboardingAgentConnected(agent) || connectorCelebrating)) { renderAgentSetup(agent); return; }
       // Claude's chat is open with the start sentence but nobody has pressed
       // send: say exactly that, with a picture of it, until Claude starts.
       if (status !== "checking" && agent?.host === "claude" && agent.connectedAt && !agent.tutorialStarted) { renderClaudeSend(agent); return; }
+      // ChatGPT's app connected: the lesson starts in a new ChatGPT chat, until ChatGPT asks Relay how to begin.
+      if (status !== "checking" && agent?.host === "chatgpt" && agent.via === "connector" && agent.connectedAt && !agent.tutorialStarted) { renderChatGptStart(agent); return; }
       stopOnboardingAgentPoll();
       // GET STARTED (2026-09-13): with no inviter there is nobody to say hello
       // to, so the first Relay is a link for someone who is not on Relay yet.
@@ -24175,7 +24285,8 @@
       // A chosen AI that turns out not to cooperate must never strand the
       // person: the quiet way back to the chooser sits beside Skip.
       // Claude's chat opened on its own; if it was closed, this opens a new one.
-      const reopen = agentChosen?.host === "claude" && !checking ? `<button class="su-link" type="button" data-claude-reopen>Open Claude</button><span aria-hidden="true">·</span>` : "";
+      const lessonOpens = agentChosen?.host === "claude" || (agentChosen?.host === "chatgpt" && agentChosen.via === "connector");
+      const reopen = lessonOpens && !checking ? `<button class="su-link" type="button" data-claude-reopen>Open ${esc(agentName)}</button><span aria-hidden="true">·</span>` : "";
       const different = agentChosen && !checking ? `${reopen}<button class="su-link" type="button" data-agent-reset>Use a different AI</button>` : "";
       const skip = linkFirst && !checking
         ? `<div class="su-form su-agent-quiet"><button class="su-link" id="suHandoffSkip" type="button"${busy}>Skip for now</button>${different ? `<span aria-hidden="true">·</span>${different}` : ""}</div>`
@@ -25235,9 +25346,19 @@
     if (!lastExternalOpenAt || now - lastExternalOpenAt > 250
         || cardEl.classList.contains("offstage") || cardEl.classList.contains("bye") || collapsed) trayOpen();
     lastExternalOpenAt = now;
-    // The menu-bar icon opens the mini card, even over the full app; the Dock
-    // ("app") opens the full app through relay:expandApp.
-    if (mode === "mini" && appExpanded && !collapsed) setAppExpanded(false);
+    // The menu-bar icon opens the mini card: the 344px card, whatever was
+    // showing (David, 2026-10-09). An open reader closes back to where it was
+    // opened from, a full app collapses, and the frame is the card's. The
+    // Dock ("app") opens the full app through relay:expandApp instead.
+    if (mode === "mini" && !collapsed) {
+      if (activeView === "reader") closeReader();
+      if (appExpanded) setAppExpanded(false);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (collapsed || peeking || ghost || appExpanded || activeView === "reader" || cardViewTransition) return;
+        const mini = smallSize();
+        if (W.t !== mini.w || H.t !== mini.h) syncCardSize(false);
+      }));
+    }
     if (!nonce) return;
     const deadline = performance.now() + 4000;
     // The entrance animation may still be transparent or above the viewport on

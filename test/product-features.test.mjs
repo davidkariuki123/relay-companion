@@ -33,26 +33,38 @@ const PRODUCTION_DEVELOPER_SURFACES = { ...ORDINARY_SURFACES, developerAccount: 
 
 test("developer capabilities require both the server-owned role and a non-production environment", async () => {
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: ORDINARY_USER }), {
-    environment: "local", developer: false, orgAdmin: false, googleContacts: false, conductor: false, replyThreads: false, smartTips: false, fullAppExpand: false, requests: true, legacyTaskProtocol: false, cowork: false, ...ORDINARY_SURFACES,
+    environment: "local", developer: false, orgAdmin: false, googleContacts: false, conductor: false, replyThreads: false, smartTips: false, fullAppExpand: false, requests: true, legacyTaskProtocol: false, cowork: false, chatGptApp: false, ...ORDINARY_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { NODE_ENV: "development" }, user: DEVELOPER }), {
-    environment: "local", developer: true, orgAdmin: false, googleContacts: true, conductor: true, replyThreads: true, smartTips: true, fullAppExpand: true, requests: true, legacyTaskProtocol: true, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "local", developer: true, orgAdmin: false, googleContacts: true, conductor: true, replyThreads: true, smartTips: true, fullAppExpand: true, requests: true, legacyTaskProtocol: true, cowork: false, chatGptApp: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER }), {
-    environment: "dev", developer: true, orgAdmin: false, googleContacts: true, conductor: true, replyThreads: true, smartTips: true, fullAppExpand: true, requests: true, legacyTaskProtocol: true, cowork: false, ...DEVELOPER_SURFACES,
+    environment: "dev", developer: true, orgAdmin: false, googleContacts: true, conductor: true, replyThreads: true, smartTips: true, fullAppExpand: true, requests: true, legacyTaskProtocol: true, cowork: false, chatGptApp: false, ...DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_UPDATE_CHANNEL: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, conductor: false, replyThreads: false, smartTips: false, fullAppExpand: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, conductor: false, replyThreads: false, smartTips: false, fullAppExpand: false, requests: true, legacyTaskProtocol: false, cowork: false, chatGptApp: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: { RELAY_ENV: "staging" }, user: DEVELOPER }), {
-    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, conductor: false, replyThreads: false, smartTips: false, fullAppExpand: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
+    environment: "staging", developer: false, orgAdmin: false, googleContacts: false, conductor: false, replyThreads: false, smartTips: false, fullAppExpand: false, requests: true, legacyTaskProtocol: false, cowork: false, chatGptApp: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
   assert.deepEqual(productFeatures({ env: {}, user: DEVELOPER }), {
-    environment: "production", developer: false, orgAdmin: false, googleContacts: false, conductor: false, replyThreads: false, smartTips: false, fullAppExpand: false, requests: true, legacyTaskProtocol: false, cowork: false, ...PRODUCTION_DEVELOPER_SURFACES,
+    environment: "production", developer: false, orgAdmin: false, googleContacts: false, conductor: false, replyThreads: false, smartTips: false, fullAppExpand: false, requests: true, legacyTaskProtocol: false, cowork: false, chatGptApp: false, ...PRODUCTION_DEVELOPER_SURFACES,
   });
   for (const environment of ["local", "dev", "staging", "production"]) {
     assert.ok(!Object.hasOwn(productFeatures({ env: { RELAY_ENV: environment }, user: DEVELOPER }), "todo"), "the Todo feature is removed on every row");
   }
+});
+
+test("ChatGPT moves to Relay's ChatGPT app only when the server says so, for people, on every deployment", () => {
+  for (const env of [{ NODE_ENV: "development" }, { RELAY_UPDATE_CHANNEL: "dev" }, { RELAY_ENV: "staging" }, {}]) {
+    assert.equal(productFeatures({ env, user: { ...ORDINARY_USER, chatGptApp: true } }).chatGptApp, true);
+    assert.equal(productFeatures({ env, user: { ...DEVELOPER, chatGptApp: true } }).chatGptApp, true);
+    assert.equal(productFeatures({ env, user: { ...ORDINARY_USER, chatGptApp: false } }).chatGptApp, false);
+  }
+  // An older API that never says, an unheard answer, or a managed account: setup codes, as today.
+  assert.equal(productFeatures({ env: {}, user: ORDINARY_USER }).chatGptApp, false);
+  assert.equal(productFeatures({ env: {}, user: null }).chatGptApp, false);
+  assert.equal(productFeatures({ env: {}, user: { id: "usr_g", accountKind: "granular_employee", chatGptApp: true } }).chatGptApp, false);
 });
 
 test("Google Contacts sync requires both the Dev deployment and developer account role", () => {

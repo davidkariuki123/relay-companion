@@ -483,3 +483,104 @@ test("a fast background Claude turn completes from direct transcript growth plus
   }
   assert.ok(true);
 });
+
+import { createSessionPublishLedger } from "../src/session-controller.js";
+
+// The directory publish used to resend every observed session on every tick.
+// These pin the leaner contract: changed rows travel at once, unchanged rows
+// wait for the next full heartbeat, the heartbeat stays inside the server's
+// freshness window, and the cached directory the pill reads keeps every row.
+function directoryHarness({ freshForMs = 15_000 } = {}) {
+  const calls = [];
+  const cached = [];
+  let clock = 1_000_000;
+  const rows = [
+    { provider: "claude", placement: "local", placementId: "mac", nativeId: "c1", state: "idle", lastActiveAt: "2026-10-09T10:00:00.000Z" },
+    { provider: "codex", placement: "local", placementId: "mac", nativeId: "x1", state: "active", lastActiveAt: "2026-10-09T10:00:00.000Z" },
+  ];
+  const options = {
+    client: {
+      async sessionControllerInbox() { return { operations: [] }; },
+      async publishSessionObservations(observations) {
+        calls.push(observations.map((row) => `${row.nativeId}:${row.state}`));
+        return {
+          sessions: observations.map((row) => ({ id: `rsess_${row.nativeId}`, nativeId: row.nativeId, state: row.state })),
+          freshForMs,
+        };
+      },
+    },
+    discover: () => rows.map((row) => ({ ...row })),
+    controller: () => ({}),
+    publishLedger: createSessionPublishLedger(),
+    cache: (directory) => cached.push(directory.sessions.map((row) => `${row.id}:${row.state}`).sort()),
+    now: () => clock,
+  };
+  return { calls, cached, rows, options, advance: (ms) => { clock += ms; } };
+}
+
+test("unchanged sessions are not re-uploaded between directory heartbeats", async () => {
+  const h = directoryHarness();
+  await runSessionDirectoryOnce(h.options);
+  h.advance(4_000);
+  await runSessionDirectoryOnce(h.options);
+  assert.deepEqual(h.calls, [["c1:idle", "x1:active"], []]);
+  // The pill's copy still lists both sessions after the empty tick.
+  assert.deepEqual(h.cached[1], ["rsess_c1:idle", "rsess_x1:active"]);
+});
+
+test("a session whose observation changed is uploaded on the next tick, alone", async () => {
+  const h = directoryHarness();
+  await runSessionDirectoryOnce(h.options);
+  h.advance(4_000);
+  h.rows[1].state = "idle";
+  await runSessionDirectoryOnce(h.options);
+  assert.deepEqual(h.calls[1], ["x1:idle"]);
+  assert.deepEqual(h.cached[1], ["rsess_c1:idle", "rsess_x1:idle"]);
+});
+
+test("the whole directory is re-sent before the server's freshness window ends", async () => {
+  const h = directoryHarness({ freshForMs: 15_000 });
+  await runSessionDirectoryOnce(h.options);
+  h.advance(4_000);
+  await runSessionDirectoryOnce(h.options);
+  h.advance(4_000); // 8 s since the full publish: past half of 15 s, well inside 15 s
+  await runSessionDirectoryOnce(h.options);
+  assert.deepEqual(h.calls, [["c1:idle", "x1:active"], [], ["c1:idle", "x1:active"]]);
+});
+
+test("a longer server freshness window stretches the directory heartbeat with it", async () => {
+  const h = directoryHarness({ freshForMs: 60_000 });
+  await runSessionDirectoryOnce(h.options);
+  for (let tick = 0; tick < 6; tick += 1) { h.advance(4_000); await runSessionDirectoryOnce(h.options); }
+  // 24 s elapsed: under half of 60 s, so no full resend yet.
+  assert.equal(h.calls.filter((rows) => rows.length).length, 1);
+  h.advance(8_000);
+  await runSessionDirectoryOnce(h.options);
+  assert.deepEqual(h.calls.at(-1), ["c1:idle", "x1:active"]);
+});
+
+test("a failed directory upload is retried in full on the next tick", async () => {
+  const h = directoryHarness();
+  const publish = h.options.client.publishSessionObservations;
+  let failNext = true;
+  h.options.client.publishSessionObservations = async (observations) => {
+    if (failNext) { failNext = false; throw new Error("gateway timeout"); }
+    return publish(observations);
+  };
+  await assert.rejects(runSessionDirectoryOnce(h.options), /gateway timeout/);
+  await runSessionDirectoryOnce(h.options);
+  assert.deepEqual(h.calls, [["c1:idle", "x1:active"]]);
+  assert.deepEqual(h.cached, [["rsess_c1:idle", "rsess_x1:active"]]);
+});
+
+test("a session that leaves the directory is a change again when it returns", async () => {
+  const h = directoryHarness();
+  await runSessionDirectoryOnce(h.options);
+  const gone = h.rows.pop();
+  h.advance(8_000); // full heartbeat without x1
+  await runSessionDirectoryOnce(h.options);
+  h.rows.push(gone);
+  h.advance(4_000); // delta tick: x1 is back, unchanged in content
+  await runSessionDirectoryOnce(h.options);
+  assert.deepEqual(h.calls, [["c1:idle", "x1:active"], ["c1:idle"], ["x1:active"]]);
+});

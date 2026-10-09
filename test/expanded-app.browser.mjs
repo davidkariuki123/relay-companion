@@ -193,6 +193,12 @@ try {
   await page.evaluate(() => window.events.onOpenFull('', 'mini'));
   await page.waitForFunction(() => !appExpanded); await settle();
   assert.equal(await width(), 344, 'the menu-bar icon means the mini card');
+  // Even with a Relay open in the reader: the menu bar is the mini card.
+  await page.evaluate(() => openReader('relay-s2', 'relays'));
+  await page.waitForFunction(() => activeView === 'reader'); await settle();
+  await page.evaluate(() => window.events.onOpenFull('', 'mini'));
+  await page.waitForFunction(() => activeView !== 'reader'); await settle();
+  assert.equal(await width(), 344, 'the menu-bar icon closes the reader to the mini card');
   await page.locator('#wideToggle').click(); await page.waitForFunction(() => appExpanded); await settle();
   await page.evaluate(() => window.events.onOpenFull('', 'app'));
   await settle();

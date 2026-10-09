@@ -365,6 +365,8 @@ test("browser-approved PKCE connection keeps secrets out of output and powers di
   assert.equal(JSON.parse(finished.stdout).tutorial.state, "pending");
   assert.equal(fs.existsSync(pendingFile), false);
   assert.match(fs.readFileSync(configFile, "utf8"), /web_012345/);
+  const consumeBodies = () => requests.filter((item) => item.url === "/v1/agent/authorizations/authorization_test/consume").map((item) => item.body);
+  assert.equal(consumeBodies()[0].replacesToken, undefined, "a first connection on this computer replaces nothing");
 
   const send = await runProtocol(["tutorial-send", "--approved"], { env });
   assert.equal(send.code, 0, send.stderr);
@@ -408,6 +410,13 @@ test("browser-approved PKCE connection keeps secrets out of output and powers di
     assert.equal(sent.files, undefined);
     assert.equal(sent.attachments[0].path, undefined);
   }
+
+  // Renewing on this computer names the key it held, so Relay replaces it.
+  assert.equal((await runProtocol(["connect-start", api, "david", "codex"], { env })).code, 0);
+  const renewed = await runProtocol(["connect-finish"], { env });
+  assert.equal(renewed.code, 0, renewed.stderr);
+  assert.doesNotMatch(renewed.stdout, /web_/);
+  assert.equal(consumeBodies().at(-1).replacesToken, "web_0123456789012345678901234567890123456789");
 
   const selfPending = path.join(root, "self-pending.json");
   const selfConfig = path.join(root, "self-config.json");

@@ -54,6 +54,22 @@ test("the ChatGPT tile is always the web app, in Work mode", () => {
   }
 });
 
+// RELAY_CHATGPT_APP (2026-10-09): Relay's ChatGPT app works in an ordinary
+// chat, so with the server's switch on a Relay opens there, not in Work.
+test("with the ChatGPT app on, the ChatGPT tile opens an ordinary chat; off, Work as before", () => {
+  const on = chatAppTargets("chatgpt", PROMPT, { schemeOwner: owns, chatGptApp: true });
+  assert.deepEqual(on, { primary: `https://chatgpt.com/?q=${encodeURIComponent(PROMPT)}`, fallback: "", via: "web" });
+  assert.equal(new URL(on.primary).searchParams.get("q"), PROMPT);
+  assert.equal(new URL(chatAppTargets("chatgpt", PROMPT, { chatGptApp: false }).primary).pathname, "/work");
+  // Claude is untouched by ChatGPT's switch.
+  assert.deepEqual(chatAppTargets("claude", PROMPT, { schemeOwner: ownsNothing, chatGptApp: true }),
+    chatAppTargets("claude", PROMPT, { schemeOwner: ownsNothing }));
+  const fn = main.slice(main.indexOf("async function openChatApp("), main.indexOf("ipcMain.handle(\"relay:openChatApp\""));
+  assert.match(fn, /chatGptApp: currentProductFeatures\(\)\.chatGptApp === true/, "main reads the server's switch at the click");
+  const opener = inbox.slice(inbox.indexOf("  function openChatApp(app, message)"), inbox.indexOf("  function hostOptions("));
+  assert.match(opener, /payload\.features\?\.chatGptApp === true \? `https:\/\/chatgpt\.com\/\?q=\$\{q\}` : `https:\/\/chatgpt\.com\/work\?q=\$\{q\}`/);
+});
+
 test("main asks the OS at the click, opens the app first, and falls back to the web link only when the app refused", () => {
   const fn = main.slice(main.indexOf("async function openChatApp("), main.indexOf("ipcMain.handle(\"relay:openChatApp\""));
   assert.match(fn, /chatAppTargets\(/);

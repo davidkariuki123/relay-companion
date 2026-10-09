@@ -37,16 +37,20 @@ function ownsScheme(schemeOwner, scheme) {
 /**
  * @param {"claude"|"chatgpt"} app the tile that was pressed
  * @param {string} prompt the sentence the chat's composer opens with
- * @param {{ schemeOwner?: (scheme: string) => string }} options
+ * @param {{ schemeOwner?: (scheme: string) => string, chatGptApp?: boolean }} options
  *   schemeOwner answers with the name of the app registered for a scheme,
- *   or "" when nothing is.
+ *   or "" when nothing is. chatGptApp is the server's RELAY_CHATGPT_APP
+ *   switch (features.chatGptApp).
  * @returns {{ primary: string, fallback: string, via: "app"|"web" }}
  *   primary is opened first; fallback, when non-empty, is opened only when
  *   the primary is refused by the OS.
  */
-function chatAppTargets(app, prompt, { schemeOwner } = {}) {
+function chatAppTargets(app, prompt, { schemeOwner, chatGptApp = false } = {}) {
   const q = encodeURIComponent(String(prompt || ""));
   if (app === "chatgpt") {
+    // Relay's ChatGPT app (the server's switch on): its tools work in an
+    // ordinary chat, so the Relay opens there, in Chat (2026-10-09).
+    if (chatGptApp === true) return { primary: `https://chatgpt.com/?q=${q}`, fallback: "", via: "web" };
     // Work mode: the reply has to be fetched and posted, which ChatGPT Work
     // does and Chat does not (David, 2026-09-17). /work is the door: the home
     // page ignores ?mode=work and opens Chat (tested live 2026-10-07).

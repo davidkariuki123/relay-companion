@@ -46,6 +46,12 @@ function productFeatures(options = {}) {
     // the same boundary per capability (hasDeveloperAccountFeatures).
     developerAccount,
     orgAdmin: user?.accountKind === "human" && user?.canViewAdminDashboard === true,
+    // RELAY_CHATGPT_APP (2026-10-09): ChatGPT connects through Relay's
+    // ChatGPT app (the hosted connector, as Claude does) instead of a setup
+    // code, and a Relay opens in an ordinary ChatGPT chat instead of Work.
+    // One server-owned switch for every deployment; off whenever the server's
+    // answer has not been heard, so an older API keeps today's setup code.
+    chatGptApp: user?.accountKind === "human" && user?.chatGptApp === true,
     // Google Contacts sync is still under Dev validation, so it follows the
     // same server-owned developer-account gate as the other unreleased tools.
     googleContacts: developer,

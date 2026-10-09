@@ -52,6 +52,7 @@ function boot({ relays = [], sent = [], apps = ["codex", "claude"], opens = () =
     avatarInitials: (name) => String(name || "?").slice(0, 2).toUpperCase(),
     Object,
     agentAppHosts: () => apps,
+    agentAppsSwitchedOn: () => apps,
     agentOpensInApp: opens,
     pullSentenceFor: () => "Pull the relay.",
     applyTaskClaimProjection: () => {},
@@ -703,6 +704,19 @@ test("only the apps on this computer that Settings › Your agent has on get a m
   const failed = boot({ features: { taskExecution: true } });
   failed.taskRunPlans.set("t1", null);
   assert.match(failed.taskCardFooterHtml(inboundTask()), /tk-agents/, "a plan main could not give leaves the agent row");
+});
+
+test("the Run block keeps its apps where Relay cannot open a Relay in them (Windows), 2026-10-09", () => {
+  // On Windows Open in is not offered yet, so agentAppHosts() is empty, yet
+  // main found both apps and can run the Task in them. The card lost its
+  // run buttons when it filtered main's plan through Open in.
+  const t = boot({ features: { taskExecution: true } });
+  t.__context.agentAppHosts = () => [];
+  t.taskRunPlans.set("t1", PLAN());
+  const footer = t.taskCardFooterHtml(inboundTask());
+  assert.match(footer, /data-task-run="t1" data-provider="claude"/);
+  assert.match(footer, /data-task-run="t1" data-provider="codex"/);
+  assert.doesNotMatch(footer, /tk-agents/, "the Run block, not the Copy-only agent row");
 });
 
 test("the app chosen before wears its colour and says why; an Everyone copy says yours", () => {

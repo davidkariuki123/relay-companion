@@ -23,3 +23,17 @@ test("the web rows say only Connected or Not connected, counting only connection
   assert.match(row, /: !live\.length \? `<button class="sv-choose setup-add" type="button" data-setup-web-connect="\$\{surface\}">Connect<\/button>`/);
   assert.match(row, /claude\.ai, the Claude app and Claude Code all use it/);
 });
+
+// RELAY_CHATGPT_APP (2026-10-09): with the server's switch on, the ChatGPT row
+// connects by Relay's ChatGPT app like Claude's row, never by a setup code.
+test("with the ChatGPT app on, the ChatGPT row connects by the app and waits for it", () => {
+  assert.match(row, /const appConnects = surface === "chatgpt" && setupChatGptApp\(\);/);
+  assert.match(row, /surface !== "claude" && !appConnects && setupSnapshot\?\.run\?\.surface === surface/, "no setup code with the app on");
+  assert.match(row, /const appWaiting = appConnects && setupSnapshot\?\.chatgptConnector\?\.started && !appConnector;/);
+  assert.match(row, /const waiting = run\?\.status === "pending" \|\| claudeWaiting \|\| appWaiting;/, "Waiting for ChatGPT… while the app is added");
+  assert.match(row, /\$\{chatGptKeysHtml\(false, true\)\}/, "the clicks left in ChatGPT, drawn as keys");
+  assert.match(inbox, /function setupChatGptApp\(\) \{\n\s+return payload\.features\?\.chatGptApp === true && typeof window\.relay\?\.setupConnectChatGptApp === "function";/);
+  const start = inbox.slice(inbox.indexOf("async function setupStartWeb(surface)"), inbox.indexOf("function wireSetupReveal()"));
+  assert.match(start, /if \(surface === "claude" \|\| \(surface === "chatgpt" && setupChatGptApp\(\)\)\)/);
+  assert.match(start, /window\.relay\[surface === "claude" \? "setupConnectClaude" : "setupConnectChatGptApp"\]\(setupUserId\(\)\)/);
+});

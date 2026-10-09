@@ -19,14 +19,15 @@ function resetWindowZoom(win) {
   return true;
 }
 
-function reinforceSpacePresence(win, { moveTop = false, alwaysOnTop = true, platform = process.platform } = {}) {
+function reinforceSpacePresence(win, { moveTop = false, alwaysOnTop = true, allSpaces = true, platform = process.platform } = {}) {
   if (!isUsableWindow(win)) return false;
   resetWindowZoom(win);
   const isWindows = platform === "win32";
   // All-Spaces is a macOS Spaces concept. On Windows isVisibleOnAllWorkspaces()
   // always reports false, so the drift check below re-called the setter on every
-  // 1.5s poll for nothing.
-  if (!isWindows) {
+  // 1.5s poll for nothing. The full app (allSpaces: false) lives on one Space
+  // like any other app, so there is nothing to repair.
+  if (!isWindows && allSpaces) {
     // Only touch window-server state that actually drifted. Re-asserting
     // setVisibleOnAllWorkspaces / setAlwaysOnTop unconditionally (every 1.5s poll +
     // every Space change) reorders the window each time and reads as flicker.
@@ -66,16 +67,22 @@ function reinforceSpacePresence(win, { moveTop = false, alwaysOnTop = true, plat
   return true;
 }
 
-function showInactiveOnAllSpaces(win, { force = false, userInitiated = false, alwaysOnTop = true, platform = process.platform } = {}) {
+function showInactiveOnAllSpaces(win, { force = false, userInitiated = false, alwaysOnTop = true, allSpaces = true, platform = process.platform } = {}) {
   if (!isUsableWindow(win)) return false;
   const visible = typeof win.isVisible === "function" ? win.isVisible() : false;
+  if (visible && !allSpaces && !userInitiated) {
+    // The full app stays on the Space it was opened on. A Space switch must
+    // not order it front: on macOS that pulls the person back to its Space.
+    reinforceSpacePresence(win, { alwaysOnTop, allSpaces, platform });
+    return false;
+  }
   // Capture drift BEFORE reinforceSpacePresence repairs it: once the collection
   // behavior has been re-asserted there is no way to tell whether a re-attach was
   // needed. A missing getter means we cannot verify, so take the re-show path.
   const canJoinAllSpacesIntact =
     typeof win.isVisibleOnAllWorkspaces === "function" && win.isVisibleOnAllWorkspaces();
   if (visible && !force && !userInitiated) {
-    reinforceSpacePresence(win, { alwaysOnTop, platform });
+    reinforceSpacePresence(win, { alwaysOnTop, allSpaces, platform });
     return false;
   }
   if (visible && canJoinAllSpacesIntact && !userInitiated) {
@@ -83,7 +90,7 @@ function showInactiveOnAllSpaces(win, { force = false, userInitiated = false, al
     // the active Space, so there is nothing to re-attach. showInactive()/moveTop()
     // here re-order the window mid Space-transition animation — the residual
     // "pill blinks on every swipe" after the hide()/show() cycle was removed.
-    reinforceSpacePresence(win, { alwaysOnTop, platform });
+    reinforceSpacePresence(win, { alwaysOnTop, allSpaces, platform });
     return false;
   }
 
@@ -91,9 +98,9 @@ function showInactiveOnAllSpaces(win, { force = false, userInitiated = false, al
   // blink on every forced re-show (twice per Space change). showInactive() on a
   // visible window is enough to re-attach it to the active Space once the
   // all-workspaces collection behavior has been re-asserted above.
-  reinforceSpacePresence(win, { alwaysOnTop, platform });
+  reinforceSpacePresence(win, { alwaysOnTop, allSpaces, platform });
   if (typeof win.showInactive === "function") win.showInactive();
-  reinforceSpacePresence(win, { moveTop: alwaysOnTop, alwaysOnTop, platform });
+  reinforceSpacePresence(win, { moveTop: alwaysOnTop, alwaysOnTop, allSpaces, platform });
   return !visible;
 }
 

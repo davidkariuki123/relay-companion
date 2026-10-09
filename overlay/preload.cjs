@@ -253,6 +253,7 @@ contextBridge.exposeInMainWorld("relay", {
   onboardingCopyAgentRequest: (userId) => ipcRenderer.invoke("relay:onboardingCopyAgentRequest", String(userId || "")),
   onboardingOpenAgent: (userId) => ipcRenderer.invoke("relay:onboardingOpenAgent", String(userId || "")),
   onboardingConnectClaude: (userId) => ipcRenderer.invoke("relay:onboardingConnectClaude", String(userId || "")),
+  onboardingConnectChatGptApp: (userId) => ipcRenderer.invoke("relay:onboardingConnectChatGptApp", String(userId || "")),
   // SETUP (2026-10-07): every AI's connection, and the verbs to connect them.
   setupSnapshot: (userId, options = {}) => ipcRenderer.invoke("relay:setupSnapshot", String(userId || ""), { force: options?.force === true }),
   setupConnect: (userId, hostId) => ipcRenderer.invoke("relay:setupConnect", String(userId || ""), String(hostId || "")),
@@ -265,6 +266,7 @@ contextBridge.exposeInMainWorld("relay", {
   setupOpenRun: (userId) => ipcRenderer.invoke("relay:setupOpenRun", String(userId || "")),
   setupCancelRun: (userId) => ipcRenderer.invoke("relay:setupCancelRun", String(userId || "")),
   setupConnectClaude: (userId) => ipcRenderer.invoke("relay:setupConnectClaude", String(userId || "")),
+  setupConnectChatGptApp: (userId) => ipcRenderer.invoke("relay:setupConnectChatGptApp", String(userId || "")),
   copyFirstLinkMessage: (userId) => ipcRenderer.invoke("relay:copyFirstLinkMessage", userId),
   installationAuthSignIn: (options = {}) => ipcRenderer.invoke("relay:installationAuthSignIn", { forceAccountSelection: options?.forceAccountSelection === true }),
   installationAuthGoogle: (options = {}) => ipcRenderer.invoke("relay:installationAuthGoogle", {

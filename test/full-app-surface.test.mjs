@@ -17,6 +17,7 @@ function harness() {
     getBounds: () => ({ ...bounds }),
     setBounds: (b) => { calls.push(["setBounds", b]); Object.assign(bounds, b); },
     setAlwaysOnTop: (v) => calls.push(["alwaysOnTop", v]),
+    setVisibleOnAllWorkspaces: (...a) => calls.push(["allSpaces", ...a]),
     moveTop: () => calls.push(["moveTop"]),
     focus: () => calls.push(["focus"]),
     isVisible: () => true,
@@ -78,6 +79,8 @@ test("Expand grows the pill's surface to the screen and makes Relay an ordinary 
   assert.ok(calls.some((c) => c[0] === "alwaysOnTop" && c[1] === false), "not floating above other apps");
   assert.equal(api.elevated(), false);
   assert.ok(calls.some((c) => c[0] === "dock" && c[1] === "show"), "in the Dock and Cmd+Tab");
+  assert.deepEqual(calls.find((c) => c[0] === "allSpaces"), ["allSpaces", false, { skipTransformProcessType: true }],
+    "on its own Space like any app, and the Dock icon is not toggled as a side effect");
   assert.ok(calls.some((c) => c[0] === "focus"), "the app you expanded is in front");
   const inset = calls.find((c) => c[0] === "send" && c[1] === "relay:surfaceInset");
   assert.deepEqual(inset[2], { top: 8, right: 8, width: 1512, height: 949 }, "the small card's place inside the grown surface, and the area it fills");
@@ -96,6 +99,8 @@ test("Collapse returns the pill to exactly where it was, on top, and hands the s
   assert.deepEqual(bounds, { x: 604, y: 41, width: 900, height: 800 });
   assert.equal(api.elevated(), true, "floating again");
   assert.ok(calls.some((c) => c[0] === "dock" && c[1] === "hide"));
+  assert.deepEqual(calls.filter((c) => c[0] === "allSpaces").at(-1), ["allSpaces", true, { visibleOnFullScreen: true, skipTransformProcessType: true }],
+    "the pill follows you to every Space again");
   assert.deepEqual(calls.find((c) => c[0] === "execFile")?.[1], ["-b", "com.anthropic.claudefordesktop"], "the app that was in front comes back");
 });
 
@@ -113,6 +118,8 @@ test("the renderer sizes the expanded app to the screen and places the card at t
   assert.match(html, /window\.relay\.onSurfaceInset\?\.\(/);
   assert.match(main, /if \(appSurface\) next = false;/, "the full app is never re-elevated by the frontmost poll");
   assert.match(main, /if \(appSurface\) return \{ \.\.\.appSurfaceRefit\(\) \};/, "re-showing the full app never shrinks it");
+  assert.match(main, /showInactiveOnAllSpaces\(win, \{ force, userInitiated, alwaysOnTop: overlayElevated, allSpaces: !appSurface \}\)/, "a Space switch never re-shows the full app");
+  assert.doesNotMatch(main, /reinforceSpacePresence\(win, \{ alwaysOnTop: overlayElevated \}\)/, "every presence repair knows about the full app");
   assert.match(html, /if \(payload\.features\?\.fullAppExpand !== true\) \{\n\s+return \{ w: Math\.max\(READER\.w, Math\.min\(WIDE\.w, aw - 48\)\)/, "without the developer gate Expand keeps the two-thirds card");
 });
 
@@ -136,4 +143,87 @@ test("a screen that changes under the full app refits it, and an unplugged one h
   displays.splice(0, 1); // unplugged
   const moved = api.refit();
   assert.deepEqual(moved, { x: 1512, y: 25, width: 2560, height: 1415 });
+});
+
+// THE FULL APP ON WINDOWS (2026-10-09): the card-sized window drops to the
+// normal level and drops its hidden owner, so it has a taskbar button and an
+// Alt-Tab entry; Collapse owns it again and puts it back on top.
+function windowsHarness({ platform = "win32", topmost = true } = {}) {
+  const calls = [];
+  const win = {
+    isDestroyed: () => false,
+    setAlwaysOnTop: (...a) => calls.push(["alwaysOnTop", ...a]),
+    focus: () => calls.push(["focus"]),
+  };
+  const owner = { id: "owner" };
+  const run = Function("win", "pillOwner", "calls", "platform", "topmost", `
+    const CARD_MAX = { w: 900, h: 800 };
+    const FIXED_OVERLAY_SURFACE = platform === "darwin";
+    const process = { platform, env: {} };
+    let cardSize = { w: 344, h: 524 };
+    let overlayElevated = true;
+    function setCompanionAppWindow(w, on, { owner }) { calls.push(["appWindow", on, owner && owner.id]); }
+    ${block}
+    pillTopmost = topmost;
+    return {
+      full: (w, h) => cardIsFullApp(w, h),
+      enter: () => enterAppWindow(),
+      exit: () => exitAppWindow(),
+      active: () => appWindow,
+      elevated: () => overlayElevated,
+    };
+  `);
+  return { calls, api: run(win, owner, calls, platform, topmost) };
+}
+
+test("Windows: the full app is an ordinary app until Collapse makes it the pill again", () => {
+  const { calls, api } = windowsHarness();
+  assert.equal(api.full(344, 524), false, "the small card is the pill");
+  assert.equal(api.full(900, 800), false, "the two-thirds card fits the native maximum and stays the pill");
+  assert.equal(api.full(1920, 1032), true);
+  api.enter();
+  assert.equal(api.active(), true);
+  assert.equal(api.elevated(), false, "space presence stops re-asserting topmost");
+  assert.deepEqual(calls.slice(0, 3), [["alwaysOnTop", false], ["appWindow", true, "owner"], ["focus"]],
+    "drops to the normal level, gets its taskbar button and Alt-Tab entry, and is the app in front");
+  api.enter();
+  assert.equal(calls.length, 3, "entering twice changes nothing");
+  api.exit();
+  assert.equal(api.active(), false);
+  assert.equal(api.elevated(), true);
+  assert.deepEqual(calls.slice(3), [["appWindow", false, "owner"], ["alwaysOnTop", true, "screen-saver"]],
+    "owned again (no taskbar, no Alt-Tab) and back above everything");
+  api.exit();
+  assert.equal(calls.length, 5, "collapsing twice changes nothing");
+});
+
+test("Linux: the full app drops to the normal level and floats again on Collapse", () => {
+  const { calls, api } = windowsHarness({ platform: "linux" });
+  api.enter();
+  api.exit();
+  assert.deepEqual(calls.filter((c) => c[0] === "alwaysOnTop"), [["alwaysOnTop", false], ["alwaysOnTop", true, "floating"]]);
+});
+
+test("a harness pill that never floated is not lifted on Collapse", () => {
+  const { calls, api } = windowsHarness({ topmost: false });
+  api.enter();
+  api.exit();
+  assert.deepEqual(calls.filter((c) => c[0] === "alwaysOnTop"), [["alwaysOnTop", false]]);
+});
+
+test("macOS keeps its own surface path", () => {
+  const { calls, api } = windowsHarness({ platform: "darwin" });
+  api.enter();
+  assert.equal(api.active(), false);
+  assert.deepEqual(calls, []);
+});
+
+test("Windows and Linux become the full app before growing and the pill after shrinking", () => {
+  const fit = main.slice(main.indexOf("function fitOverlayWindowToCard"), main.indexOf("function scheduleNativeGeometryReconcile"));
+  assert.ok(fit.indexOf("if (full) enterAppWindow();") < fit.indexOf("win.setBounds(target, false)"), "enter precedes the grow");
+  assert.ok(fit.lastIndexOf("if (backToPill) exitAppWindow();") > fit.indexOf("win.setBounds(target, false)"), "exit follows the shrink");
+  assert.match(fit, /const backToPill = settle && !full;/, "only a settled fold ends the full app");
+  assert.match(main, /if \(appSurface \|\| appWindow\) return; \/\/ the full app fills the screen/);
+  assert.match(main, /const maximum = appWindow \? \{ w: wa\.width, h: wa\.height \} : CARD_MAX;/, "re-showing the full app never shrinks it");
+  assert.match(main, /\}, \{ owner: pillOwner \}\);\n\s+setPillAppDetails\(\);/, "the pill is created owned and carries Relay's taskbar identity");
 });

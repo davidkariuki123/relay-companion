@@ -4,12 +4,12 @@ import path from "node:path";
 import {
   claudeDesktopConfigDirs,
   claudeDesktopEntry,
-  codexBinaryCandidates,
   isDeadRelayEntry,
   isLegacyRelayCompanionEntry,
   mergeClaudeDesktopConfig,
   resolveStableNode,
 } from "../src/desktop-hosts.js";
+import installedApps from "../src/installed-apps.cjs";
 
 const HOME = "/Users/tester";
 
@@ -186,8 +186,14 @@ test("a stable candidate pointing at a DIFFERENT node is not used", () => {
   assert.equal(node, "/Users/x/.nvm/versions/node/v22/bin/node", "falls back rather than pointing at the wrong runtime");
 });
 
-test("the codex binary bundled in the ChatGPT app is a candidate, so desktop-only users are covered", () => {
-  const candidates = codexBinaryCandidates({ env: { HOME }, platform: "darwin" });
-  assert.ok(candidates.includes("/Applications/ChatGPT.app/Contents/Resources/codex"));
-  assert.ok(candidates.includes(path.join(HOME, "Applications", "ChatGPT.app", "Contents", "Resources", "codex")));
+test("the codex binary bundled in the ChatGPT app is found, so desktop-only users are covered", () => {
+  const found = (present, platform = "darwin", env = { HOME }) => installedApps.codexAppBinary({ env, platform, exists: (p) => present.includes(p),
+    readdir: (dir) => (dir === String.raw`C:\Local\OpenAI\Codex\bin` ? ["aaa", "bbb"] : []) });
+  assert.equal(found(["/Applications/ChatGPT.app/Contents/Resources/codex"]), "/Applications/ChatGPT.app/Contents/Resources/codex");
+  const mine = path.posix.join(HOME, "Applications", "ChatGPT.app", "Contents", "Resources", "codex");
+  assert.equal(found([mine]), mine);
+  // Windows: the Store app keeps its codex.exe under %LOCALAPPDATA%\OpenAI\Codex\bin\<build>.
+  const win = String.raw`C:\Local\OpenAI\Codex\bin\bbb\codex.exe`;
+  assert.equal(found([win], "win32", { LOCALAPPDATA: String.raw`C:\Local` }), win);
+  assert.equal(found([], "linux"), "");
 });

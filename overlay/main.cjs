@@ -19,8 +19,8 @@
 //   - Mutations (accept/reject/approve/decline/answer) call RelayClient with device-token
 //     auth. ack/mark-read writes state.json directly (atomic temp+rename).
 
-const { app, dialog, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
-const { createCompanionWindow } = require("./companion-window.cjs");
+const { app, dialog, BaseWindow, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
+const { createCompanionWindow, createCompanionWindowOwner, setCompanionAppWindow } = require("./companion-window.cjs");
 const { createFirstRelayOnboarding, firstMintedLink } = require("./first-relay-onboarding.cjs");
 const { createAgentOnboarding } = require("./agent-onboarding.cjs");
 const { createAgentConnections } = require("./agent-connections.cjs");
@@ -165,6 +165,7 @@ const {
 const { parseRelayDeepLink, relayDeepLinkFromArgv, relayDeepLinkFailureStatus } = require("./deep-link.cjs");
 const { chatAppTargets } = require("./chat-app-open.cjs");
 const { conductorAvailability, conductorLink, isGitRepository } = require("../src/conductor.cjs");
+const installedApps = require("../src/installed-apps.cjs");
 const {
   overlayWanted,
   createHostRunningTracker,
@@ -185,7 +186,7 @@ const { readDeviceToken } = require("../src/credential-store.cjs");
 const { appendLocalTrace, appendLocalTraces } = require("../src/local-trace.cjs");
 const { canonicalInboxItemId, packetIdsForCanonicalItem } = require("../src/inbox-item-id.cjs");
 const claudeInject = require("../src/claude-inject.cjs");
-const { commandAvailable, launchLinuxAgentTerminal } = require("./linux-terminal.cjs");
+const { launchLinuxAgentTerminal } = require("./linux-terminal.cjs");
 const {
   reinforceSpacePresence,
   resetWindowZoom,
@@ -240,6 +241,9 @@ const MARGIN = 8;
 const DEFAULT_WEB_BASE = "https://sendrelays.com";
 
 let win = null;
+// Windows: the hidden owner that keeps the pill out of the taskbar and Alt-Tab
+// until Expand makes it the full app (companion-window.cjs).
+let pillOwner = null;
 // Preview windows are documents, not one reused pane. Opening a second relay
 // ADDS a window rather than evicting the first — the same way a second PDF does
 // not close the one you are reading — so each window minimizes to the Dock,
@@ -374,6 +378,8 @@ const agentOnboarding = createAgentOnboarding({
   schemeOwner: (scheme) => process.env.RELAY_OVERLAY_TEST_NO_CLAUDE_APP === "1" && scheme === "claude://" ? "" : app.getApplicationNameForProtocol(scheme),
   openExternal: (url) => openExternalOrTestSeam(url),
   writeClipboard: (text) => clipboard.writeText(text),
+  // The server's RELAY_CHATGPT_APP switch: ChatGPT connects by Relay's ChatGPT app.
+  chatGptApp: () => currentProductFeatures().chatGptApp === true,
 });
 const agentOnboardingRefreshing = new Set();
 // SETUP (2026-10-07): which AIs on this computer and in the browser have Relay.
@@ -4218,61 +4224,21 @@ function activateHost(host, observedBundle = null) {
   tryBundle(0);
 }
 
+// Whether an app is on this computer: installed-apps.cjs's answer, the one
+// Open in, Tasks and Your AIs share (2026-10-09). On Linux there is no
+// desktop app, so the command-line tool stands in for it.
 function appInstalled(appName) {
-  const name = String(appName || "").replace(/[^A-Za-z0-9 ._-]/g, "");
-  if (!name) return false;
-  if (process.platform === "win32" && /^claude$/i.test(name)) {
-    if (windowsUriSchemeRegistered("claude")) return true;
-    const appDataClaude = process.env.APPDATA && path.join(process.env.APPDATA, "Claude");
-    if (appDataClaude && fs.existsSync(appDataClaude)) return true;
-  }
-  let candidates = [];
-  if (process.platform === "darwin") {
-    const names = name === "Codex" ? ["ChatGPT", "Codex"] : [name];
-    candidates = names.flatMap((candidate) => [
-      path.join("/Applications", `${candidate}.app`),
-      path.join(os.homedir(), "Applications", `${candidate}.app`),
-    ]);
-  } else if (process.platform === "win32") {
-    const exe = `${name}.exe`;
-    candidates = [
-      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", name, exe),
-      process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, name, exe),
-      process.env["PROGRAMFILES(X86)"] && path.join(process.env["PROGRAMFILES(X86)"], name, exe),
-    ].filter(Boolean);
-  } else if (process.platform === "linux") {
-    const executable = /^codex$/i.test(name) ? (process.env.CODEX_CLI_PATH || "codex") : (process.env.CLAUDE_CLI_PATH || "claude");
-    return commandAvailable(executable);
-  }
-  return candidates.some((candidate) => fs.existsSync(candidate));
+  const name = String(appName || "");
+  if (/^claude$/i.test(name)) return Boolean(installedApps.claudeAppPath() || (process.platform === "linux" && installedApps.claudeCliPath()));
+  if (/^(codex|chatgpt)$/i.test(name)) return Boolean(installedApps.chatgptAppPath() || (process.platform === "linux" && installedApps.codexCliPath()));
+  return false;
 }
 
+// The codex Relay drives: CODEX_CLI_PATH, else on macOS the ChatGPT app's own,
+// else `codex` from PATH.
 function codexCliPath() {
   if (process.env.CODEX_CLI_PATH) return process.env.CODEX_CLI_PATH;
-  for (const candidate of [
-    "/Applications/ChatGPT.app/Contents/Resources/codex",
-    "/Applications/Codex.app/Contents/Resources/codex",
-  ]) {
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return "codex";
-}
-
-function windowsUriSchemeRegistered(scheme) {
-  if (process.platform !== "win32") return false;
-  const clean = String(scheme || "").replace(/[^A-Za-z0-9+.-]/g, "");
-  if (!clean) return false;
-  for (const hive of ["HKCU\\Software\\Classes", "HKCR"]) {
-    try {
-      const out = execFileSync("reg.exe", ["query", `${hive}\\${clean}\\shell\\open\\command`, "/ve"], {
-        encoding: "utf8",
-        timeout: 1000,
-        windowsHide: true,
-      });
-      if (String(out || "").trim()) return true;
-    } catch {}
-  }
-  return false;
+  return (process.platform === "darwin" && installedApps.codexAppBinary()) || "codex";
 }
 
 // Resolve which host a click opens into from the current frontmost bundle, folding
@@ -4528,16 +4494,35 @@ async function focusedNativeSession(provider, routing) {
 const SESSION_PICKER_DIRECTORY_TTL_MS = 5_000;
 const SESSION_PICKER_RAIL_TTL_MS = 3_000;
 const SESSION_PICKER_TERMINAL_FOCUS_GRACE_MS = 30_000;
-const sessionPickerDirectoryCache = new Map();
 const sessionPickerRailCache = new Map();
 const sessionPickerTerminalFocus = new Map();
 
-function cachedPickerDirectory(provider, routing) {
-  const cached = sessionPickerDirectoryCache.get(provider);
-  if (cached && Date.now() - cached.at < SESSION_PICKER_DIRECTORY_TTL_MS) return cached.sessions;
-  const sessions = routing.directory.discoverSessions({ provider, terminalBindings:new Map() });
-  sessionPickerDirectoryCache.set(provider, { at:Date.now(), sessions });
-  return sessions;
+// The one way the pill reads the native session directory. Every reader used
+// to call the synchronous sweep on the main process: it walks every Claude and
+// Codex session on disk (thousands of files; gigabytes to re-read after a
+// restart or a wake) while the window can neither draw nor answer a click.
+// The async sweep reads through the thread pool and yields between files.
+// One sweep per provider is in flight at a time and is shared by whoever asks
+// during it; its rows are reused for `ttlMs` so a 400 ms poller and a picker
+// opened at the same moment cost one walk, not several.
+const sessionDirectoryCache = new Map();
+const sessionDirectoryInFlight = new Map();
+async function cachedSessionDirectory(provider, routing, { ttlMs = SESSION_PICKER_DIRECTORY_TTL_MS } = {}) {
+  const key = provider === "codex" || provider === "claude" ? provider : "all";
+  const cached = sessionDirectoryCache.get(key);
+  if (cached && Date.now() - cached.at < ttlMs) return cached.sessions;
+  let pending = sessionDirectoryInFlight.get(key);
+  if (!pending) {
+    pending = routing.directory
+      .discoverSessionsAsync({ ...(key === "all" ? {} : { provider: key }), terminalBindings: new Map() })
+      .then((sessions) => {
+        sessionDirectoryCache.set(key, { at: Date.now(), sessions });
+        return sessions;
+      })
+      .finally(() => sessionDirectoryInFlight.delete(key));
+    sessionDirectoryInFlight.set(key, pending);
+  }
+  return pending;
 }
 
 async function cachedPickerRail(provider, routing) {
@@ -4618,7 +4603,7 @@ async function sessionPicker(packetId, requestedProvider = "", source = "relay",
   const binding = routing.delivery.relaySessionBinding(deliveryRow.packetId);
   const current = await focusedNativeSession(provider, routing);
   const nativeRailPromise = cachedPickerRail(provider, routing);
-  const baseSessions = cachedPickerDirectory(provider, routing);
+  const baseSessions = await cachedSessionDirectory(provider, routing);
   const terminalBindings = routing.directory.discoverTerminalSessionBindings();
   const discoveredSessions = routing.directory.enrichTerminalSessions(baseSessions, terminalBindings);
   const nativeRail = await nativeRailPromise;
@@ -5166,6 +5151,7 @@ function openUrlTarget(url) {
 async function openChatApp(chatApp, prompt) {
   const targets = chatAppTargets(chatApp === "chatgpt" ? "chatgpt" : "claude", prompt, {
     schemeOwner: (scheme) => app.getApplicationNameForProtocol(scheme),
+    chatGptApp: currentProductFeatures().chatGptApp === true,
   });
   // Sandboxed harness runs must never pop the user's real browser or apps.
   if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") {
@@ -5992,7 +5978,9 @@ function anchorTopRight() {
   // origin and size change atomically. Windows and Linux instead get an
   // ordinary native window whose bounds are exactly the visible card.
   const nativeSize = FIXED_OVERLAY_SURFACE ? CARD_MAX : cardSize;
-  const anchor = fittedOverlayBounds(wa, nativeSize, { margin: MARGIN, maximum: CARD_MAX });
+  // A re-show of the Windows or Linux full app keeps it full size.
+  const maximum = appWindow ? { w: wa.width, h: wa.height } : CARD_MAX;
+  const anchor = fittedOverlayBounds(wa, nativeSize, { margin: appWindow ? 0 : MARGIN, maximum });
   if (process.env.RELAY_OVERLAY_TEST === "1" || process.env.RELAY_OVERLAY_PERF === "1") {
     // A harness run must not take over the developer's screen. Park sandbox
     // windows just off the bottom-right of the work area: still a REAL composited
@@ -6091,7 +6079,7 @@ function showOverlayWindow({ force = false, reposition = true, userInitiated = f
   const visible = win.isVisible();
   if (visible && !force) {
     perf.inc("spaceAsserts");
-    reinforceSpacePresence(win, { alwaysOnTop: overlayElevated });
+    reinforceSpacePresence(win, { alwaysOnTop: overlayElevated, allSpaces: !appSurface });
     return;
   }
   if (reposition) {
@@ -6109,7 +6097,7 @@ function showOverlayWindow({ force = false, reposition = true, userInitiated = f
   // whether the collection behavior actually drifted to decide between a real
   // re-attach and a no-op — repairing it first would force the re-show every time.
   perf.inc("spaceAsserts");
-  const shown = showInactiveOnAllSpaces(win, { force, userInitiated, alwaysOnTop: overlayElevated });
+  const shown = showInactiveOnAllSpaces(win, { force, userInitiated, alwaysOnTop: overlayElevated, allSpaces: !appSurface });
   if (shown) {
     if (FIXED_OVERLAY_SURFACE) {
       // A hide/show cycle can leave Electron's native ignore flag out of step
@@ -6315,6 +6303,10 @@ function enterAppSurface() {
   });
   try { win.setAlwaysOnTop(false); } catch {}
   overlayElevated = false;
+  // An ordinary app lives on the Space it was opened on; the pill follows you
+  // to every Space. skipTransformProcessType: the Dock icon is ours to show
+  // below, not a side effect of this call (Electron otherwise shows or hides it).
+  try { win.setVisibleOnAllWorkspaces(false, { skipTransformProcessType: true }); } catch {}
   try { win.webContents.send("relay:surfaceInset", appSurfaceMessage()); } catch {}
   try { win.setBounds(appSurface.workArea, false); } catch {}
   // The app you expanded is the app in front.
@@ -6360,6 +6352,7 @@ function exitAppSurface() {
   appSurface = null;
   try { win.webContents.send("relay:surfaceInset", { top: 0, right: 0 }); } catch {}
   try { win.setBounds(restore, false); } catch {}
+  try { win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true }); } catch {}
   overlayElevated = false;
   setOverlayElevated(true, { moveTop: false });
   if (process.platform === "darwin" && app.dock) {
@@ -6370,7 +6363,7 @@ function exitAppSurface() {
     const reshow = () => {
       if (!win || win.isDestroyed() || appSurface) return;
       if (!win.isVisible()) showOverlayWindow({ force: true, reposition: false });
-      try { reinforceSpacePresence(win, { alwaysOnTop: overlayElevated }); } catch {}
+      try { reinforceSpacePresence(win, { alwaysOnTop: overlayElevated, allSpaces: !appSurface }); } catch {}
     };
     setImmediate(reshow);
     setTimeout(reshow, 250);
@@ -6388,9 +6381,76 @@ function exitAppSurface() {
 }
 function syncAppSurfaceForCard(w, h, { settled = false } = {}) {
   if (!FIXED_OVERLAY_SURFACE) return null;
-  if (w > CARD_MAX.w || h > CARD_MAX.h) return enterAppSurface();
+  if (cardIsFullApp(w, h)) return enterAppSurface();
   if (appSurface && settled) exitAppSurface();
   return appSurface;
+}
+// The full app is the only card larger than the native maximum: the
+// two-thirds expanded card everyone else gets fits inside it.
+function cardIsFullApp(w = cardSize.w, h = cardSize.h) {
+  return w > CARD_MAX.w || h > CARD_MAX.h;
+}
+
+// THE FULL APP ON WINDOWS AND LINUX (2026-10-09). The same contract as the
+// macOS surface above, on the card-sized native window: while the card is the
+// full app, the window drops to the normal level so Alt-Tab and a click on
+// another app bring that app in front, and on Windows it becomes an ordinary
+// application with a taskbar button and an Alt-Tab entry (companion-window.cjs
+// drops its hidden owner). Collapse makes it the pill again: owned, out of the
+// taskbar and Alt-Tab, always on top. Linux keeps its taskbar entry throughout
+// (it is the fallback for desktops without a tray).
+//
+// Enter runs before the window grows and exit after it has shrunk, so the
+// re-show Windows needs to see an owner change happens at card size.
+let appWindow = false;
+// Where the pill sat when Expand began: Collapse folds back to exactly there.
+let appWindowHome = null;
+let pillTopmost = true;
+const PILL_TOPMOST_LEVEL = process.platform === "win32" ? "screen-saver" : "floating";
+function enterAppWindow() {
+  if (FIXED_OVERLAY_SURFACE || appWindow || !win || win.isDestroyed()) return;
+  appWindow = true;
+  try { appWindowHome = win.getBounds(); } catch { appWindowHome = null; }
+  // Space presence re-asserts topmost from overlayElevated on every pass;
+  // the full app must not be lifted back above the app the person chose.
+  overlayElevated = false;
+  try { win.setAlwaysOnTop(false); } catch {}
+  try { setCompanionAppWindow(win, true, { owner: pillOwner }); } catch {}
+  try { win.focus(); } catch {}
+}
+function exitAppWindow() {
+  if (!appWindow) return;
+  appWindow = false;
+  appWindowHome = null;
+  if (!win || win.isDestroyed()) return;
+  try { setCompanionAppWindow(win, false, { owner: pillOwner }); } catch {}
+  overlayElevated = true;
+  if (pillTopmost) { try { win.setAlwaysOnTop(true, PILL_TOPMOST_LEVEL); } catch {} }
+}
+// Windows names a taskbar button after its application, not its window: an
+// unbranded one says "Electron" with Electron's atom. Give the pill Relay's
+// identity. Where the native installer owns Relay this is its Start Menu
+// application (same ID), so the button groups with it, shows its name and
+// icon, and pinning it pins Relay. A Companion-only install relaunches
+// through its hidden pill launcher.
+function setPillAppDetails() {
+  if (process.platform !== "win32" || !win || win.isDestroyed()) return;
+  let details = null;
+  try {
+    const owner = require("../bootstrap/application-owner.cjs").applicationOwner();
+    if (owner && owner.appId && owner.executable) {
+      details = { appId: owner.appId, appIconPath: owner.executable, relaunchCommand: `"${owner.executable}"` };
+    }
+  } catch {}
+  if (!details) {
+    details = { appId: "work.relay.companion", appIconPath: path.join(__dirname, "relay.ico") };
+    const wscript = path.join(process.env.SystemRoot || process.env.windir || "C:\\Windows", "System32", "wscript.exe");
+    const launcher = ["relay-pill-launcher.vbs", "relay-companion-pill.vbs"]
+      .map((name) => path.join(relayConfigDir(), name))
+      .find((file) => fs.existsSync(file));
+    if (launcher) details.relaunchCommand = `"${wscript}" //B //Nologo "${launcher}"`;
+  }
+  try { win.setAppDetails({ ...details, appIconIndex: 0, relaunchDisplayName: "Relay" }); } catch {}
 }
 const HIT_IN = 6;
 const HIT_OUT = 12;
@@ -6489,6 +6549,9 @@ function startHitTest() {
 
 function fitOverlayWindowToCard({ settle = false } = {}) {
   if (FIXED_OVERLAY_SURFACE || !win || win.isDestroyed()) return;
+  const full = cardIsFullApp();
+  // The full app becomes an ordinary window before it grows (see enterAppWindow).
+  if (full) enterAppWindow();
   let current;
   try { current = win.getBounds(); } catch { return; }
   // Preserve the user's current top-right anchor while the ordinary Windows or
@@ -6498,13 +6561,18 @@ function fitOverlayWindowToCard({ settle = false } = {}) {
   // past that screen's work area.
   let wa = null;
   try { wa = (screen.getDisplayMatching(current) || screen.getPrimaryDisplay()).workArea; } catch {}
-  const maximum = wa && (cardSize.w > CARD_MAX.w || cardSize.h > CARD_MAX.h) ? { w: wa.width, h: wa.height } : CARD_MAX;
-  const target = setupCentered ? overlayHomeBounds() : resizedOverlayBounds(current, cardSize, { maximum });
+  const maximum = wa && full ? { w: wa.width, h: wa.height } : CARD_MAX;
+  // Collapse folds the full app back to the pill's own place, not the
+  // screen's corner the full app grew into.
+  const backToPill = settle && !full;
+  const anchor = backToPill && appWindow && appWindowHome ? appWindowHome : current;
+  const target = setupCentered ? overlayHomeBounds() : resizedOverlayBounds(anchor, cardSize, { maximum });
   if (wa && !setupCentered) {
     target.x = Math.max(wa.x, Math.min(target.x, wa.x + wa.width - target.width));
     target.y = Math.max(wa.y, Math.min(target.y, wa.y + wa.height - target.height));
   }
   if (target.x === current.x && target.y === current.y && target.width === current.width && target.height === current.height) {
+    if (backToPill) exitAppWindow();
     return;
   }
   const growing = target.width > current.width || target.height > current.height;
@@ -6513,6 +6581,7 @@ function fitOverlayWindowToCard({ settle = false } = {}) {
   // remains after the visual card has folded.
   if (!growing && !settle) return;
   try { win.setBounds(target, false); } catch {}
+  if (backToPill) exitAppWindow();
 }
 
 function scheduleNativeGeometryReconcile(delayMs) {
@@ -6542,6 +6611,8 @@ function createWindow() {
   // Keep the ordinary harness translucent so parallel probes remain unmistakable,
   // but let an explicitly requested recording own the foreground for visual QA.
   const isRecordingHarness = isHarness && process.env.RELAY_OVERLAY_TEST_RECORDING === "1";
+  if (!pillOwner || pillOwner.isDestroyed()) pillOwner = createCompanionWindowOwner(BaseWindow);
+  appWindow = false;
   win = createCompanionWindow(BrowserWindow, {
     ...overlayHomeBounds(),
     ...(isHarness && !isRecordingHarness ? { opacity: 0.55 } : {}),
@@ -6557,6 +6628,8 @@ function createWindow() {
     // Linux trays are optional desktop-environment extensions. The Companion
     // window factory preserves a taskbar/app-switcher route there.
     ...(process.platform === "linux" ? { icon: path.join(__dirname, "relayAppIcon.svg") } : {}),
+    // Windows: the icon Alt-Tab shows for the full app.
+    ...(process.platform === "win32" ? { icon: path.join(__dirname, "relay.ico") } : {}),
     fullscreenable: false,
     maximizable: false,
     minimizable: false,
@@ -6573,7 +6646,8 @@ function createWindow() {
       // all day); setThrottlingForShow() disables it only while a notification
       // card's dwell timer is live, where timing is trust-critical.
     },
-  });
+  }, { owner: pillOwner });
+  setPillAppDetails();
 
   // Windows strips WS_EX_TOPMOST from a scheduled-task-launched overlay that only asks
   // politely ("floating"); "screen-saver" is the level that survives. The periodic
@@ -6584,7 +6658,8 @@ function createWindow() {
   const harnessTopmost = isHarness && (
     process.env.RELAY_OVERLAY_TEST_TOPMOST === "1" || isRecordingHarness
   );
-  if (!isHarness || harnessTopmost) win.setAlwaysOnTop(true, process.platform === "win32" ? "screen-saver" : "floating");
+  pillTopmost = !isHarness || harnessTopmost;
+  if (pillTopmost) win.setAlwaysOnTop(true, PILL_TOPMOST_LEVEL);
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   if (FIXED_OVERLAY_SURFACE) {
     applyIgnore(true, { force: true });
@@ -7777,14 +7852,21 @@ async function ensurePlainHandoffCompletionMonitor(relayId) {
   const startedMs = Date.parse(String(row.agentHandoff?.acceptedAt || row.agentHandoff?.startedAt || row.workStartedAt)) || Date.now();
   const deadline = startedMs + 12 * 60 * 60 * 1000;
   const routing = await loadSessionRouting();
-  const tick = () => {
+  const tick = async () => {
     const current = rowById(id);
     if (!current?.workStartedAt || current.workCompletedAt || Date.now() >= deadline) {
       plainHandoffCompletionMonitors.delete(id);
       return;
     }
-    const exact = routing.directory.discoverSessions()
-      .find((session) => session.provider === binding.provider && String(session.nativeId) === String(binding.nativeId));
+    // One bound session is being watched, so only its provider is swept, off
+    // the main thread, and a sweep is reused across the 400 ms ticks: this
+    // poller used to walk every session of both providers synchronously on
+    // each tick.
+    let exact = null;
+    try {
+      exact = (await cachedSessionDirectory(binding.provider, routing, { ttlMs: 1_000 }))
+        .find((session) => session.provider === binding.provider && String(session.nativeId) === String(binding.nativeId)) || null;
+    } catch {}
     const lastMessageMs = Date.parse(String(exact?.lastMessageAt || "")) || 0;
     if (exact && !["active", "needs_input"].includes(String(exact.state)) && lastMessageMs >= startedMs) {
       updateStagedPacket(id, { workCompletedAt: new Date(lastMessageMs).toISOString() });
@@ -8040,7 +8122,8 @@ async function localChatAgentNative(session) {
     const published = JSON.parse(fs.readFileSync(directory.sessionDirectoryStatePath(), "utf8"));
     const binding = (published.sessions || []).find((item) => item.id === session.relaySessionId);
     if (!binding?.nativeId) return null;
-    const native = directory.discoverSessions().find((item) =>
+    const routing = await loadSessionRouting();
+    const native = (await cachedSessionDirectory(session.provider, routing)).find((item) =>
       item.provider === session.provider && item.nativeId === binding.nativeId);
     return native || null;
   } catch {
@@ -10358,6 +10441,7 @@ ipcMain.handle("relay:onboardingPollAgent", agentOnboardingIpc((key) => agentOnb
 ipcMain.handle("relay:onboardingCopyAgentRequest", agentOnboardingIpc((key) => agentOnboarding.copyPrompt(key)));
 ipcMain.handle("relay:onboardingOpenAgent", agentOnboardingIpc((key) => agentOnboarding.open(key, localOnboardingPrompt())));
 ipcMain.handle("relay:onboardingConnectClaude", agentOnboardingIpc((key) => agentOnboarding.connectClaude(key)));
+ipcMain.handle("relay:onboardingConnectChatGptApp", agentOnboardingIpc((key) => agentOnboarding.connectChatGptApp(key)));
 // SETUP (2026-10-07). The Setup page's facts and verbs, each for the account
 // still on screen. Connecting a chat AI reuses the first-run chooser's setup
 // request (agentOnboarding.prepareRun …), so there is one connect flow.
@@ -10373,14 +10457,18 @@ function setupNudgeFor(key) {
 }
 function setupSnapshot(key) {
   return { ...agentConnections.snapshot(key, { rider: currentProductFeatures().conductor === true }), conductorOffered: currentProductFeatures().conductor === true, run: agentOnboarding.runSnapshot(key),
-    claudeConnector: agentOnboarding.connectorSnapshot(key), platform: process.platform };
+    claudeConnector: agentOnboarding.connectorSnapshot(key, "claude"), chatgptConnector: agentOnboarding.connectorSnapshot(key, "chatgpt"),
+    platform: process.platform };
 }
 ipcMain.handle("relay:setupSnapshot", setupIpc(async (key, options) => {
   const before = JSON.stringify(setupNudgeFor(key));
-  // While Claude's connector is being added, ask the server every time.
-  const claudePending = agentOnboarding.connectorSnapshot(key).started && !agentOnboarding.connectorSnapshot(key).connected;
-  if (claudePending) await agentOnboarding.checkConnector(key).catch(() => {});
-  await agentConnections.refresh(key, { force: options?.force === true || claudePending });
+  // While Claude's connector or ChatGPT's app is being added, ask the server every time.
+  const pending = ["claude", "chatgpt"].filter((surface) => {
+    const connector = agentOnboarding.connectorSnapshot(key, surface);
+    return connector.started && !connector.connected;
+  });
+  for (const surface of pending) await agentOnboarding.checkConnector(key, surface).catch(() => {});
+  await agentConnections.refresh(key, { force: options?.force === true || pending.length > 0 });
   if (JSON.stringify(setupNudgeFor(key)) !== before) pushInbox(true);
   return setupSnapshot(key);
 }));
@@ -10419,6 +10507,12 @@ ipcMain.handle("relay:setupCancelRun", setupIpc(async (key) => { agentOnboarding
 // polling of the server's connection list turns the row to Connected.
 ipcMain.handle("relay:setupConnectClaude", setupIpc(async (key) => {
   await agentOnboarding.connectClaude(key);
+  return setupSnapshot(key);
+}));
+// With the server's ChatGPT app switch on, ChatGPT connects the same way:
+// Relay's page in ChatGPT, Connect, then Allow on Relay's page.
+ipcMain.handle("relay:setupConnectChatGptApp", setupIpc(async (key) => {
+  await agentOnboarding.connectChatGptApp(key);
   return setupSnapshot(key);
 }));
 
@@ -10928,11 +11022,11 @@ ipcMain.on("relay:cardResizing", (event, on) => {
   if (FIXED_OVERLAY_SURFACE) scheduleHit(0);
 });
 ipcMain.on("relay:setPos", (_e, x, y) => {
-  if (appSurface) return; // the full app fills the screen; there is nowhere to drag it
+  if (appSurface || appWindow) return; // the full app fills the screen; there is nowhere to drag it
   if (win && !win.isDestroyed() && Number.isFinite(x) && Number.isFinite(y)) {
     win.setPosition(Math.round(x), Math.round(y));
     perf.inc("spaceAsserts");
-    reinforceSpacePresence(win, { alwaysOnTop: overlayElevated });
+    reinforceSpacePresence(win, { alwaysOnTop: overlayElevated, allSpaces: !appSurface });
   }
 });
 // ✕ on the card: hide the overlay entirely until the status-area Relay mark is clicked.

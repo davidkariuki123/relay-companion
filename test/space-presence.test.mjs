@@ -289,3 +289,23 @@ test('deliberate reopen re-presents a window even when cached visibility and Spa
   showInactiveOnAllSpaces(win, { force: true, userInitiated: true, platform: 'darwin' });
   assert.deepEqual(calls, ['show', 'raise']);
 });
+
+test("the full app stays on its own Space: no all-Spaces repair and no re-show on a Space switch", () => {
+  // The full app (2026-10-09) is an ordinary app: it lives on the Space it was
+  // opened on. Ordering it front from the Space watcher would pull the person
+  // back to that Space.
+  const win = fakeWindow({ visible: true });
+  win.isVisibleOnAllWorkspaces = () => false;
+  win.isAlwaysOnTop = () => false;
+  assert.equal(showInactiveOnAllSpaces(win, { force: true, alwaysOnTop: false, allSpaces: false, platform: "darwin" }), false);
+  assert.ok(!win.calls.some(([name]) => ["setVisibleOnAllWorkspaces", "showInactive", "moveTop", "setAlwaysOnTop"].includes(name)), JSON.stringify(win.calls));
+});
+
+test("asking for the full app explicitly still brings it to the front", () => {
+  const win = fakeWindow({ visible: true });
+  win.isVisibleOnAllWorkspaces = () => false;
+  win.isAlwaysOnTop = () => false;
+  showInactiveOnAllSpaces(win, { force: true, userInitiated: true, alwaysOnTop: false, allSpaces: false, platform: "darwin" });
+  assert.ok(win.calls.some(([name]) => name === "showInactive"));
+  assert.ok(!win.calls.some(([name]) => name === "setVisibleOnAllWorkspaces"), "but it does not join every Space");
+});

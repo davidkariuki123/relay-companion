@@ -245,7 +245,8 @@ test("choosing a chat does not start opening, acknowledge or deliver content", (
 // ---- Fix 4: topmost level on Windows --------------------------------------
 
 test("the overlay window uses the screen-saver level on win32", () => {
-  assert.match(main, /win\.setAlwaysOnTop\(true, process\.platform === "win32" \? "screen-saver" : "floating"\)/);
+  assert.match(main, /const PILL_TOPMOST_LEVEL = process\.platform === "win32" \? "screen-saver" : "floating";/);
+  assert.match(main, /if \(pillTopmost\) win\.setAlwaysOnTop\(true, PILL_TOPMOST_LEVEL\)/);
 });
 
 // ---- 0.1.87: open-status notes reach the thread surfaces too ---------------

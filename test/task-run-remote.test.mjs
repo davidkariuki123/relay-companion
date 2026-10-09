@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runTaskOperation, TASK_RUN_OFF_MESSAGE } from "../src/task-run-remote.js";
+import { runTaskOperation, TASK_RUN_OFF_MESSAGE, workspaceKey } from "../src/task-run-remote.js";
 import { runSessionDirectoryOnce } from "../src/session-controller.js";
 
 function harness({ enabled = true, providers = [{ provider: "claude", label: "Claude Code" }, { provider: "codex", label: "Codex", binary: "codex" }], result = { ok: true }, choices } = {}) {
@@ -21,8 +21,8 @@ function harness({ enabled = true, providers = [{ provider: "claude", label: "Cl
     },
     workspace: {
       workspaceChoices: choices || (({ providers: offered }) => ({
-        auto: null,
-        suggested: { provider: offered[0].provider, cwd: "C:/work/relay" },
+        auto: { provider: offered[0].provider, cwd: "C:/work/relay" },
+        suggested: null,
         options: [],
       })),
       rememberWorkspaceChoice: (_preferences, chosen) => ({ provider: chosen.provider, cwd: chosen.cwd }),
@@ -43,7 +43,7 @@ test("only a start operation that names a Task is a remote Task run", async () =
   assert.deepEqual(h.evidence, []);
 });
 
-test("a remote Task run takes the Execute path in the folder Execute would suggest, and never asks for consent", async () => {
+test("a remote Task run takes the Execute path in the folder Execute would use without asking, and never asks for consent", async () => {
   const h = harness();
   assert.equal(await runTaskOperation(h.client, operation(), "tok", { load: h.load, recordEvidence: h.recordEvidence, config: {} }), true);
   assert.equal(h.calls.consentResult, false, "nobody is at this computer to consent");
@@ -75,7 +75,55 @@ test("a remote run reports why it could not start", async () => {
 
   const nowhere = harness({ choices: () => ({ auto: null, suggested: null, options: [] }) });
   await runTaskOperation(nowhere.client, operation(), "tok", { load: nowhere.load, recordEvidence: nowhere.recordEvidence, config: {} });
-  assert.match(nowhere.evidence[0].error, /no folder for this Task/);
+  assert.equal(nowhere.evidence[0].state, "failed");
+  assert.match(nowhere.evidence[0].error, /no folder to offer for this Task/);
+});
+
+// Where Execute would ask on this computer, the phone is asked instead.
+const offer = ({ providers: offered }) => ({
+  auto: null,
+  suggested: null,
+  options: offered.flatMap((app) => [
+    { provider: app.provider, cwd: "C:/work/relay", name: "relay", why: "Last used for David's Tasks" },
+    { provider: app.provider, cwd: "C:/work/site", name: "site", why: "" },
+  ]),
+});
+
+test("a Task that does not settle the folder runs nothing and offers Execute's list, without paths", async () => {
+  const h = harness({ choices: offer });
+  await runTaskOperation(h.client, operation(), "tok", { load: h.load, recordEvidence: h.recordEvidence, config: {} });
+  assert.equal(h.calls.choose, null, "nothing was chosen, so nothing ran");
+  assert.deepEqual(h.remembered, []);
+  assert.equal(h.evidence.length, 1);
+  assert.equal(h.evidence[0].state, "completed");
+  const output = h.evidence[0].result.output;
+  assert.equal(output.needsFolder, true);
+  assert.deepEqual(output.options.map((option) => [option.provider, option.app, option.name]), [
+    ["claude", "Claude Code", "relay"], ["claude", "Claude Code", "site"], ["codex", "Codex", "relay"], ["codex", "Codex", "site"],
+  ]);
+  assert.equal(output.options[0].why, "Last used for David's Tasks");
+  assert.match(output.options[0].key, /^[a-f0-9]{24}$/);
+  assert.equal(new Set(output.options.map((option) => option.key)).size, 4, "each app-and-folder pair has its own key");
+  assert.equal(JSON.stringify(output).includes("C:/work"), false, "no path leaves this computer");
+});
+
+test("the folder picked on the phone runs the Task, and only if this computer still offers it", async () => {
+  const key = workspaceKey({ provider: "codex", cwd: "C:/work/site" });
+  const h = harness({ choices: offer });
+  await runTaskOperation(h.client, operation({ provider: "codex", taskAppChosen: true, taskWorkspaceKey: key }), "tok", { load: h.load, recordEvidence: h.recordEvidence, config: {} });
+  assert.deepEqual(h.calls.choose, { provider: "codex", cwd: "C:/work/site" });
+  assert.deepEqual(h.remembered, [{ provider: "codex", cwd: "C:/work/site" }]);
+  assert.equal(h.evidence[0].result.output.message, "Started in Codex in site.");
+
+  const stale = harness({ choices: offer });
+  await runTaskOperation(stale.client, operation({ taskWorkspaceKey: workspaceKey({ provider: "claude", cwd: "C:/elsewhere" }) }), "tok", { load: stale.load, recordEvidence: stale.recordEvidence, config: {} });
+  assert.equal(stale.calls.choose, null, "a pick that is not on offer runs nothing");
+  assert.equal(stale.evidence[0].result.output.needsFolder, true, "and the phone is asked again");
+
+  const settled = harness();
+  await runTaskOperation(settled.client, operation({ taskWorkspaceKey: workspaceKey({ provider: "claude", cwd: "C:/elsewhere" }) }), "tok", { load: settled.load, recordEvidence: settled.recordEvidence, config: {} });
+  assert.equal(settled.calls.choose, null, "a key is never swapped for the folder Execute would use");
+  assert.equal(settled.evidence[0].state, "failed");
 });
 
 test("a Claude draft waiting for Send says so instead of claiming the Task started", async () => {

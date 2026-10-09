@@ -32,7 +32,7 @@ import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { claudeCliPath, codexCliPath } from "./capabilities.js";
+import installedApps from "./installed-apps.cjs";
 import { claudeDesktopConfigDirs, claudeDesktopConfigPathIn } from "./desktop-hosts.js";
 import { HOST_PLACES, placeOfAncestry, readHostEvidence } from "./host-evidence.js";
 import { readHostHistory } from "./host-history.js";
@@ -45,14 +45,6 @@ const LOG_TAIL_BYTES = 512 * 1024;
 
 function exists(file) {
   try { return Boolean(file) && fs.existsSync(file); } catch { return false; }
-}
-
-function findApp(roots, names) {
-  for (const root of roots) for (const name of names) {
-    const candidate = path.join(root, `${name}.app`);
-    if (exists(candidate)) return candidate;
-  }
-  return "";
 }
 
 /** The command an MCP entry runs, and whether every file it names exists. */
@@ -164,20 +156,21 @@ export function inspectAgentHosts({
   now = Date.now(),
 } = {}) {
   const mac = platform === "darwin";
-  const roots = appsDir ? [appsDir] : mac ? ["/Applications", path.join(homeDir, "Applications")] : [];
-  const claudeApp = mac ? findApp(roots, ["Claude"]) : "";
-  const chatgptApp = mac ? findApp(roots, ["ChatGPT", "Codex"]) : "";
-  const conductorApp = mac ? findApp(roots, ["Conductor"]) : "";
+  // Which apps are installed is installed-apps.cjs's answer, the same one
+  // Open in and Tasks use (2026-10-09); this file adds whether Relay works in
+  // each. The sandbox folders stand in for this computer's own apps.
   const cliEnv = { ...env, HOME: homeDir };
+  const installed = installedApps.installedAiApps({ env: cliEnv, platform, homedir: homeDir, appsDir });
+  const { claudeApp, chatgptApp, conductorApp } = installed;
   const insideApp = (file) => /\.app[/\\]/.test(file);
   const claudeCli = appsDir || binDir
     ? (binDir && exists(path.join(binDir, "claude")) ? path.join(binDir, "claude") : "")
-    : cli ? String(cli.claude || "") : claudeCliPath({ env: cliEnv, homedir: homeDir });
+    : cli ? String(cli.claude || "") : installed.claudeCli;
   const codexCliFound = appsDir || binDir
     ? (binDir && exists(path.join(binDir, "codex")) ? path.join(binDir, "codex") : "")
-    : cli ? String(cli.codex || "") : codexCliPath({ env: cliEnv });
+    : cli ? String(cli.codex || "") : installed.codexCli;
   const codexCli = codexCliFound && !insideApp(codexCliFound) ? codexCliFound : "";
-  const claudeDesktopCode = path.join(homeDir, "Library", "Application Support", "Claude", "claude-code");
+  const claudeDesktopCode = appsDir ? path.join(homeDir, "Library", "Application Support", "Claude", "claude-code") : installed.claudeAppCode;
 
   // Registrations, from the same files setup writes.
   const desktopDirs = mac || platform === "win32"
@@ -376,21 +369,14 @@ function run(file, args) {
     execFile(file, args, { encoding: "utf8", timeout: 4000, maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => resolve(error ? "" : String(stdout || "")));
   });
 }
-async function findCli(name, candidates, env) {
-  const hit = candidates.find(exists);
-  if (hit) return hit;
-  return (await run("/usr/bin/which", [name])).trim().split("\n")[0] || "";
-}
 export async function inspectAgentHostsAsync(options = {}) {
   const env = options.env || process.env;
   const homeDir = options.homeDir || env.HOME || os.homedir();
   const now = options.now || Date.now();
   if (!cliCache.value || now - cliCache.at > CLI_TTL_MS) {
-    const [claude, codex] = await Promise.all([
-      String(env.RELAY_CLAUDE_CLI_PATH || "").trim() || findCli("claude", [path.join(homeDir, ".claude", "local", "claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude"], env),
-      String(env.CODEX_CLI_PATH || "").trim() || findCli("codex", ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"], env),
-    ]);
-    cliCache = { at: now, value: { claude, codex } };
+    // A PATH scan in-process, no child process, so it never blocks.
+    const lookup = { env: { ...env, HOME: homeDir }, platform: options.platform || process.platform, homedir: homeDir };
+    cliCache = { at: now, value: { claude: installedApps.claudeCliPath(lookup), codex: installedApps.codexCliPath(lookup) } };
   }
   const processes = (options.platform || process.platform) === "win32" ? [] : parseProcessTable(await run("/bin/ps", ["-axo", "uid=,pid=,ppid=,lstart=,command="]));
   const store = evidenceHome(env, homeDir);
@@ -479,32 +465,19 @@ export function claudeCheckFromOutput(code, stdout, stderr) {
   if (status) return { ok: false, reason: "app_check_failed", detail: status.replace(/^[✘✗]\s*/, "").slice(0, 200) };
   return null;
 }
-/** The Claude Code the Claude app's Code tab runs: the newest one it downloaded. */
-function claudeAppCli(homeDir) {
-  const root = path.join(homeDir, "Library", "Application Support", "Claude", "claude-code");
-  let versions = [];
-  try { versions = fs.readdirSync(root).filter((name) => /^\d+\.\d+\.\d+/.test(name)); } catch { return ""; }
-  const order = (a, b) => a.split(/[.-]/).map(Number).reduce((diff, part, i) => diff || part - (Number(b.split(/[.-]/)[i]) || 0), 0);
-  for (const version of versions.sort(order).reverse()) {
-    let builds = [];
-    try { builds = fs.readdirSync(path.join(root, version)); } catch {}
-    for (const build of builds) {
-      const bin = path.join(root, version, build, "claude.app", "Contents", "MacOS", "claude");
-      if (exists(bin)) return bin;
-    }
-  }
-  return "";
-}
 function hostChecksFor({ homeDir, env, appsDir, cli, now }) {
   if (appsDir) return { results: {}, pending: [] };
   const support = path.join(homeDir, "Library", "Application Support");
-  const chatgpt = ["ChatGPT", "Codex"].map((name) => path.join("/Applications", `${name}.app`, "Contents", "Resources", "codex")).find(exists) || "";
+  // The ChatGPT app's own codex, and the Claude Code the Claude app's Code
+  // tab runs (the newest it downloaded): installed-apps.cjs finds both.
+  const lookup = { env: { ...env, HOME: homeDir }, homedir: homeDir };
+  const chatgpt = installedApps.codexAppBinary(lookup);
   const codexConfig = env.CODEX_CONFIG || path.join(env.CODEX_HOME || path.join(homeDir, ".codex"), "config.toml");
   const claudeConfig = env.CLAUDE_CODE_CONFIG || path.join(homeDir, ".claude.json");
   // Claude rewrites ~/.claude.json constantly; only its Relay entry matters.
   const claudeEntry = JSON.stringify(jsonRelayEntry(claudeConfig) || null);
   const checks = {
-    "claude-code:app": { bin: claudeAppCli(homeDir), kind: "claude" },
+    "claude-code:app": { bin: installedApps.claudeAppCodeCli(lookup), kind: "claude" },
     "claude-code:terminal": { bin: cli?.claude || "", kind: "claude" },
     "claude-code:conductor": { bin: path.join(support, "com.conductor.app", "bin", "claude"), kind: "claude" },
     "codex:chatgpt-app": { bin: chatgpt, kind: "codex" },

@@ -426,12 +426,19 @@ async function connectFinish() {
     if (error?.code === "ENOENT") throw new Error("No Relay browser approval is waiting. Start the connection again.");
     throw new Error("Relay's pending authorization could not be read.");
   }
+  // The key this computer used until now is replaced by the new one, so the
+  // person's list of connected AIs keeps one row per computer.
+  let replacesToken;
+  try {
+    const existing = JSON.parse(fs.readFileSync(configPath(), "utf8"));
+    if (existing?.apiUrl === pending.apiUrl && /^web_[A-Za-z0-9_-]{16,250}$/.test(String(existing.accessToken || ""))) replacesToken = existing.accessToken;
+  } catch {}
   let response;
   try {
     response = await publicRequest(
       pending.apiUrl,
       `/v1/agent/authorizations/${encodeURIComponent(pending.authorizationId)}/consume`,
-      { clientSecret: pending.clientSecret, codeVerifier: pending.codeVerifier },
+      { clientSecret: pending.clientSecret, codeVerifier: pending.codeVerifier, ...(replacesToken ? { replacesToken } : {}) },
     );
   } catch (error) {
     if (Number(error?.status) === 409 && error?.code === "authorization_pending") {

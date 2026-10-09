@@ -13,8 +13,8 @@
 // a convenience, never a substitute.
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import installedApps from "./installed-apps.cjs";
 
 /**
  * Every directory that might hold claude_desktop_config.json on this machine.
@@ -22,48 +22,11 @@ import path from "node:path";
  * Order matters only for reporting; we write to every candidate whose parent
  * already exists, because on Windows the app READS a virtualised MSIX path while
  * its own "Edit Config" button OPENS %APPDATA% — the two never sync, and picking
- * one silently registers nothing for half of users.
+ * one silently registers nothing for half of users. The list is
+ * installed-apps.cjs's, the one place Relay finds the AI apps (2026-10-09).
  */
-export function claudeDesktopConfigDirs({ env = process.env, platform = process.platform, exists = fs.existsSync } = {}) {
-  // An explicit override wins and is used verbatim — the app appends no app-name
-  // suffix when CLAUDE_USER_DATA_DIR is set.
-  if (env.CLAUDE_USER_DATA_DIR) return [env.CLAUDE_USER_DATA_DIR];
-
-  const home = env.HOME || os.homedir();
-  if (platform === "darwin") {
-    const base = path.posix.join(home, "Library", "Application Support");
-    // Claude-3p is the enterprise/partner build; it has its own userData dir.
-    return [path.posix.join(base, "Claude"), path.posix.join(base, "Claude-3p")].filter((dir) => exists(dir));
-  }
-
-  if (platform === "win32") {
-    const dirs = [];
-    const localAppData = env.LOCALAPPDATA;
-    if (localAppData) {
-      const packages = path.win32.join(localAppData, "Packages");
-      // The MSIX package family name carries a hash, so glob rather than pin it.
-      try {
-        for (const entry of fs.readdirSync(packages)) {
-          if (!/^Claude_/.test(entry)) continue;
-          const dir = path.win32.join(packages, entry, "LocalCache", "Roaming", "Claude");
-          if (exists(dir)) dirs.push(dir);
-        }
-      } catch {
-        // No Packages dir: not an MSIX install.
-      }
-      const thirdParty = path.win32.join(localAppData, "Claude-3p");
-      if (exists(thirdParty)) dirs.push(thirdParty);
-    }
-    if (env.APPDATA) {
-      const roaming = path.win32.join(env.APPDATA, "Claude");
-      if (exists(roaming)) dirs.push(roaming);
-    }
-    return dirs;
-  }
-
-  // Anthropic ships no documented Linux desktop build; guessing a path would
-  // write a file nothing reads and report success.
-  return [];
+export function claudeDesktopConfigDirs(options = {}) {
+  return installedApps.claudeDesktopDirs(options);
 }
 
 export function claudeDesktopConfigPathIn(dir) {
@@ -197,25 +160,9 @@ export function resolveStableNode({
   return execPath;
 }
 
-/**
- * A desktop-only Codex user still has a full codex binary — it ships inside the
- * ChatGPT app, it just is not on PATH. Preferring it means we can use the
- * supported `codex mcp add` rather than hand-editing TOML.
- */
-export function codexBinaryCandidates({ env = process.env, platform = process.platform } = {}) {
-  const home = env.HOME || os.homedir();
-  if (platform === "darwin") {
-    return [
-      "/Applications/ChatGPT.app/Contents/Resources/codex",
-      path.join(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
-    ];
-  }
-  return [];
-}
-
-/** True when a Claude Desktop install is present, whether or not a CLI is. */
+/** True when the Claude app is installed, whether or not a CLI is. */
 export function claudeDesktopPresent(options = {}) {
-  return claudeDesktopConfigDirs(options).length > 0;
+  return Boolean(installedApps.claudeAppPath(options));
 }
 
 /**
@@ -224,9 +171,8 @@ export function claudeDesktopPresent(options = {}) {
  * The Codex desktop experience ships inside the ChatGPT app rather than a
  * separate bundle, and it reads the same ~/.codex/config.toml as the CLI — so
  * finding the app is enough to know a Codex host exists, even before ~/.codex
- * has been created by a first run.
+ * has been created by a first run. On Windows that is the Store app.
  */
-export function codexAppPresent({ env = process.env, platform = process.platform, exists = fs.existsSync } = {}) {
-  if (platform !== "darwin") return false;
-  return codexBinaryCandidates({ env, platform }).some((candidate) => exists(candidate));
+export function codexAppPresent(options = {}) {
+  return Boolean(installedApps.chatgptAppPath(options));
 }

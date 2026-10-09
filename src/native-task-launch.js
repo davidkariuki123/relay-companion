@@ -8,7 +8,7 @@ import net from "node:net";
 import { spawn } from "node:child_process";
 import { randomUUID, createHash } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
-import { claudeDesktopPresent } from "./desktop-hosts.js";
+import installedApps from "./installed-apps.cjs";
 import { claudeHome, codexHome } from "./host-paths.js";
 import { configDir } from "./config.js";
 import atomicJson from "./atomic-json.cjs";
@@ -45,18 +45,16 @@ export function executionEnabled(config) {
   try { return executionPreferences(config).enabled === true; } catch { return false; }
 }
 
+// The apps a Task can run in here: the ChatGPT/Codex app's own codex (driven
+// through its app-server) and the Claude app. Which apps are installed is
+// installed-apps.cjs's answer, shared with Open in and Your AIs; running a
+// Task is supported on Windows and macOS.
 export function nativeProviders({ platform = process.platform, env = process.env, home = os.homedir() } = {}) {
   if (!["win32", "darwin"].includes(platform)) return [];
-  const root = path.join(env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "OpenAI", "Codex", "bin");
-  const candidates = platform === "win32"
-    ? names(root).map((n) => path.join(root, n, "codex.exe"))
-      .filter((p) => fs.existsSync(p)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
-    : ["/Applications/Codex.app/Contents/Resources/codex", "/Applications/ChatGPT.app/Contents/Resources/codex",
-      path.join(home, "Applications/Codex.app/Contents/Resources/codex"), path.join(home, "Applications/ChatGPT.app/Contents/Resources/codex")];
-  const binary = candidates.find((p) => fs.existsSync(p));
+  const apps = installedApps.installedAiApps({ platform, env, homedir: home });
   return [
-    ...(binary ? [{ provider: "codex", label: "Codex", binary }] : []),
-    ...(claudeDesktopPresent({ platform, env }) ? [{ provider: "claude", label: "Claude Code" }] : []),
+    ...(apps.codexAppBinary ? [{ provider: "codex", label: "Codex", binary: apps.codexAppBinary }] : []),
+    ...(apps.claudeApp ? [{ provider: "claude", label: "Claude Code" }] : []),
   ];
 }
 

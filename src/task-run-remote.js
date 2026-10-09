@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readConfig } from "./config.js";
 
 // A Task someone asked this computer to run from another of their devices
@@ -7,8 +8,11 @@ import { readConfig } from "./config.js";
 // the same server reservation and the same prompt. The differences are only
 // that nobody is at this computer to answer a question, so:
 // - consent is never asked: device execution must already be on here;
-// - the folder is the one Execute would suggest first (the Task's own project,
-//   then this sender's or Topic's last folder, the last folder, recent work);
+// - the folder is used without asking only where Execute would not ask (the
+//   Task names exactly one checkout here, with a known app). Otherwise the
+//   computer answers with the same short list Execute offers, the person
+//   picks one on the phone, and the pick comes back as a second run that is
+//   honoured only if it was offered (by an opaque key, never a path);
 // - a Claude folder this computer has not trusted yet cannot start remotely.
 
 export const TASK_RUN_OFF_MESSAGE = "Device execution is off on this computer. Turn it on in Relay there (run Execute on a Task once), then try again.";
@@ -23,6 +27,19 @@ export function openDeepLink(url, { platform = process.platform, spawnProcess = 
     child.once("error", reject);
     child.once("spawn", () => { child.unref?.(); resolve(); });
   });
+}
+
+/** An offered app-and-folder pair, named without revealing its path. */
+export function workspaceKey(option) {
+  return createHash("sha256").update(`${option.provider}\n${String(option.cwd || "").toLowerCase()}`).digest("hex").slice(0, 24);
+}
+
+/** Thrown from choose: the phone has to pick a folder from this list. */
+export class FolderNeeded extends Error {
+  constructor(options) {
+    super("Choose a folder for this Task.");
+    this.options = options;
+  }
 }
 
 function appLabel(provider) {
@@ -77,8 +94,21 @@ export async function runTaskOperation(client, operation, claimToken, {
           packet,
           senderName: String(packet?.senderName || packet?.sender?.name || "").trim().split(/\s+/)[0] || "",
         });
-        const pick = offered.auto || offered.suggested;
-        if (!pick) throw new Error("This computer has no folder for this Task yet. Run Execute on it there once to choose one.");
+        const pickedKey = String(operation.input?.taskWorkspaceKey || "");
+        const pick = pickedKey
+          ? offered.options.find((option) => workspaceKey(option) === pickedKey) || null
+          : offered.auto;
+        if (!pick) {
+          // As Execute asks on this computer, ask on the phone: the offered
+          // pairs only. A pick that is no longer offered is asked again.
+          throw new FolderNeeded(offered.options.map((option) => ({
+            key: workspaceKey(option),
+            provider: option.provider,
+            app: appLabel(option.provider),
+            name: option.name,
+            why: option.why || "",
+          })));
+        }
         chosen = { provider: pick.provider, cwd: pick.cwd };
         launch.setExecutionPreferences(config, workspace.rememberWorkspaceChoice(preferences, { packet, ...chosen }));
         return chosen;
@@ -94,6 +124,17 @@ export async function runTaskOperation(client, operation, claimToken, {
       output: { message, app: chosen?.provider || wantedApp || "", folder, waiting: Boolean(result.awaitingSend) },
     });
   } catch (error) {
+    if (error instanceof FolderNeeded) {
+      if (!error.options.length) {
+        await recordEvidence(client, operation.id, claimToken, "failed", {}, "This computer has no folder to offer for this Task. Run it from Relay on that computer once to choose one.");
+        return true;
+      }
+      // Nothing ran and nothing was reserved: the phone shows these and sends a pick.
+      await recordEvidence(client, operation.id, claimToken, "completed", {
+        output: { needsFolder: true, message: "Choose a folder for this Task.", options: error.options },
+      });
+      return true;
+    }
     log(`remote Task run ${taskId} failed: ${error?.message || error}`);
     await recordEvidence(client, operation.id, claimToken, "failed", {}, error?.message || String(error));
   }

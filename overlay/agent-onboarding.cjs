@@ -32,11 +32,28 @@ function claudeStartPrompt(known) {
   if (known?.kind === "link") return "Help me make my first Relay link.";
   return CLAUDE_START_PROMPT;
 }
+// CHATGPT CONNECTS BY ITS APP (2026-10-09), when the server's RELAY_CHATGPT_APP
+// switch is on (features.chatGptApp). Relay's official ChatGPT app is the same
+// hosted connector Claude uses, listed in ChatGPT's plugin directory: the
+// person clicks Connect on Relay's page in ChatGPT, then Allow on Relay's own
+// page, and it works in every ChatGPT chat, not only Work. The lesson then
+// starts in an ordinary chat, opened with this sentence typed in, which is
+// what the app's get-started flow answers. Off, ChatGPT keeps its setup code.
+const CHATGPT_START_PROMPT = "Help me get started with Relay.";
+const CHATGPT_START_URL = `https://chatgpt.com/?q=${encodeURIComponent(CHATGPT_START_PROMPT)}`;
 
-function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeOwner = () => "", openExternal, writeClipboard, now = Date.now }) {
+function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeOwner = () => "", openExternal, writeClipboard, now = Date.now, chatGptApp = () => false }) {
   const runs = new Map(); // key -> live setup run (code only in memory)
   const server = new Map(); // key -> last /v1/agent/onboarding answer
-  const connectors = new Map(); // key -> { startedAt, connected, checked }: Claude's connector
+  // key + surface -> { startedAt, connected, checked, error }: a hosted connector being added
+  const connectors = new Map();
+  const connectorKey = (key, surface) => `${key}\u0000${surface}`;
+  /** The surface whose hosted connector this AI connects by, or "" for a setup code / local agent. */
+  function connectorSurface(host) {
+    if (host === "claude") return "claude";
+    if (host === "chatgpt") { try { return chatGptApp() === true ? "chatgpt" : ""; } catch { return ""; } }
+    return "";
+  }
   const ownsScheme = (scheme) => { try { return Boolean(String(schemeOwner(scheme) || "").trim()); } catch { return false; } };
 
   function record(key) { return key && store[key] && typeof store[key] === "object" ? store[key] : null; }
@@ -73,42 +90,53 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
         kind: known?.kind || "",
         destination: known?.org?.name || known?.inviter?.name || "",
         openable: { "claude-code": ownsScheme("claude://"), codex: ownsScheme("codex://"), claudeApp: ownsScheme("claude://") },
-        connector: chosen?.host === "claude" ? api.connectorSnapshot(key) : null,
+        connector: connectorSurface(chosen?.host) ? api.connectorSnapshot(key, connectorSurface(chosen.host)) : null,
+        // "connector" once a hosted connector connected this choice (ChatGPT's
+        // app); a ChatGPT connected by a setup code started its lesson there.
+        via: chosen?.via || "",
         // An AI asked Relay how to begin (server fact): the lesson is under way.
         tutorialStarted: Boolean(known?.tutorialStartedAt),
-        startPrompt: claudeStartPrompt(known),
+        startPrompt: chosen?.host === "chatgpt" ? CHATGPT_START_PROMPT : claudeStartPrompt(known),
       };
     },
-    connectorSnapshot(key) {
-      const state = connectors.get(key) || {};
+    connectorSnapshot(key, surface = "claude") {
+      const state = connectors.get(connectorKey(key, surface)) || {};
       return { started: Boolean(state.startedAt), connected: Boolean(state.connected), checked: Boolean(state.checked), error: state.error || "" };
     },
     /**
-     * Open Claude's add-connector screen, filled in, through Relay's website
+     * Open the AI's connect screen (Claude's add-connector dialog filled in,
+     * or Relay's page in ChatGPT's plugin directory) through Relay's website
      * carrying this app's account: no Relay sign-in, and never another account.
      */
-    async connectClaude(key) {
+    async connect(key, surface) {
       if (!key) throw new Error("Sign in to Relay first.");
-      const state = connectors.get(key) || {};
-      connectors.set(key, { ...state, error: "" });
+      if (connectorSurface(surface) !== surface) throw new Error("Connect ChatGPT with its setup message.");
+      const name = HOSTS[surface].name;
+      const id = connectorKey(key, surface);
+      const state = connectors.get(id) || {};
+      connectors.set(id, { ...state, error: "" });
       let url;
-      try { url = (await (await client()).mcpBrowserHandoff("claude")).url; }
+      try { url = (await (await client()).mcpBrowserHandoff(surface)).url; }
       catch {
-        connectors.set(key, { ...state, error: "Relay couldn’t reach Claude’s setup. Check your connection and try again." });
-        throw new Error("Relay couldn’t reach Claude’s setup. Check your connection and try again.");
+        connectors.set(id, { ...state, error: `Relay couldn’t reach ${name}’s setup. Check your connection and try again.` });
+        throw new Error(`Relay couldn’t reach ${name}’s setup. Check your connection and try again.`);
       }
-      if (!/^https:\/\//.test(String(url || "")) && !/^http:\/\/localhost[:/]/.test(String(url || ""))) throw new Error("Relay couldn’t reach Claude’s setup.");
+      if (!/^https:\/\//.test(String(url || "")) && !/^http:\/\/localhost[:/]/.test(String(url || ""))) throw new Error(`Relay couldn’t reach ${name}’s setup.`);
       await openExternal(url);
-      connectors.set(key, { ...connectors.get(key), startedAt: now(), error: "" });
+      connectors.set(id, { ...connectors.get(id), startedAt: now(), error: "" });
       return api.snapshot(key);
     },
-    /** Does this account have Claude's connector? Read from the server's own list. */
-    async checkConnector(key) {
+    connectClaude(key) { return api.connect(key, "claude"); },
+    /** Relay's page in ChatGPT, where Connect adds Relay's ChatGPT app. Only with the server's switch on. */
+    connectChatGptApp(key) { return api.connect(key, "chatgpt"); },
+    /** Does this account have the AI's hosted connector? Read from the server's own list. */
+    async checkConnector(key, surface = "claude") {
       const list = await (await client()).agentConnections();
       const connected = Array.isArray(list?.connections)
-        && list.connections.some((item) => item.kind === "connector" && item.surface === "claude");
-      const before = connectors.get(key) || {};
-      connectors.set(key, { ...before, connected, checked: true });
+        && list.connections.some((item) => item.kind === "connector" && item.surface === surface);
+      const id = connectorKey(key, surface);
+      const before = connectors.get(id) || {};
+      connectors.set(id, { ...before, connected, checked: true });
       return { connected, justNow: connected && !before.connected && Boolean(before.startedAt) };
     },
     /**
@@ -129,6 +157,16 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
       void api.refreshServer(key);
       return api.snapshot(key);
     },
+    /**
+     * A new, ordinary ChatGPT chat with the start sentence typed in, where
+     * Relay's ChatGPT app answers it. Not Work: the app's tools work in Chat.
+     * The person presses send; the clipboard is theirs (Copy instead).
+     */
+    async openChatGptChat(key) {
+      await openExternal(CHATGPT_START_URL);
+      void api.refreshServer(key);
+      return api.snapshot(key);
+    },
     choose(key, host, place = "") {
       if (!key || !HOSTS[host]) throw new Error("Choose one of the listed AIs.");
       if (place && !PLACES.has(place)) throw new Error("Choose the browser or the app.");
@@ -139,9 +177,10 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
         runs.delete(key);
         if (old?.status === "pending") void client().then((c) => c.cancelAgentSetupRun(old.id)).catch(() => {});
       }
-      // Claude's connector works wherever Claude does, so Claude has no "where".
-      const where = host === "claude" ? "" : HOSTS[host].chat ? place : "";
-      save(key, { host, place: where, connectedAt: current.host === host && current.place === where ? current.connectedAt || "" : "" });
+      // A connector works wherever its AI does, so Claude (and ChatGPT's app) has no "where".
+      const where = connectorSurface(host) ? "" : HOSTS[host].chat ? place : "";
+      const same = current.host === host && current.place === where;
+      save(key, { host, place: where, connectedAt: same ? current.connectedAt || "" : "", ...(same && current.via ? { via: current.via } : {}) });
       return api.snapshot(key);
     },
     reset(key) {
@@ -221,18 +260,20 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
     /** Did the AI redeem the code? The one event that moves the paste screen on. */
     async poll(key) {
       const chosen = record(key);
-      if (chosen?.host === "claude" && !chosen.connectedAt) {
-        const { connected } = await api.checkConnector(key);
-        // Allow in the browser is the last click (or Claude had Relay already):
-        // the app moves on to "copy your first message". Nothing opens by itself.
+      const surface = connectorSurface(chosen?.host);
+      if (surface && !chosen.connectedAt) {
+        const { connected } = await api.checkConnector(key, surface);
+        // Allow in the browser is the last click (or the AI had Relay already):
+        // the app moves on to starting the first chat. Nothing opens by itself.
         if (connected) {
-          save(key, { ...chosen, connectedAt: new Date(now()).toISOString() });
+          save(key, { ...chosen, connectedAt: new Date(now()).toISOString(), via: "connector" });
           void api.refreshServer(key);
         }
         return api.snapshot(key);
       }
-      // Claude's chat is open with the start sentence: wait for Claude to ask Relay how to begin.
-      if (chosen?.host === "claude" && !server.get(key)?.tutorialStartedAt) {
+      // The AI's chat has the start sentence: wait for it to ask Relay how to begin.
+      const lesson = chosen?.host === "claude" || (surface === "chatgpt" && chosen?.via === "connector");
+      if (lesson && !server.get(key)?.tutorialStartedAt) {
         await api.refreshServer(key);
         return api.snapshot(key);
       }
@@ -253,6 +294,11 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
         writeClipboard(claudeStartPrompt(server.get(key) || await api.refreshServer(key)));
         return { ok: true };
       }
+      // ChatGPT's app has no code either: its start sentence, the one the chat opens with.
+      if (record(key)?.host === "chatgpt" && record(key)?.via === "connector") {
+        writeClipboard(CHATGPT_START_PROMPT);
+        return { ok: true };
+      }
       return api.copyRun(key);
     },
     /** Open the chosen AI with the request already in its composer, where it has a link for that. */
@@ -261,6 +307,7 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
       const host = HOSTS[chosen?.host];
       if (!host) throw new Error("Choose an AI first.");
       if (chosen.host === "claude") return api.openClaudeChat(key);
+      if (chosen.host === "chatgpt" && chosen.via === "connector") return api.openChatGptChat(key);
       if (host.chat) return api.openRun(key);
       if (!host.open || !localPrompt || !ownsScheme(host.scheme)) throw new Error(`Copy the prompt, then paste it into ${host.name}.`);
       writeClipboard(localPrompt);
@@ -279,4 +326,4 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
   return api;
 }
 
-module.exports = { createAgentOnboarding, AGENT_ONBOARDING_HOSTS: HOSTS, CLAUDE_START_PROMPT, claudeStartPrompt };
+module.exports = { createAgentOnboarding, AGENT_ONBOARDING_HOSTS: HOSTS, CLAUDE_START_PROMPT, CHATGPT_START_PROMPT, CHATGPT_START_URL, claudeStartPrompt };
