@@ -2308,6 +2308,15 @@ function ensureSentLoaded() {
 // re-binds its client (inbox-receiver-worker.js).
 let sentLiveWake = null;
 let sentLiveWakeToken = "";
+// After sleep or a locked screen the held account-change request can be a dead
+// socket the pill waits out (David's Open in Claude Code from Slack, 2026-10-09:
+// clicked a minute after waking, claimed four minutes later, long expired).
+// Dropping it lets the 2 s reconcile reopen it at once, and reopening claims
+// any Slack card click that is waiting.
+function restartSentLiveWake() {
+  if (sentLiveWake) { sentLiveWake.stop(); sentLiveWake = null; }
+  sentLiveWakeToken = "";
+}
 function startSentLiveWakeForAccount() {
   const reconcile = async () => {
     const token = deviceToken() || "";
@@ -8653,6 +8662,7 @@ function installPowerAttentionLifecycle() {
   });
   powerMonitor.on("resume", () => {
     systemSuspended = false;
+    restartSentLiveWake();
     scheduleReturnReconciliation();
   });
   powerMonitor.on("lock-screen", () => {
@@ -8662,6 +8672,7 @@ function installPowerAttentionLifecycle() {
   });
   powerMonitor.on("unlock-screen", () => {
     screenLocked = false;
+    restartSentLiveWake();
     scheduleReturnReconciliation();
   });
   if (process.platform === "darwin") {

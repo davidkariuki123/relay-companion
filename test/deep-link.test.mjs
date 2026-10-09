@@ -118,3 +118,12 @@ test("a Slack card click by this account opens the Relay in the pill, once, what
   assert.match(main, /\["relay", "conductor", "claude", "codex"\]\.includes\(parsed\.host\) && !freshRelayOpen\(parsed\)/);
   assert.match(main, /const RELAY_OPEN_DEDUPE_MS = 15_000;/);
 });
+
+test("after sleep or unlock the pill reopens its account-change wait at once and claims waiting Slack clicks", () => {
+  // A held request can be a dead socket after sleep; David's Slack click was claimed four minutes late.
+  assert.match(overlay, /function restartSentLiveWake\(\) \{\s*if \(sentLiveWake\) \{ sentLiveWake\.stop\(\); sentLiveWake = null; \}\s*sentLiveWakeToken = "";/);
+  assert.match(overlay, /powerMonitor\.on\("resume", \(\) => \{\s*systemSuspended = false;\s*restartSentLiveWake\(\);/);
+  assert.match(overlay, /powerMonitor\.on\("unlock-screen", \(\) => \{\s*screenLocked = false;\s*restartSentLiveWake\(\);/);
+  // Reopening runs the reconcile, which claims before it waits.
+  assert.match(overlay, /claimSlackOpens\(\);\s*sentLiveWake = startSentLiveWake\(/);
+});
