@@ -440,12 +440,16 @@ export function createInstallationAuthorizationController({
 
   async function activeContext({ create = false } = {}) {
     let state = await readDurable();
-    // A sign-in click on a lapsed first-run link with no account chosen gets
-    // a fresh link, the same rule beginInternal applies: someone who stepped
+    // A sign-in click on a lapsed link gets a fresh one: someone who stepped
     // away mid-sign-in saw "Setup expired" and a Restart button instead (live
-    // run 27, 2026-10-08). An identified record still waits for explicit Restart.
-    if (create && state && (state.status === "expired" || Date.parse(state.expiresAt) <= now()) && !accountSummary(state.account)) {
-      await beginInternal();
+    // run 27, 2026-10-08). That holds when the lapsed link had already matched
+    // an account too: the first screen offers no Restart, so every Continue
+    // with Google or Send code hit "timed out" again and the person could never
+    // sign in (fresh Mac VM, 2026-10-09). Starting sign-in IS the explicit
+    // restart; a live record is never touched.
+    if (create && state && (state.status === "expired" || Date.parse(state.expiresAt) <= now())) {
+      if (accountSummary(state.account)) await restartInternal();
+      else await beginInternal();
       state = await readDurable();
     }
     if (state && Date.parse(state.expiresAt) <= now()) {

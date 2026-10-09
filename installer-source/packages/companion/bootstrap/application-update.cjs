@@ -1,4 +1,6 @@
 "use strict";
+// First: started as an Electron app instead of Node, re-run as Node and quit.
+require("./electron-as-node.cjs");
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
 const { verifyReleaseEnvelope } = require("./release-signature.cjs");
 const trust = require("./trust.json");

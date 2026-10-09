@@ -180,6 +180,7 @@ const attention = require("./attention-queue.cjs");
 const { withJsonLock } = require("../src/state-lock.cjs");
 const { atomicWriteJsonSync } = require("../src/atomic-json.cjs");
 const relaySettings = require("../src/relay-settings.cjs");
+const strayElectron = require("../src/stray-electron.cjs");
 const { readDeviceToken } = require("../src/credential-store.cjs");
 const { appendLocalTrace, appendLocalTraces } = require("../src/local-trace.cjs");
 const { canonicalInboxItemId, packetIdsForCanonicalItem } = require("../src/inbox-item-id.cjs");
@@ -11158,6 +11159,13 @@ if (!gotSingleInstanceLock) {
     setTimeout(() => checkForUpdate(), 20000).unref?.();
     setInterval(() => checkForUpdate(), 60 * 60 * 1000).unref?.();
     installActiveSpaceWatcher();
+    // No Electron atoms in the Dock (ao1, 2026-10-08): quit any Electron app a
+    // Relay runtime started that is not this pill, and mark older release trees
+    // as background apps. Harness pills leave the person's machine alone.
+    if ((process.env.RELAY_OVERLAY_TEST !== "1" && process.env.RELAY_OVERLAY_PERF !== "1")
+      || process.env.RELAY_OVERLAY_TEST_STRAY_GUARD === "1") {
+      strayElectron.startStrayElectronGuard({ log: (line) => console.error(`[overlay] ${line}`) });
+    }
     installActiveApplicationWatcher();
     installPowerAttentionLifecycle();
     // Display topology changes are the remaining event that can strand the
@@ -11181,6 +11189,7 @@ if (!gotSingleInstanceLock) {
     // Never set outside the harnesses.
     if (process.env.RELAY_OVERLAY_TEST === "1" || process.env.RELAY_OVERLAY_PERF === "1") {
       global.__relayTest = {
+        sweepStrayElectron: () => strayElectron.sweepStrayRelayElectronApps({ log: (line) => console.error(`[overlay] ${line}`) }),
         showFromTray,
         requestExternalReopen,
         writePillStatus,

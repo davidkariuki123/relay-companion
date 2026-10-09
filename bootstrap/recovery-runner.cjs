@@ -1,4 +1,6 @@
 "use strict";
+// First: started as an Electron app instead of Node, re-run as Node and quit.
+require("./electron-as-node.cjs");
 
 // This file and its bootstrap dependencies live outside the application tree.
 // No application imports, npm, credentials, or messaging API are needed to heal it.

@@ -1,4 +1,6 @@
 "use strict";
+// First: started as an Electron app instead of Node, re-run as Node and quit.
+require("./electron-as-node.cjs");
 // The guardian does not load the application's module graph. A broken import or
 // blocked worker event loop cannot disable its deadline.
 const fs = require("node:fs");

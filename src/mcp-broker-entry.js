@@ -1,3 +1,5 @@
+// First: started as an Electron app instead of Node, re-run as Node and quit.
+import "../bootstrap/electron-as-node.cjs";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";

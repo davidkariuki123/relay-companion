@@ -1,4 +1,6 @@
 "use strict";
+// First: started as an Electron app instead of Node, re-run as Node and quit.
+require("./electron-as-node.cjs");
 // launchctl submit is KeepAlive, including after exit 0. Re-entry must reconcile
 // the loaded schedule, not replay bootout/bootstrap. Keep the independent job
 // until a schedule is confirmed: the daemon may also be unavailable.

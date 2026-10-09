@@ -1,4 +1,6 @@
 "use strict";
+// First: started as an Electron app instead of Node, re-run as Node and quit.
+require("./electron-as-node.cjs");
 // Independently scheduled, upload-only capability; never reads a device token.
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
 const d = require("./diagnostics.cjs");

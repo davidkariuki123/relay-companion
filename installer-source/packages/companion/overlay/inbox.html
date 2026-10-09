@@ -2254,7 +2254,12 @@
   .rd-attachments-dialog { width:472px; max-width:calc(100vw - 32px); height:340px; max-height:calc(100vh - 32px); padding:0;
     border:1px solid var(--edge); border-radius:12px; background:var(--bg); color:var(--ink); box-shadow:var(--shadow-pop); overflow:hidden; }
   .rd-attachments-dialog[open] { display:flex; flex-direction:column; }
-  .rd-attachments-dialog::backdrop { background:rgba(0,0,0,.28); }
+  /* The native window is transparent and can be far larger than the card, so a
+     ::backdrop dim would shade the desktop around it. Dim only the card, and
+     keep the dialog inside the card (openReaderAttachments places it). */
+  .rd-attachments-dialog { position:fixed; inset:auto; margin:0; }
+  .rd-attachments-dialog::backdrop { background:transparent; }
+  .rd-attachments-scrim { position:absolute; inset:0; z-index:39; border-radius:inherit; background:rgba(0,0,0,.28); pointer-events:none; }
   .rd-attachments-heading { flex:none; min-height:48px; display:flex; align-items:center; justify-content:space-between; gap:10px;
     padding:0 10px 0 16px; border-bottom:1px solid var(--hair); font:600 12px/1.4 var(--sans); }
   .rd-attachments-close { appearance:none; width:32px; height:32px; border:0; border-radius:6px; background:transparent;
@@ -6104,10 +6109,30 @@
     dialog.dataset.relayId = String(relay.id);
     document.body.append(dialog);
     readerAttachmentsDialog = dialog;
+    const card = document.querySelector(".card");
+    const scrim = document.createElement("div");
+    scrim.className = "rd-attachments-scrim";
+    card?.append(scrim);
+    const place = () => {
+      const box = card ? card.getBoundingClientRect() : { left:0, top:0, width:innerWidth, height:innerHeight };
+      const width = Math.max(0, Math.min(472, box.width - 32));
+      const height = Math.max(0, Math.min(340, box.height - 32));
+      dialog.style.width = `${width}px`;
+      dialog.style.height = `${height}px`;
+      dialog.style.left = `${Math.round(box.left + (box.width - width) / 2)}px`;
+      dialog.style.top = `${Math.round(box.top + (box.height - height) / 2)}px`;
+    };
+    place();
+    const follow = card && typeof ResizeObserver === "function" ? new ResizeObserver(place) : null;
+    if (follow) follow.observe(card);
+    addEventListener("resize", place);
     const timelineTrigger = Boolean(trigger.closest(".ca-file-shelf"));
     trigger.setAttribute("aria-expanded", "true");
     dialog.addEventListener("close", () => {
       if (readerAttachmentsDialog === dialog) readerAttachmentsDialog = null;
+      follow?.disconnect();
+      removeEventListener("resize", place);
+      scrim.remove();
       dialog.remove();
       // Polling may have replaced the trigger, but must not lose the reader's place.
       const triggerRoot = timelineTrigger ? document.getElementById("thHistory") : readerBodyEl;

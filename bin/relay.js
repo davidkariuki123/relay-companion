@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// First: started as an Electron app instead of Node, re-run as Node and quit.
+import "../bootstrap/electron-as-node.cjs";
 import os from "node:os";
 import fsSync from "node:fs";
 import path from "node:path";

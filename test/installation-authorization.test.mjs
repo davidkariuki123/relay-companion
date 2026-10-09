@@ -394,14 +394,31 @@ test("Continue with Google on a lapsed first-run link opens a fresh one instead 
   assert.equal(stores.peekDurable().expiresAt, replacementExpires);
 });
 
-test("Continue with Google keeps an expired identified authorization for explicit restart", async () => {
+// Fresh Mac VM (2026-10-09): yesterday's email sign-in matched an account
+// and then lapsed. The first screen offers no Restart, so every Continue with
+// Google or Send code met "timed out" and the person could never sign in.
+// Clicking sign-in is the explicit restart.
+test("signing in again replaces a lapsed authorization that had matched an account", async () => {
   const stores = memoryStores({
     durable: { schemaVersion: 1, authorizationId: AUTHORIZATION_ID, expiresAt: EXPIRES, status: "expired", account: { email: "alex@example.com", displayName: "Alex" } },
   });
-  const { controller, calls } = harness({ stores, openExternal: async () => true });
-  await assert.rejects(controller.google(), (error) => error.code === "authorization_expired");
-  assert.equal(calls.length, 0);
-  assert.equal(stores.peekDurable().account.email, "alex@example.com");
+  const opened = [];
+  const replacementExpires = "2026-08-20T10:30:00.000Z";
+  const { controller, calls } = harness({
+    stores,
+    now: () => Date.parse(EXPIRES) + 1,
+    openExternal: async (url) => { opened.push(url); return true; },
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), body: JSON.parse(init.body) });
+      return response({ ...createReply(), expiresAt: replacementExpires });
+    },
+  });
+  const state = await controller.google();
+  assert.notEqual(state.status, "expired");
+  assert.equal(calls.length, 1, "one replacement authorization is minted");
+  assert.equal(opened.length, 1, "and its sign-in page opens");
+  assert.equal(stores.peekDurable().expiresAt, replacementExpires);
+  assert.equal(stores.peekDurable().account, undefined, "the lapsed account choice is not carried over");
 });
 
 test("begin preserves an expired identified authorization for explicit restart", async () => {

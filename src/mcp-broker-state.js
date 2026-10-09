@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { atomicWriteFileSync, atomicWriteJsonSync } = require("./atomic-json.cjs");
 const { withJsonLockStrict } = require("./state-lock.cjs");
+const nodeContract = require("../bootstrap/node-contract.cjs");
 import { isCanonicalPackageRoot, readCanonicalRuntime } from "./canonical-runtime.js";
 
 export const MCP_BROKER_PROTOCOL = 1;
@@ -185,6 +186,29 @@ export function protectWindowsCapability(file, { run = spawnSync } = {}) {
   }
 }
 
+function previousBrokerNode(descriptorFile) {
+  try { return JSON.parse(fs.readFileSync(descriptorFile, "utf8")).brokerNode || null; } catch { return null; }
+}
+
+// The Node every MCP bridge starts the broker with. Provisioning from the pill
+// passes the pill's own executable, which is Electron: the native bridge runs
+// that without ELECTRON_RUN_AS_NODE, so the broker came up as an Electron APP
+// that lives as long as the broker (an Electron atom in the Dock before the
+// runtime bundle was LSUIElement; ao1, 2026-10-08). Record Relay's verified
+// Node instead, and keep a previously recorded Node over Electron when none
+// can be verified right now.
+export function brokerNodeFor(candidate, {
+  homeDir = os.homedir(),
+  previous = null,
+  isElectron = (file) => nodeContract.isElectronExecutable(file),
+  managedNode = (node) => nodeContract.resolveManagedNode({ homeDir, node }),
+} = {}) {
+  if (!isElectron(candidate)) return candidate;
+  try { return managedNode(candidate); } catch {}
+  if (previous && !isElectron(previous)) return previous;
+  return candidate;
+}
+
 export function ensureMcpBrokerProvisioned({
   env = process.env,
   packageRoot = packageRootForModule(),
@@ -192,6 +216,7 @@ export function ensureMcpBrokerProvisioned({
   platform = process.platform,
   homeDir = homeDirFor(env),
   windowsAclProtector = protectWindowsCapability,
+  resolveBrokerNode = brokerNodeFor,
 } = {}) {
   const identity = brokerIdentity({ env, packageRoot, platform, homeDir });
   const files = brokerProvisioningPaths({ env, identity, homeDir, platform });
@@ -219,7 +244,7 @@ export function ensureMcpBrokerProvisioned({
       domainId: identity.domainId,
       capabilityFile: CAPABILITY_NAME,
       endpoint: brokerEndpoint({ env, identity, platform }),
-      brokerNode: path.resolve(brokerNode),
+      brokerNode: path.resolve(resolveBrokerNode(brokerNode, { homeDir, previous: previousBrokerNode(files.descriptor) })),
       brokerEntry: path.join(packageRoot, "src", "mcp-broker-entry.js"),
       ...(platform === "win32" ? { windowsAclProtected: true } : {}),
     }, { mode: 0o600 });

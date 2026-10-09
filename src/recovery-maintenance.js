@@ -1,3 +1,5 @@
+// First: started as an Electron app instead of Node, re-run as Node and quit.
+import "../bootstrap/electron-as-node.cjs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

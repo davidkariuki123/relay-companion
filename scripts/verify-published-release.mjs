@@ -231,7 +231,11 @@ export function validateInstalledPackageShape(packageRoot, { version, distributi
     // How macOS names Relay's launch agents (2026-10-08): two constants and a
     // path helper over Node builtins and the reviewed application-owner.cjs.
     const backgroundIdentityBootstrap = [...previousPillBootstrap, "mac-background-identity.cjs"].sort();
-    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap, lifecycleBootstrap, diagnosticBootstrap, installerRecoveryBootstrap, previousPillBootstrap, backgroundIdentityBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
+    // Every runnable script re-runs itself as Node when it is started as an
+    // Electron app (ao1, 2026-10-09): Node builtins only, plus electron's own
+    // module inside that Electron-app branch.
+    const electronAsNodeBootstrap = [...backgroundIdentityBootstrap, "electron-as-node.cjs"].sort();
+    if (![legacyBootstrap, recoveryBootstrap, resilientBootstrap, monitoredBootstrap, macRecoveryBootstrap, responsiveRecoveryBootstrap, configRecoveryBootstrap, bundledNodeBootstrap, daemonProgressBootstrap, applicationBootstrap, handoffBootstrap, rulesBootstrap, transactionBootstrap, lifecycleBootstrap, diagnosticBootstrap, installerRecoveryBootstrap, previousPillBootstrap, backgroundIdentityBootstrap, electronAsNodeBootstrap].some(shape => JSON.stringify(bootstrapFiles) === JSON.stringify(shape))) {
       throw new Error("Thin installer bootstrap contents do not match the reviewed shape");
     }
     const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "skill", "manifest.json"), "utf8"));

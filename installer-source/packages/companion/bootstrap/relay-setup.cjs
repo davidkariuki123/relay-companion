@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 "use strict";
+// First: started as an Electron app instead of Node, re-run as Node and quit.
+require("./electron-as-node.cjs");
 
 // Deliberately stdlib-only. This is every byte npm executes before the person
 // has reviewed Relay: no package dependencies and no npm lifecycle scripts.

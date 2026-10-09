@@ -58,7 +58,14 @@ app.whenReady().then(async()=>{
  await closed();
  assert.equal(await js(`document.activeElement===timelineEntry.querySelector('button')`),true);
  assert.equal(await js(`timelineEntry.querySelector('button').getAttribute('aria-expanded')`),'false');
- console.log('PASS: 1/12/100 files, 720/360 widths, fixed height, reader/timeline focus restoration, polling, Escape/backdrop/close, exact open ids and errors.');
+ // The pill's transparent window outgrows its card: dim and place inside the card only.
+ win.setSize(1400,900);
+ await js(`activeView='reader';{const c=document.createElement('div');c.className='card';c.style.cssText='position:fixed;top:20px;right:20px;width:344px;height:524px;animation:none';document.body.append(c)}document.querySelector('[data-reader-attachments]').click()`);
+ const inCard=await js(`(()=>{const c=document.querySelector('.card').getBoundingClientRect(),d=document.querySelector('dialog').getBoundingClientRect(),s=document.querySelector('.card > .rd-attachments-scrim');return {inside:d.left>=c.left&&d.right<=c.right&&d.top>=c.top&&d.bottom<=c.bottom,scrim:Boolean(s),backdrop:getComputedStyle(document.querySelector('dialog'),'::backdrop').backgroundColor}})()`);
+ assert.deepEqual(inCard,{inside:true,scrim:true,backdrop:'rgba(0, 0, 0, 0)'});
+ await js('closeReaderAttachments()');await closed();
+ assert.equal(await js(`document.querySelector('.rd-attachments-scrim')===null`),true);
+ console.log('PASS: 1/12/100 files, 720/360 widths, fixed height, reader/timeline focus restoration, polling, Escape/backdrop/close, card-bound dim, exact open ids and errors.');
  win.destroy();app.exit(0);
  }catch(e){console.error(e);win.destroy();app.exit(1)}
 });
