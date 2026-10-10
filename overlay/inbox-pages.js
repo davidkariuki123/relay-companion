@@ -7,7 +7,7 @@
 //
 // The physics is page-physics.js. This file owns the DOM: the two panes, the
 // list, the dots, the peek, and the hand-over from wheel events to frames.
-// Dev-gated: payload.features.inboxPages. With it off nothing here touches
+// Gated by payload.features.inboxPages (on for everyone since 2026-10-10). With it off nothing here touches
 // the page; the old Chats · Tasks · Relays rows stay.
 (function (root) {
   "use strict";

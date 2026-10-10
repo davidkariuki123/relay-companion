@@ -73,18 +73,17 @@ function productFeatures(options = {}) {
     // the existing reply link; proven by the developers on dev first.
     replyThreads: developer,
     // The inbox's ways-to-use-Relay card retires each way once the person has
-    // used it and offers the next (Shane, 2026-10-07). Pill-only; proven by
-    // the developers on dev first. Everyone else keeps the fixed five.
-    smartTips: developer,
+    // used it and offers the next (Shane, 2026-10-07). Released to every
+    // account on every deployment (David, 2026-10-10).
+    smartTips: true,
     // Expand fills the screen and is an ordinary app until Collapse (David,
-    // Shane and Sven, 2026-10-08). Proven by the developers on dev first;
-    // everyone else keeps the two-thirds expanded card.
-    fullAppExpand: developer,
+    // Shane and Sven, 2026-10-08). Released to every account on every
+    // deployment (David, 2026-10-10).
+    fullAppExpand: true,
     // The Inbox as two pages, Chats and Relays and Tasks, moved by two
     // fingers, with a peek that teaches the swipe (David, 2026-10-09).
-    // Pill-only; proven by the developers on dev first. Everyone else keeps
-    // the Chats · Tasks · Relays rows.
-    inboxPages: developer,
+    // Released to every account on every deployment (David, 2026-10-10).
+    inboxPages: true,
     // The pre-Requests task protocol (/v1/tasks, the agent inbox, task
     // sessions) the daemon polls and relay_task_create drives. Its routes
     // stay behind the developer gate on the server.
