@@ -466,23 +466,34 @@ function hdiutil(args, { run, sleep, produces, attempts = 4 }) {
   }
 }
 
-// hdiutil detach on hosted macOS runners sometimes reports "No such file or
-// directory" for a volume that is already gone (Spotlight/diskarbitrationd beat
-// it to the unmount), which failed a signed candidate build (relay-companion run
-// 38067347046). Only a volume that is still mounted after a failed detach is a
-// real failure: retry it, forcing the last attempt.
-export function detachVolume(mount, { run, sleep, attempts = 4 }) {
-  const mounted = () => {
-    try { return run("/sbin/mount", []).split("\n").some(line => line.includes(` on ${mount} (`)); }
-    catch { return true; }
-  };
+// Release the read-write image before converting it. On hosted macOS runners
+// (most often the Intel ones) `hdiutil detach <mountpoint>` can fail with "No
+// such file or directory" after the mount point has gone while the image is
+// still attached, and the following convert then fails "Resource temporarily
+// unavailable" (relay-companion runs 38067347046, 38073580920, 38073611766).
+// So detach the disk device hdiutil attached, and only return once `hdiutil
+// info` no longer lists the image; force the last attempts.
+export function attachedDevices(image, { run }) {
+  const info = run("/usr/bin/hdiutil", ["info"]);
+  const devices = [];
+  let current = null;
+  for (const line of info.split("\n")) {
+    if (line.startsWith("image-path")) current = line.slice(line.indexOf(":") + 1).trim();
+    else if (/^=+$/.test(line.trim())) current = null;
+    else if (current === image) { const m = line.match(/^(\/dev\/disk\d+)\s/); if (m && !devices.includes(m[1])) devices.push(m[1]); }
+  }
+  return devices;
+}
+
+export function releaseImage(image, { run, sleep, attempts = 6 }) {
   for (let attempt = 1; ; attempt++) {
-    try { run("/usr/bin/hdiutil", attempt === attempts ? ["detach", mount, "-force"] : ["detach", mount]); return; }
-    catch (error) {
-      if (!mounted()) return;
-      if (attempt >= attempts) throw error;
-      sleep(5 * attempt);
+    const devices = attachedDevices(image, { run });
+    if (!devices.length) return;
+    if (attempt > attempts) throw new Error(`${image} is still attached (${devices.join(", ")}) after ${attempts} detach attempts`);
+    for (const device of devices) {
+      try { run("/usr/bin/hdiutil", attempt >= attempts - 1 ? ["detach", device, "-force"] : ["detach", device]); } catch {}
     }
+    sleep(3 * attempt);
   }
 }
 
@@ -516,12 +527,12 @@ export function buildMacDmg({ app, output, volumeName = DMG_VOLUME_NAME, layout 
     assertVolumeLayout(mount, { volumeName, layout, background, appName: path.basename(app) });
     fs.rmSync(path.join(mount, ".fseventsd"), { recursive: true, force: true });
     run("/bin/sync", []);
-    detachVolume(mount, { run, sleep });
+    releaseImage(writable, { run, sleep });
     attached = false;
-    hdiutil(["convert", writable, "-format", "UDZO", "-o", output], { run, sleep, produces: output });
+    hdiutil(["convert", writable, "-format", "UDZO", "-o", output], { run, sleep, produces: output, attempts: 6 });
     return output;
   } finally {
-    if (attached) spawnSync("/usr/bin/hdiutil", ["detach", mount, "-force"], { timeout: 60_000 });
+    if (attached) { try { releaseImage(writable, { run, sleep, attempts: 2 }); } catch {} }
     fs.rmSync(work, { recursive: true, force: true });
   }
 }

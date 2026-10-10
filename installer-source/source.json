@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "42c0bedf1d8578e4c3c3af8592f28ab0c2859213",
+  "sourceSha": "dcaf8308d4730493dae315b432d8765b01dfb912",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
     "packages/companion/bootstrap/application-handoff.cjs": "cc857469bd3e01c1c2bd00816e5f4338083f0aaa",
@@ -88,7 +88,7 @@
     "tools/relay-application/lib/bridge.cjs": "87728287171a8d41369c7591df033fd804410c07",
     "tools/relay-application/lib/integrity.mjs": "2673726a441a6b3444bb52939b8b9458d3e62d19",
     "tools/relay-application/lib/mac-dmg-background.tiff": "510095161befacb3629ff41777215a73da6012c7",
-    "tools/relay-application/lib/mac-dmg.mjs": "32367a728a388d30009f5d4ac6cd3ffef0116f9f",
+    "tools/relay-application/lib/mac-dmg.mjs": "9d5da133306099cb71843acb66b9dd9043d81a34",
     "tools/relay-application/lib/migration.cjs": "be38e3993e16b52091ca7be7aa1dca225d20578a",
     "tools/relay-application/lib/relay-app-icon.svg": "cfabe1d18fcaaddbbdaf2eebd17e06c50a5d960c",
     "tools/relay-application/lib/relay-icon-1024.png": "5fbd431a6dd9d5bd5a14ef334029e35a1ecce5d7",
