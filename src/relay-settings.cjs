@@ -95,6 +95,7 @@ function pillSnapshot(accountKey, options = {}, store = readStore(options)) {
   if (Array.isArray(account.agentApps)) snapshot.agentApps = [...account.agentApps];
   if (Array.isArray(account.chatApps)) snapshot.chatApps = [...account.chatApps];
   if (typeof account.conductor === "boolean") snapshot.conductor = account.conductor;
+  if (FIRST_RELAY_TUTORIAL_RESULTS.includes(account.firstRelayTutorial)) snapshot.firstRelayTutorial = account.firstRelayTutorial;
   snapshot.pending = pendingRequests(store);
   return snapshot;
 }
@@ -140,6 +141,8 @@ function savePillChoices(accountKey, patch = {}, options = {}) {
     if (Array.isArray(patch.agentApps)) accountPatch.agentApps = AGENT_APPS.filter((app) => patch.agentApps.includes(app));
     if (Array.isArray(patch.chatApps)) accountPatch.chatApps = CHAT_APPS.filter((app) => patch.chatApps.includes(app));
     if (typeof patch.conductor === "boolean") accountPatch.conductor = patch.conductor;
+    // The first-run tutorial, finished or skipped: it never starts again for this account.
+    if (FIRST_RELAY_TUTORIAL_RESULTS.includes(patch.firstRelayTutorial)) accountPatch.firstRelayTutorial = patch.firstRelayTutorial;
     if (!Object.keys(accountPatch).length) return;
     if (!accountKey) return;
     const accounts = store.accounts && typeof store.accounts === "object" ? store.accounts : {};
@@ -149,6 +152,7 @@ function savePillChoices(accountKey, patch = {}, options = {}) {
 }
 
 const AGENT_APPS = ["Claude Code", "Codex"];
+const FIRST_RELAY_TUTORIAL_RESULTS = ["done", "skipped"];
 const CHAT_APPS = ["Claude", "ChatGPT"];
 // Each vendor's own modes, least freedom first. The order decides which
 // direction a change goes.

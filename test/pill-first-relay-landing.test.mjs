@@ -82,9 +82,9 @@ test("Grow your network has no agent tutorial block and ends with Open Relay", (
   assert.match(html, /if \(payload\.ui\?\.networkOnboarding\?\.required === true && localChapterDone\) signupStage = "network";/);
 });
 
-function finishHarness({ pending = false, completes = true, switchAccount = false, room = null, firstRelayId = "r_old" }) {
+function finishHarness({ pending = false, completes = true, switchAccount = false, room = null, firstRelayId = "r_old", tutorial = false }) {
   const src = slice("  let firstRelayLanding = null;", "  function pendingOpenSignupCard() {");
-  const calls = { completeNetwork: 0, completeLocal: 0, open: [], commit: 0, renderAll: 0 };
+  const calls = { completeNetwork: 0, completeLocal: 0, open: [], commit: 0, renderAll: 0, tutorial: [] };
   let account = "user_a";
   const payload = {
     account: { userId: "user_a" },
@@ -108,10 +108,11 @@ function finishHarness({ pending = false, completes = true, switchAccount = fals
     chatSections: () => ({ people: room ? [room] : [] }),
     openThreadDetail: (...args) => calls.open.push(args),
     commitNavigation: () => { calls.commit += 1; },
+    startFirstRelayTutorial: (account) => { calls.tutorial.push(account); return tutorial; },
   };
   const api = new Function("ctx", `"use strict"; let activeView = "relays"; let signupStage = "first-relay";
     const window = { relay: ctx.relay };
-    const { payload, state, signupAccountKey, networkInviteForAccount, renderSignup, renderAll, chatSections, openThreadDetail, commitNavigation } = ctx;
+    const { payload, state, signupAccountKey, networkInviteForAccount, renderSignup, renderAll, chatSections, openThreadDetail, commitNavigation, startFirstRelayTutorial } = ctx;
     ${src}
     return { finishNetworkInvitation, view: () => activeView, stage: () => signupStage };`)(ctx);
   return { api, calls, payload, state };
@@ -154,4 +155,21 @@ test("a completion that did not take shows on the card and can be retried; an ac
   await switched.api.finishNetworkInvitation();
   assert.equal(switched.calls.open.length + switched.calls.commit, 0);
   assert.equal(switched.payload.ui.onboardingRequired, true, "a late result never completes another account");
+});
+
+// THE FIRST RELAY TUTORIAL (2026-10-10): when it can start (a welcome Relay,
+// never done or skipped), onboarding ends on the Inbox, where it begins, and
+// the room of the Relay they wrote is not opened over it. Once per account.
+test("when the first Relay tutorial starts, onboarding ends on it instead of the first Relay's room", async () => {
+  const room = { threadId: "direct-chat:c1", name: "David Kariuki", partyKey: "email:david@example.test", msgs: [{ id: "r_old" }] };
+  const h = finishHarness({ room, tutorial: true });
+  await h.api.finishNetworkInvitation();
+  assert.deepEqual(h.calls.tutorial, ["user_a"]);
+  assert.deepEqual(h.calls.open, [], "the room is not opened over the tutorial");
+  await h.api.finishNetworkInvitation();
+  assert.deepEqual(h.calls.tutorial, ["user_a"], "once per account");
+  const fallback = finishHarness({ room, tutorial: false });
+  await fallback.api.finishNetworkInvitation();
+  assert.deepEqual(fallback.calls.tutorial, ["user_a"]);
+  assert.equal(fallback.calls.open.length, 1, "no tutorial (no welcome Relay, or done before): the room opens as before");
 });

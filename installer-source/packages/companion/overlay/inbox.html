@@ -4377,6 +4377,7 @@
 </style>
 <link rel="stylesheet" href="./relay-anyone-tip.css" />
 <link rel="stylesheet" href="./inbox-pages.css" />
+<link rel="stylesheet" href="./first-relay-tutorial.css" />
 </head>
 <body>
   <svg width="0" height="0" viewBox="0 0 0 0" aria-hidden="true" focusable="false">
@@ -4681,6 +4682,7 @@
 <script src="./chat-rows.js"></script>
 <script src="./chat-search.cjs"></script>
 <script src="./relay-anyone-tip.cjs"></script>
+<script src="./first-relay-tutorial.cjs"></script>
 <script src="./reader-status-motion.cjs"></script>
 <script src="./link-tooltip.js"></script>
 <script src="./page-physics.js"></script>
@@ -10227,7 +10229,7 @@
     return Object.fromEntries(Object.entries(settings).filter(([key]) => !ACCOUNT_SETTING_KEYS.has(key)));
   }
   // The switches that belong to an account rather than to this computer.
-  const ACCOUNT_SETTING_KEYS = new Set(["agentApps", "chatApps", "conductor"]);
+  const ACCOUNT_SETTING_KEYS = new Set(["agentApps", "chatApps", "conductor", "firstRelayTutorial"]);
   function requestedAgentApps() {
     const stored = storedSettings().agentApps;
     if (Array.isArray(stored)) return stored.filter((app) => AGENT_APP_OPTIONS.includes(app));
@@ -23712,6 +23714,47 @@
   // also marks this computer's first-send chapter; otherwise the local chapter
   // completes on its own. Then the room of the first relay opens, once per
   // account; a result that lands after the account changed changes nothing.
+  // THE FIRST RELAY TUTORIAL (David, 2026-10-10: board candidate D). Once per
+  // account, as onboarding ends, the pill lands on the Inbox and teaches what a
+  // Relay is on Relay Agent's welcome: the chat, the Relay, the part for you,
+  // the part for your AI, and that the AI reads both. first-relay-tutorial.cjs
+  // owns the motion and the input; this owns where it starts and what it saves.
+  // No welcome Relay, the expanded app, or an earlier Done/Skip: no tutorial.
+  let firstRelayTutorial = null;
+  function firstRelayTutorialApp(welcomeId) {
+    const root = document.documentElement;
+    return {
+      view: activeView,
+      roomHasWelcome: activeView === "threads" && Boolean(thHistoryEl?.querySelector(`.th-msg[data-msg="${CSS.escape(String(welcomeId))}"]`)),
+      readerId: activeView === "reader" ? String(readerId || "") : "",
+      detailsOpen: activeView === "reader" && readerDetailsOpen.has(String(welcomeId)),
+      hidden: collapsed || peeking || ghost || wideLayoutActive() || cardEl.classList.contains("signup") || cardEl.classList.contains("offstage") || cardEl.classList.contains("bye"),
+      transitioning: Boolean(cardViewTransition || roomViewTransition) || root.classList.contains("card-view-transition") || root.classList.contains("room-view-transition"),
+      // The AI they chose at "Which AI do you use most?" (kept per account by agent-onboarding.cjs).
+      chosenHost: String(payload.ui?.onboardingAgent?.host || ""),
+    };
+  }
+  function startFirstRelayTutorial(account) {
+    const tutorial = window.RelayFirstRelayTutorial;
+    if (!tutorial || firstRelayTutorial || account !== signupAccountKey()) return false;
+    const welcome = tutorial.findWelcomeRelay(payload.relays);
+    if (!tutorial.shouldStart({ welcome, saved: storedSettings().firstRelayTutorial, wide: wideLayoutActive() })) return false;
+    // Land on the Inbox's Chats, where Relay Agent's row is.
+    activeView = "relays";
+    relaysLayout = "chats";
+    commitNavigation({ outerScrollTop:0 });
+    const welcomeId = String(welcome.id);
+    firstRelayTutorial = tutorial.create({
+      doc: document, card: cardEl, welcomeId,
+      getApp: () => firstRelayTutorialApp(welcomeId),
+      reducedMotion: () => REDUCED,
+      onEnd: (result) => {
+        firstRelayTutorial = null;
+        if (result && account === signupAccountKey()) savePillSetting({ firstRelayTutorial: result });
+      },
+    });
+    return firstRelayTutorial.start();
+  }
   let firstRelayLanding = null;
   async function finishNetworkInvitation() {
     const state = networkInviteForAccount();
@@ -23746,6 +23789,8 @@
     if (!finished) { renderAll(); return; }
     signupStage = "installed";
     renderAll();
+    // The first Relay tutorial lands on the Inbox; without it, the room of the Relay they wrote.
+    if (firstRelayLanding !== account && startFirstRelayTutorial(account)) { firstRelayLanding = account; return; }
     if (firstRelayId && firstRelayLanding !== account) { firstRelayLanding = account; openFirstRelayRoom(firstRelayId); }
   }
   function openFirstRelayRoom(relayId = payload.ui?.firstRelayId || "") {

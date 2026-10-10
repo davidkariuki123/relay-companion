@@ -466,6 +466,26 @@ function hdiutil(args, { run, sleep, produces, attempts = 4 }) {
   }
 }
 
+// hdiutil detach on hosted macOS runners sometimes reports "No such file or
+// directory" for a volume that is already gone (Spotlight/diskarbitrationd beat
+// it to the unmount), which failed a signed candidate build (relay-companion run
+// 38067347046). Only a volume that is still mounted after a failed detach is a
+// real failure: retry it, forcing the last attempt.
+export function detachVolume(mount, { run, sleep, attempts = 4 }) {
+  const mounted = () => {
+    try { return run("/sbin/mount", []).split("\n").some(line => line.includes(` on ${mount} (`)); }
+    catch { return true; }
+  };
+  for (let attempt = 1; ; attempt++) {
+    try { run("/usr/bin/hdiutil", attempt === attempts ? ["detach", mount, "-force"] : ["detach", mount]); return; }
+    catch (error) {
+      if (!mounted()) return;
+      if (attempt >= attempts) throw error;
+      sleep(5 * attempt);
+    }
+  }
+}
+
 function defaultRun(command, args) {
   const result = spawnSync(command, args, { encoding: "utf8", timeout: 20 * 60_000 });
   if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr || `${command} failed`);
@@ -496,7 +516,7 @@ export function buildMacDmg({ app, output, volumeName = DMG_VOLUME_NAME, layout 
     assertVolumeLayout(mount, { volumeName, layout, background, appName: path.basename(app) });
     fs.rmSync(path.join(mount, ".fseventsd"), { recursive: true, force: true });
     run("/bin/sync", []);
-    hdiutil(["detach", mount], { run, sleep });
+    detachVolume(mount, { run, sleep });
     attached = false;
     hdiutil(["convert", writable, "-format", "UDZO", "-o", output], { run, sleep, produces: output });
     return output;
