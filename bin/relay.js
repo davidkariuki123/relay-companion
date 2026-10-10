@@ -258,9 +258,12 @@ async function applyInstall({
     desktopRestarts = [],
     sweptStaleEntries = [],
     skillInstall,
+    claudeAppConnector = false,
   } = await runSetupInstall({ claim, reload, agentProtocol });
   const lifecycleFailed = process.platform === "linux" && (!daemon.ok || !pill?.ok);
   if (installed.length) console.log(`Added Relay to ${installed.join(" and ")} on this machine.`);
+  // The Claude app's chats use Relay's connector, added from Relay's pill.
+  if (claudeAppConnector) console.log("In the Claude app, Relay works through its Claude connector: choose Claude in Relay's pill to add it.");
   printSkillInstallResult(skillInstall);
   if (!binStable) {
     console.log(
@@ -303,7 +306,7 @@ async function applyInstall({
     console.log(`Removed a broken Relay entry that pointed at a path that no longer exists (${sweptStaleEntries.join(", ")}).`);
   }
 
-  if (!installed.length) {
+  if (!installed.length && !claudeAppConnector) {
     console.log("");
     console.log(`Relay is installed, but no ${process.platform === "linux" ? "Claude Code or Codex CLI" : "Claude or Codex app"} was found to connect it to.`);
     console.log("To use Relay from an AI assistant, install one of these:");

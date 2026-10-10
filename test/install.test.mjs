@@ -120,6 +120,49 @@ test("agent repair refreshes MCP launchers and retires Relay hooks for existing 
   }
 });
 
+test("repair registers Claude Code but never the Claude app, whose old Relay entry it removes", {
+  skip: process.platform !== "darwin" && "the Claude app's config folder is the macOS one here",
+}, () => {
+  // The Claude app's chats use Relay's connector (David, 2026-10-10).
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-claude-app-connector-"));
+  const bin = path.join(homeDir, ".relay", "lib", "node_modules", "relay-companion", "bin", "relay.js");
+  const claudeConfigFile = path.join(homeDir, ".claude.json");
+  const desktopDir = path.join(homeDir, "Library", "Application Support", "Claude");
+  const desktopConfig = path.join(desktopDir, "claude_desktop_config.json");
+  fs.mkdirSync(path.dirname(bin), { recursive: true });
+  fs.writeFileSync(bin, "// target\n");
+  fs.mkdirSync(desktopDir, { recursive: true });
+  fs.writeFileSync(claudeConfigFile, JSON.stringify({ numStartups: 3 }));
+  const repair = () => repairAgentMcpRegistrations({
+    bin,
+    node: process.execPath,
+    homeDir,
+    claudeConfigFile,
+    codexConfigFile: path.join(homeDir, ".codex", "config.toml"),
+    claudeSettingsFile: path.join(homeDir, ".claude", "settings.json"),
+    codexHooksFile: path.join(homeDir, ".codex", "hooks.json"),
+  });
+
+  // A fresh machine: Claude Code is registered; the Claude app's config is
+  // never created.
+  let result = repair();
+  assert.equal(JSON.parse(fs.readFileSync(claudeConfigFile, "utf8")).mcpServers.relay.args[1], result.mcpBin);
+  assert.equal(fs.existsSync(desktopConfig), false, "no claude_desktop_config.json is created");
+  assert.deepEqual(result.claudeDesktop.removedFrom, []);
+
+  // An upgrade from a Relay that wrote it: only Relay's entry goes.
+  const other = { command: "/usr/local/bin/other-mcp", args: ["serve"] };
+  fs.writeFileSync(desktopConfig, JSON.stringify({ preferences: { keep: true }, mcpServers: {
+    relay: { command: path.join(homeDir, ".relay", "bin", "mcp-bridge"), args: ["--descriptor", "x"] },
+    other,
+  } }));
+  result = repair();
+  assert.deepEqual(result.claudeDesktop.removedFrom, [desktopConfig]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(desktopConfig, "utf8")), { preferences: { keep: true }, mcpServers: { other } });
+  assert.ok(JSON.parse(fs.readFileSync(claudeConfigFile, "utf8")).mcpServers.relay, "Claude Code keeps its registration");
+  fs.rmSync(homeDir, { recursive: true, force: true });
+});
+
 function relayDesktopFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-desktop-fixture-"));
   const homeDir = path.join(root, "home");

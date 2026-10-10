@@ -291,16 +291,19 @@ test("candidate runtime repair does not add Relay MCP to unrelated host configs"
   assert.equal(fs.readFileSync(codexConfigFile, "utf8"), beforeCodex);
 });
 
-test("candidate runtime repair refreshes an existing Claude Desktop-only registration", () => {
+test("candidate runtime repair takes Relay out of the Claude app's config, and never fails over it", () => {
+  // The Claude app's chats use Relay's connector (2026-10-10): an update
+  // removes the local entry an older Relay wrote, keeps everything else, and
+  // never registers anything there.
   const homeDir = fixture("desktop-only");
   const desktopDir = path.join(homeDir, "Claude data");
   const desktopConfig = path.join(desktopDir, "claude_desktop_config.json");
   fs.mkdirSync(desktopDir, { recursive: true });
   fs.writeFileSync(desktopConfig, JSON.stringify({ keep: true, mcpServers: {
-    relay: { command: "old-node", args: ["old-relay", "mcp"] },
+    relay: { command: path.join(homeDir, ".relay", "bin", "mcp-bridge"), args: ["--descriptor", "d"] },
     other: { command: "keep" },
   } }));
-  const result = repairExistingAgentRegistrations({
+  const repair = () => repairExistingAgentRegistrations({
     bin: path.join(homeDir, "release", "bin", "relay.js"),
     node: process.execPath,
     homeDir,
@@ -311,10 +314,24 @@ test("candidate runtime repair refreshes an existing Claude Desktop-only registr
     claudeSettingsFile: path.join(homeDir, "absent-settings.json"),
     codexHooksFile: path.join(homeDir, "absent-hooks.json"),
   });
+  const result = repair();
   assert.equal(result.ok, true);
-  assert.ok(result.mcpBin, "Desktop-only registration still refreshes the stable MCP target");
-  const config = JSON.parse(fs.readFileSync(desktopConfig, "utf8"));
-  assert.equal(config.keep, true);
-  assert.deepEqual(config.mcpServers.other, { command: "keep" });
-  assert.equal(config.mcpServers.relay.args[1], result.mcpBin);
+  assert.equal(result.mcpBin, null, "nothing else to refresh: no launcher is written for the Claude app");
+  assert.deepEqual(result.claudeDesktop.removedFrom, [desktopConfig]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(desktopConfig, "utf8")), { keep: true, mcpServers: { other: { command: "keep" } } });
+  // Idempotent: the next update finds nothing and writes nothing.
+  const before = fs.statSync(desktopConfig).mtimeMs;
+  assert.deepEqual(repair().claudeDesktop.removedFrom, []);
+  assert.equal(fs.statSync(desktopConfig).mtimeMs, before);
+
+  // A config it cannot parse is left exactly as it is, and the update goes on.
+  fs.writeFileSync(desktopConfig, '{"mcpServers": {"relay": ');
+  const unreadable = repair();
+  assert.equal(unreadable.ok, true);
+  assert.equal(unreadable.claudeDesktop.skipped.length, 1);
+  assert.equal(fs.readFileSync(desktopConfig, "utf8"), '{"mcpServers": {"relay": ');
+  // An absent config is never created.
+  fs.rmSync(desktopConfig);
+  assert.equal(repair().ok, true);
+  assert.equal(fs.existsSync(desktopConfig), false);
 });

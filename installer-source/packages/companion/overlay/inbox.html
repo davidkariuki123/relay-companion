@@ -21511,8 +21511,9 @@
   // their own config files and running processes, and the chat AIs on the
   // web, from the server. Each row says one true thing and offers one verb.
   // Nothing says Connected without evidence; the dot is that evidence:
-  // green = registered and valid, ringed = working right now, amber = a
-  // restart away, red = registered but broken.
+  // green = registered and valid, ringed = working right now, red =
+  // registered but broken. The Claude app's chats are the account's Claude
+  // connector, from the server (agent-connections.cjs): never a restart.
   // Conductor runs Claude Code and Codex; it is a developer preview, so its
   // row exists only for accounts that have it (features.conductor).
   const SETUP_RIDER = "conductor"; const setupRiderOffered = () => payload.features?.conductor === true;
@@ -21558,14 +21559,13 @@
     const note = setupSnapshot?.notes?.[host.id];
     const context = setupContext(host);
     if (busy === "connecting") return { dot:"wait", text:"Connecting…", verb:"Connecting…", disabled:true };
-    if (busy === "restarting") return { dot:"wait", text:"Restarting Claude…", verb:"Restarting…", disabled:true };
-    if (note?.tone === "error") return { dot:"bad", text:note.text, verb:host.state === "restart" ? "Restart" : "Try again", action:host.state === "restart" ? "restart" : "connect" };
+    if (note?.tone === "error") return { dot:"bad", text:note.text, verb:"Try again", action:"connect" };
     if (host.state === "available") return { dot:"", text:context ? `${context} · not connected` : "Not connected yet", verb:"Connect", action:"connect" };
     if (host.state === "broken") return { dot:"bad", text:"Not working · needs a fix", verb:"Fix", action:"connect" };
-    if (host.state === "restart") return { dot:"warn", text:host.stopped ? "Relay stopped running here" : "One restart to finish", verb:"Restart", action:"restart", warn:true, title:"Quits and reopens Claude" };
     // Connected, and how we know.
     if (host.live) return { dot:"live", text:`Connected · ${host.id === SETUP_RIDER ? "in use now" : "working now"}` };
-    if (host.id === "claude-app") return { dot:"ok", text:host.running ? "Connected" : "Connected · ready when you open it" };
+    // The Claude app's chats: Relay's connector, from the account's own list.
+    if (host.id === "claude-app") return host.state === "connected" ? { dot:"ok", text:"Connected" } : { dot:"", text:"Checking…" };
     // Never green on borrowed proof: Conductor runs its own Claude Code and Codex.
     if (host.id === SETUP_RIDER) return { dot:"", text:"Uses its own Claude Code and Codex" };
     return { dot:"ok", text:host.id === "chatgpt-app" ? "Connected · new Codex chats have it" : "Connected · new chats have it" };
@@ -21628,8 +21628,6 @@
       case "turned_off": return "Relay is turned off in Codex’s settings";
       case "app_check_failed": return `Its Claude Code says: ${place.detail || "failed to connect"}`;
       case "app_too_old": return `Claude Code${version} can’t use Relay’s tools. A newer version can.`;
-      case "stopped": return "Relay stopped in Claude’s chats";
-      case "not_loaded": return "Claude hasn’t loaded Relay since it opened";
       default: return place.reason ? "Relay’s setup here is broken" : "";
     }
   }
@@ -21637,10 +21635,6 @@
     if (place.connected === true) return { dot:"ok", text:"Connected" };
     if (place.connected === null) return { dot:"", text:"Checking…" };
     const title = setupPlaceWhy(place);
-    if (place.action === "restart") {
-      const armed = setupArmed === `restart:${host.id}`;
-      return { dot:"", text:"Not connected", verb: armed ? "Restart Claude?" : "Restart", action:"restart", armed, title };
-    }
     if (place.action === "connect") return { dot:"", text:"Not connected", verb:"Connect", action:"connect", title };
     if (place.action === "fix") return { dot:"", text:"Not connected", verb:"Fix", action:"connect", title };
     // Nothing Relay can rewrite fixes an app that is too old: say what will.
@@ -21660,7 +21654,7 @@
     const allOk = group.modes.every(({ host, place }) => setupModeStatus(host, place).text === "Connected");
     const lines = group.modes.map(({ label, host, place }) => {
       const status = setupModeStatus(host, place);
-      const verb = status.verb ? `<button class="sv-choose${status.warn ? " warn" : ""}${status.armed ? " armed" : ""}" type="button" data-setup-${status.action || "busy"}="${host.id}"${status.action === "restart" ? ` title="Quits and reopens the Claude app. Chats in progress there close."` : ""}${status.disabled ? " disabled" : ""}>${esc(status.verb)}</button>` : "<span></span>";
+      const verb = status.verb ? `<button class="sv-choose${status.warn ? " warn" : ""}${status.armed ? " armed" : ""}" type="button" data-setup-${status.action || "busy"}="${host.id}"${status.disabled ? " disabled" : ""}>${esc(status.verb)}</button>` : "<span></span>";
       return `<span class="setup-mode">${label ? `<span class="setup-mode-name">${esc(label)}</span>` : "<span></span>"}<span class="setup-mode-state"${status.title ? ` title="${esc(status.title)}"` : ""}>${setupDotHtml(status.dot)}<span class="setup-why-text">${esc(status.text)}</span></span>${verb}</span>`;
     }).join("");
     return `<div class="sv-open-row setup-row setup-app${allOk ? " ok" : ""}${group.modes.some(({ host }) => setupJust.has(host.id)) ? " just" : ""}" data-setup-row="${group.key}">
@@ -21848,9 +21842,9 @@
     }
     return host.state === "available" || host.state === "broken" ? "Not connected" : "";
   }
-  /** Every app here that one click can connect (a restart is always its own click). */
+  /** Every app here that one click can connect (the Claude app's connector opens Claude: always its own click). */
   function setupConnectAllIds() {
-    return setupHosts().filter((host) => host.installed && ["available", "broken"].includes(host.state)).map((host) => host.id);
+    return setupHosts().filter((host) => host.installed && host.id !== "claude-app" && ["available", "broken"].includes(host.state)).map((host) => host.id);
   }
   async function setupConnectAll() {
     // One at a time, in the page's order: Conductor last, since connecting
@@ -21865,7 +21859,7 @@
     const hosts = setupHosts().filter((host) => host.installed);
     const connectedLocal = hosts.filter((host) => host.state === "connected");
     const webSurfaces = Object.keys(SETUP_WEB).filter((surface) => setupConnectionsFor(surface).length);
-    const todo = hosts.filter((host) => ["available", "restart", "broken"].includes(host.state) && host.id !== SETUP_RIDER);
+    const todo = hosts.filter((host) => ["available", "broken"].includes(host.state) && host.id !== SETUP_RIDER);
     const marks = [...connectedLocal.map((host) => SETUP_LOCAL[host.id].mark), ...webSurfaces.map((surface) => SETUP_WEB[surface].mark)];
     const shown = [...new Set(marks.length ? marks : hosts.map((host) => SETUP_LOCAL[host.id].mark))].slice(0, 3);
     const count = connectedLocal.length + webSurfaces.length;
@@ -21875,13 +21869,12 @@
       && (place.host !== SETUP_RIDER || setupRiderOffered()) && setupHost(place.host)?.installed);
     const why = !setupSnapshot ? "Checking…"
       : placeGap ? "Something here isn’t connected"
-      : first?.state === "restart" ? (first.stopped ? "Relay stopped in Claude’s chats" : "Restart Claude to finish")
       : first ? `${SETUP_LOCAL[first.id].name} ${first.state === "broken" ? "needs a fix" : "isn’t connected yet"}${todo.length > 1 ? ` · ${todo.length - 1} more` : ""}`
       : count ? "Everything here is connected" : "Claude, ChatGPT and more";
     // Something to do reads as the row's line; otherwise the marks say it.
     const attention = Boolean(setupSnapshot && (first || placeGap || !count));
     return `<button class="sv-row setup-entry" type="button" id="setupEntry">
-        <span class="sv-row-copy"><span class="sv-row-name">Your AIs</span>${attention ? `<span class="sv-row-sub${first ? " warn" : ""}">${first ? setupDotHtml(first.state === "restart" ? "warn" : first.state === "broken" ? "bad" : "") : ""}${esc(why)}</span>` : ""}</span>
+        <span class="sv-row-copy"><span class="sv-row-name">Your AIs</span>${attention ? `<span class="sv-row-sub${first ? " warn" : ""}">${first ? setupDotHtml(first.state === "broken" ? "bad" : "") : ""}${esc(why)}</span>` : ""}</span>
         ${!attention && shown.length ? `<span class="setup-marks" aria-hidden="true">${shown.map((mark) => `<img src="${mark}" alt="">`).join("")}</span>` : ""}
         <svg class="sv-row-chev" width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2.5L5.5 6L2 9.5"/></svg>
       </button>`;
@@ -22049,16 +22042,6 @@
       button.addEventListener("click", (event) => { event.stopPropagation(); void setupVerb("setupConnect", button.dataset.setupConnect, "connecting"); });
     }
     document.getElementById("setupConnectAll")?.addEventListener("click", (event) => { event.stopPropagation(); void setupConnectAll(); });
-    for (const button of page.querySelectorAll("[data-setup-restart]")) {
-      button.addEventListener("click", (event) => {
-        event.stopPropagation();
-        // Restart quits the whole Claude app, Code tab included: ask once.
-        const armedKey = `restart:${button.dataset.setupRestart}`;
-        if (setupArmed !== armedKey) { setupArmed = armedKey; renderSettings(); return; }
-        setupArmed = "";
-        void setupVerb("setupRestart", button.dataset.setupRestart, "restarting");
-      });
-    }
     for (const button of page.querySelectorAll("[data-setup-web]")) {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -22154,7 +22137,6 @@
   // not yet working with Relay, and only until the person acts or waves it
   // away (each app and state is waved away once, for good).
   let setupNudgeBusy = "";
-  let setupNudgeArmed = false; // Restart asks once: it quits the whole Claude app
   let setupNudgeDone = "";
   // SLACK, ONE ROW. The whole connection lives in a single row at the top of
   // Chats: Connect → "Tap Allow in your browser" → "Slack is connected", and
@@ -22277,27 +22259,24 @@
     const state = setupNudgeDone ? "done" : nudge.state;
     const the = id === "claude-code" || id === "codex" || id === SETUP_RIDER ? meta.name : `the ${meta.name}`;
     const title = state === "done" ? `Relay is in ${the}`
-      : state === "restart" ? (nudge?.stopped ? "Relay stopped in Claude’s chats" : "Restart Claude to use Relay")
       : state === "broken" ? `Relay stopped working in ${the}`
       : `Use Relay in ${the}`;
-    const verb = setupNudgeBusy ? (setupNudgeBusy === "restarting" ? "Restarting…" : "Connecting…")
-      : state === "done" ? "" : state === "restart" ? (setupNudgeArmed ? "Restart Claude?" : "Restart") : state === "broken" ? "Fix" : "Connect";
+    const verb = setupNudgeBusy ? "Connecting…"
+      : state === "done" ? "" : state === "broken" ? "Fix" : "Connect";
     const signature = JSON.stringify([id, state, verb]);
     if (slot.dataset.signature === signature && slot.innerHTML) return;
     slot.dataset.signature = signature;
     slot.innerHTML = `<div class="setup-nudge"><button class="rat-summary" type="button" id="setupNudgeGo"${setupNudgeBusy ? " disabled" : ""}>
         <img src="${meta.mark}" alt=""><span class="rat-title">${esc(title)}</span>
-        ${verb ? `<span class="rat-see${state === "restart" ? " warn" : ""}">${esc(verb)}</span>` : `<span class="setup-dot live" aria-hidden="true" style="margin-left:auto"></span>`}
-      </button>${state === "done" || setupNudgeBusy || state === "restart" || state === "broken" ? "" : `<button class="rat-minimise" type="button" id="setupNudgeHide" aria-label="Not now">×</button>`}</div>`;
+        ${verb ? `<span class="rat-see">${esc(verb)}</span>` : `<span class="setup-dot live" aria-hidden="true" style="margin-left:auto"></span>`}
+      </button>${state === "done" || setupNudgeBusy || state === "broken" ? "" : `<button class="rat-minimise" type="button" id="setupNudgeHide" aria-label="Not now">×</button>`}</div>`;
     slot.querySelector("#setupNudgeGo")?.addEventListener("click", async () => {
       if (setupNudgeBusy || state === "done") return;
-      if (state === "restart" && !setupNudgeArmed) { setupNudgeArmed = true; renderSetupNudge(); return; }
-      setupNudgeArmed = false;
       const userId = setupUserId();
-      setupNudgeBusy = state === "restart" ? "restarting" : "connecting";
+      setupNudgeBusy = "connecting";
       renderSetupNudge();
       try {
-        const next = await window.relay[state === "restart" ? "setupRestart" : "setupConnect"](userId, id);
+        const next = await window.relay.setupConnect(userId, id);
         setupObserve(next);
         const after = next?.hosts?.find((host) => host.id === id);
         if (after?.state === "connected") {
@@ -23875,7 +23854,7 @@
   }
   function renderAgentSetup(agent) {
     const option = onboardingAgentFor(agent);
-    const signature = JSON.stringify(["agent", agent?.host, agent?.place, agent?.run?.id, agent?.run?.status, agent?.runError, onboardingAgentBusy, onboardingAgentNote, payload.ui?.localOnboardingPrompt ? 1 : 0, agent?.openable, localPromptCopiedFor]);
+    const signature = JSON.stringify(["agent", agent?.host, agent?.place, agent?.run?.id, agent?.run?.status, agent?.runError, onboardingAgentBusy, onboardingAgentNote, payload.ui?.localOnboardingPrompt ? 1 : 0, agent?.openable, localPromptCopiedFor, firstRelayPressSendHint]);
     if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-agent-screen")) return;
     signupBodyEl.dataset.firstRelaySignature = signature;
     if (!option) {
@@ -23955,7 +23934,9 @@
         </div>
         <div class="su-claude-tail"><div class="su-form su-agent-actions"><button class="su-primary" type="button" data-agent-open${onboardingAgentBusy || !ready ? " disabled" : ""}>Open ${esc(option.name)}</button></div>
         <div class="su-agent-quiet"><button class="su-link" type="button" data-agent-copy${ready ? "" : " disabled"}>Copy instead</button><span aria-hidden="true">·</span><button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>
-        <div class="desktop-prompt-wait" role="status">${esc(onboardingAgentNote || (option.chat ? `This moves on when ${option.name} connects.` : "This screen moves on by itself."))}</div></div></div>`;
+        ${!option.chat && firstRelayPressSendHint
+          ? `<p class="su-send-progress su-agent-live su-press-send" role="status"><span aria-hidden="true"></span>Press send in ${esc(option.name)}.</p>`
+          : `<div class="desktop-prompt-wait" role="status">${esc(onboardingAgentNote || (option.chat ? `This moves on when ${option.name} connects.` : "This screen moves on by itself."))}</div>`}</div></div>`;
       signupBodyEl.querySelector("[data-agent-open]")?.addEventListener("click", openOnboardingAgent);
       signupBodyEl.querySelector("[data-agent-copy]")?.addEventListener("click", copyOnboardingAgentRequest);
       signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
@@ -24006,6 +23987,8 @@
   let firstRelayPickNote = "";
   let firstRelayPickOpened = "";
   let firstRelayHintTimer = null;
+  // The AI was opened a minute ago and has not started: its setup message is unsent.
+  let firstRelayPressSendHint = false;
   let firstRelayIdeasShown = "";
   function firstRelayFlow() {
     const flow = payload.ui?.firstRelayIdeas;
@@ -24020,14 +24003,29 @@
   }
   function renderLocalFirstRelay(agent, option) {
     const flow = firstRelayFlow();
-    const started = flow && flow.host === option.host && (flow.openedAt || flow.agentSeenAt || (flow.ideas || []).length);
-    if (!started) { renderAgentSetup(agent); return; }
+    const mine = flow && flow.host === option.host ? flow : null;
+    // Opening the AI is not starting it (David's live run, 2026-10-10): the
+    // setup message sits in its composer until the person presses send. The
+    // pill stays on Add Relay until the AI's first Relay tool call marks it
+    // started, and a minute after opening says "Press send in Codex."
+    const started = Boolean(mine && (mine.agentStartedAt || mine.agentSeenAt || (mine.ideas || []).length));
+    if (!started) {
+      const openedAt = Date.parse(mine?.openedAt || "") || 0;
+      const quietFor = openedAt ? Date.now() - openedAt : 0;
+      firstRelayPressSendHint = openedAt > 0 && quietFor >= FIRST_RELAY_HINT_MS;
+      if (openedAt && !firstRelayPressSendHint && !firstRelayHintTimer) {
+        firstRelayHintTimer = setTimeout(() => { firstRelayHintTimer = null; renderSignup(); }, FIRST_RELAY_HINT_MS - quietFor + 50);
+      }
+      renderAgentSetup(agent);
+      return;
+    }
+    firstRelayPressSendHint = false;
+    clearTimeout(firstRelayHintTimer); firstRelayHintTimer = null;
     stopOnboardingAgentPoll();
     const name = option.name;
     const ideas = Array.isArray(flow.ideas) ? flow.ideas : [];
     const picked = firstRelayIdeaFor(flow);
     const inviter = flow.kind === "invite" ? flow.inviterFirstName || flow.inviterName : "";
-    const quiet = (open = true) => `<div class="su-agent-quiet">${open ? `<button class="su-link" type="button" data-agent-open>Open ${esc(name)}</button><span aria-hidden="true">·</span>` : ""}<button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>`;
     if (picked) {
       const waiter = flow.pick.mode === "waiter";
       const signature = JSON.stringify(["first-relay-writing", flow.id, picked.id, flow.pick.mode, firstRelayPickOpened, inviter]);
@@ -24076,15 +24074,8 @@
       signupBodyEl.querySelectorAll("[data-idea-id]").forEach((button) => button.addEventListener("click", () => pickFirstRelayIdea(button.dataset.ideaId)));
       return;
     }
-    // Waiting for ideas. No sign of the AI a minute after it was opened: the
-    // setup message is probably still sitting unsent in its composer.
-    const openedAt = Date.parse(flow.openedAt || "") || 0;
-    const quietFor = openedAt ? Date.now() - openedAt : 0;
-    const hint = !flow.agentSeenAt && openedAt > 0 && quietFor >= FIRST_RELAY_HINT_MS;
-    if (!flow.agentSeenAt && openedAt && !hint && !firstRelayHintTimer) {
-      firstRelayHintTimer = setTimeout(() => { firstRelayHintTimer = null; renderSignup(); }, FIRST_RELAY_HINT_MS - quietFor + 50);
-    }
-    const signature = JSON.stringify(["first-relay-finding", flow.id, hint, name]);
+    // The AI has started and is reading recent work: the ideas are on their way.
+    const signature = JSON.stringify(["first-relay-finding", flow.id, name]);
     if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-ideas")) return;
     signupBodyEl.dataset.firstRelaySignature = signature;
     const skeleton = ["w70 w45", "w60 w38", "w70 w60", "w45 w38"].map((widths) => {
@@ -24096,10 +24087,32 @@
       <h1 class="su-title">Finding ideas for your first Relay.</h1>
       <p class="su-copy">${esc(name)} is looking at what you’ve worked on lately, so it can suggest something to send. Nothing goes to anyone yet.</p>
       <div class="su-idea-list" role="list" aria-busy="true">${skeleton}</div>
-      ${hint ? `<p class="su-send-progress su-agent-live" role="status"><span aria-hidden="true"></span>Press send in ${esc(name)}.</p>${quiet(true)}` : ""}
     </div>`;
-    signupBodyEl.querySelector("[data-agent-open]")?.addEventListener("click", openOnboardingAgent);
-    signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+  }
+  // THE CHAT LEADS THE PILL (David's live run, 2026-10-10): the pill showed
+  // "It's ready to send." before Codex said anything, so the tap looked like
+  // it had done nothing. After a pick, a newly minted link keeps "Codex is
+  // writing it." up until the AI checks in at the end of its turn, or for
+  // FIRST_LINK_HOLD_MS at most.
+  const FIRST_LINK_HOLD_MS = 4000;
+  let firstLinkHeld = { relayId:"", at:0, timer:null };
+  function holdFirstLinkForChat() {
+    const flow = firstRelayFlow();
+    const link = firstLinkForChapter();
+    const agent = payload.ui?.onboardingAgent;
+    const option = onboardingAgentFor(agent);
+    if (!flow?.pick || flow.pick.mode !== "waiter" || !option || option.chat || flow.host !== option.host) return false;
+    if (!link || link.relayId !== payload.ui?.firstRelayId) return false;
+    if (firstLinkHeld.relayId !== link.relayId) {
+      clearTimeout(firstLinkHeld.timer);
+      firstLinkHeld = { relayId:link.relayId, at:Date.now(), timer:null };
+    }
+    const left = FIRST_LINK_HOLD_MS - (Date.now() - firstLinkHeld.at);
+    const wrappedUp = (Date.parse(flow.pick.wrapUpAt || "") || 0) >= firstLinkHeld.at - 1000;
+    if (left <= 0 || wrappedUp) return false;
+    if (!firstLinkHeld.timer) firstLinkHeld.timer = setTimeout(() => { firstLinkHeld.timer = null; renderSignup(); }, left + 30);
+    renderLocalFirstRelay(agent, option);
+    return true;
   }
   async function pickFirstRelayIdea(ideaId) {
     if (firstRelayPickBusy || !ideaId) return;
@@ -24479,6 +24492,7 @@
       // history shows the send (or a minted link), the celebration, Your first
       // link and Grow your network follow, and Open Relay ends onboarding.
       // Until the send, the pill has nothing else to show, so this screen stays.
+      if (status === "sent" && holdFirstLinkForChat()) return;
       if (status === "sent") { stopOnboardingAgentPoll(); renderFirstRelayChapter(); return; }
       const agent = payload.ui?.onboardingAgent;
       // Claude Code, Codex and Conductor: the app connected the account, and

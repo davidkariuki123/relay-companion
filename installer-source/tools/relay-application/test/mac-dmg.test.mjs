@@ -12,6 +12,8 @@ const alias = () => aliasRecord({ volumeName: DMG_VOLUME_NAME, volumeCreated: ne
 
 // Founder, 0.1.624 on a real Mac (2026-10-10): the window said "Drag Relay to
 // Applications", the drag copied the app, and then nothing opened.
+// Founder's pick, 2026-10-10: the icon is a word in "Double-click [Relay] to
+// install." Finder shows the picture's top 368 pt under a 32 pt title bar.
 test("the install window is one large Relay icon in the middle of a 640 x 400 window, with nothing to drag it onto", () => {
   const { window, app, iconSize } = DMG_LAYOUT;
   assert.deepEqual([window.width, window.height], [640, 400]);
@@ -19,8 +21,9 @@ test("the install window is one large Relay icon in the middle of a 640 x 400 wi
   assert.equal(app.x, window.width / 2, "centred");
   assert.equal(DMG_LAYOUT.applications, undefined, "no Applications folder");
   assert.ok(app.x - iconSize / 2 >= 0 && app.x + iconSize / 2 <= window.width, "icon inside the window");
-  assert.ok(app.y - iconSize / 2 >= 132, "icon below the title and caption");
-  assert.ok(app.y + DMG_LAYOUT.labelOffset + 12 <= window.height - 32, "name inside the content below a title bar");
+  assert.ok(app.y - iconSize / 2 >= 64, "icon below the eyebrow");
+  assert.ok(app.y + DMG_LAYOUT.labelOffset + 12 <= app.y + 140, "name above the note");
+  assert.ok(app.y + 140 + 18 <= window.height - 32, "note inside the content below a title bar");
   const records = finderRecords({ backgroundAlias: alias() });
   assert.deepEqual(records.filter(record => record.code === "Iloc").map(record => record.name), ["Relay.app"]);
 });
@@ -30,7 +33,8 @@ test("the volume is called Install Relay, previews keep their own name, and the 
   assert.equal(dmgVolumeName(), "Install Relay");
   assert.equal(dmgVolumeName({ preview: true }), PREVIEW_DMG_VOLUME_NAME);
   assert.equal(PREVIEW_DMG_VOLUME_NAME, "Relay Migration Preview");
-  assert.deepEqual({ ...DMG_TEXT }, { title: "Install Relay", caption: "Double-click to install. Relay opens and finishes setting up." });
+  assert.deepEqual({ ...DMG_TEXT }, { eyebrow: "Install Relay", lead: "Double-click", trail: "to install.",
+    note: "It moves itself into Applications and opens. There\u2019s nothing to drag." });
 });
 
 // Read every image directory in a (big-endian or little-endian) TIFF.

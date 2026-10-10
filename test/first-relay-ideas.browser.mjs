@@ -49,7 +49,7 @@ try {
         window.fixtureCalls.push(['open', userId]);
         const host = window.fixturePayload.ui.onboardingAgent.host;
         window.fixturePayload.ui.firstRelayIdeas = { id: 'setup_1', host, kind: 'none', inviterName: '', inviterFirstName: '', orgName: '',
-          openedAt: now(), agentSeenAt: '', ideas: [], ideasAt: '', pick: null };
+          openedAt: now(), agentStartedAt: '', ideas: [], ideasAt: '', pick: null };
         setTimeout(publish, 0);
         return { ok: true };
       },
@@ -99,26 +99,35 @@ try {
   await fits('01-add-relay-to-codex');
   await shot('01-add-relay-to-codex');
 
-  // 2. Open Codex: the pill waits for ideas, four skeleton rows, nothing sent.
+  // 2. Open Codex: opening is not starting. The setup message sits in Codex's
+  //    composer until the person presses send, so the pill stays put.
   await page.locator('[data-agent-open]').click();
+  await page.waitForFunction(() => Boolean(window.fixturePayload.ui.firstRelayIdeas?.openedAt));
+  await page.waitForTimeout(300);
+  assert.equal(await view.getByText('Finding ideas for your first Relay.').count(), 0, 'not before the AI starts');
+  assert.match(await page.locator('.su-title').innerText(), /Add Relay to\s+Codex\./);
+  assert.equal(await view.getByText('Press send in Codex.').count(), 0, 'no hint in the first minute');
+  assert.deepEqual((await calls()).map((call) => call[0]), ['choose', 'open']);
+
+  // 3. A minute without the AI starting: the same screen says to press send.
+  await push(`p.ui.firstRelayIdeas.openedAt = new Date(Date.now() - 61000).toISOString();`);
+  await view.getByText('Press send in Codex.').waitFor();
+  assert.match(await page.locator('.su-title').innerText(), /Add Relay to\s+Codex\./);
+  await fits('02-press-send-hint');
+  await shot('02-press-send-hint');
+
+  // 3b. The AI's first Relay tool call marks it started: finding ideas.
+  await push(`p.ui.firstRelayIdeas.agentStartedAt = new Date().toISOString();`);
   await view.getByText('Finding ideas for your first Relay.').waitFor();
   assert.equal(await view.getByText('Your first Relay', { exact: true }).isVisible(), true);
   assert.equal(await view.getByText('Codex is looking at what you’ve worked on lately, so it can suggest something to send. Nothing goes to anyone yet.').isVisible(), true);
   assert.equal(await page.locator('.su-idea.skeleton').count(), 4);
-  assert.equal(await view.getByText('Press send in Codex.').count(), 0, 'no hint in the first minute');
-  assert.deepEqual((await calls()).map((call) => call[0]), ['choose', 'open']);
-  await fits('02-finding-ideas');
-  await shot('02-finding-ideas');
-
-  // 3. A minute without the AI starting: the setup message is probably unsent.
-  await push(`p.ui.firstRelayIdeas.openedAt = new Date(Date.now() - 61000).toISOString();`);
-  await view.getByText('Press send in Codex.').waitFor();
-  assert.equal(await page.locator('[data-agent-reset]').textContent(), 'Choose a different AI');
-  await fits('03-finding-ideas-hint');
-  await shot('03-finding-ideas-hint');
+  assert.equal(await view.getByText('Press send in Codex.').count(), 0, 'started: no press-send hint');
+  await fits('03-finding-ideas');
+  await shot('03-finding-ideas');
 
   // 4. The AI started and wrote four ideas: the picker, with no skip.
-  await push(`p.ui.firstRelayIdeas.agentSeenAt = new Date().toISOString(); p.ui.firstRelayIdeas.ideas = ${ideas()}; p.ui.firstRelayIdeas.ideasAt = new Date().toISOString();`);
+  await push(`p.ui.firstRelayIdeas.ideas = ${ideas()}; p.ui.firstRelayIdeas.ideasAt = new Date().toISOString();`);
   await view.getByText('What do you need from someone this week?').waitFor();
   assert.equal(await page.locator('.su-idea:not(.skeleton)').count(), 4);
   assert.equal(await page.locator('.su-idea .su-idea-title').first().textContent(), 'Review the pricing page copy');
@@ -145,7 +154,13 @@ try {
   const url = 'https://sendrelays.com/s/first_pricing_review';
   await push(`p.sent.push({ relayId: 'r_first', createdAt: new Date().toISOString(), state: 'pending', recipient: { name: 'Sam' }, shareLink: { id: 'shl_1', url: '${url}', state: 'unopened' } });
     p.ui.firstRelayStatus = 'sent'; p.ui.firstRelayId = 'r_first'; p.ui.firstLink = { relayId: 'r_first', url: '${url}', state: 'unopened', shareText: '' };`);
-  await view.getByText('It’s ready to send.').waitFor();
+  // The chat leads the pill: "Codex is writing it." stays up for a few seconds
+  // after the mint (or until the AI checks in), so Codex's own message shows first.
+  const minted = Date.now();
+  await page.waitForTimeout(400);
+  assert.equal(await view.getByText('Codex is writing it.').isVisible(), true, 'held while the chat catches up');
+  await view.getByText('It’s ready to send.').waitFor({ timeout: 8000 });
+  assert.ok(Date.now() - minted >= 3500, 'held about four seconds');
   assert.equal(await page.locator('#suFirstLinkUrl').inputValue(), url);
   await page.locator('#suLinkCopy').click();
   await page.locator('#suLinkCopy:has-text("Copied")').waitFor();
@@ -157,7 +172,7 @@ try {
   await push(`p.account.userId = 'b'; p.sent = []; p.ui.firstRelayStatus = 'waiting'; p.ui.firstRelayId = ''; p.ui.firstLink = null; p.ui.firstRelayKind = 'hello';
     p.ui.onboardingAgent = { ...p.ui.onboardingAgent, host: 'claude-code' };
     p.ui.firstRelayIdeas = { id: 'setup_2', host: 'claude-code', kind: 'invite', inviterName: 'Sam Rivera', inviterFirstName: 'Sam', orgName: '',
-      openedAt: new Date().toISOString(), agentSeenAt: new Date().toISOString(), ideas: ${ideas()}, ideasAt: new Date().toISOString(), pick: null };`);
+      openedAt: new Date().toISOString(), agentStartedAt: new Date().toISOString(), ideas: ${ideas()}, ideasAt: new Date().toISOString(), pick: null };`);
   await view.getByText('What do you need from Sam this week?').waitFor();
   assert.equal(await view.getByText('Sam Rivera invited you, so they’re in your contacts').isVisible(), true);
   await fits('07-picker-invite');
@@ -173,7 +188,7 @@ try {
   await page.evaluate(() => { window.fixtureWaiter = false; });
   await push(`p.account.userId = 'c'; p.ui.onboardingAgent = { ...p.ui.onboardingAgent, host: 'codex' };
     p.ui.firstRelayIdeas = { id: 'setup_3', host: 'codex', kind: 'none', inviterName: '', inviterFirstName: '', orgName: '',
-      openedAt: new Date().toISOString(), agentSeenAt: new Date().toISOString(), ideas: ${ideas()}, ideasAt: new Date().toISOString(), pick: null };`);
+      openedAt: new Date().toISOString(), agentStartedAt: new Date().toISOString(), ideas: ${ideas()}, ideasAt: new Date().toISOString(), pick: null };`);
   await view.getByText('What do you need from someone this week?').waitFor();
   await page.locator('[data-idea-id="idea-3"]').click();
   await view.getByText('Press send in Codex.').waitFor();
@@ -184,11 +199,27 @@ try {
 
   // 9. Choosing a different AI from the hint starts afresh at the chooser.
   await push(`p.account.userId = 'd'; p.ui.firstRelayIdeas = { id: 'setup_4', host: 'codex', kind: 'none', inviterName: '', inviterFirstName: '', orgName: '',
-      openedAt: new Date(Date.now() - 90000).toISOString(), agentSeenAt: '', ideas: [], ideasAt: '', pick: null };`);
+      openedAt: new Date(Date.now() - 90000).toISOString(), agentStartedAt: '', ideas: [], ideasAt: '', pick: null };`);
   await view.getByText('Press send in Codex.').waitFor();
   await page.locator('[data-agent-reset]').click();
   await view.getByText('Which AI do you use most?').waitFor();
   assert.deepEqual((await calls()).at(-1), ['reset', 'd']);
+
+  // 10. An AI that checks in at the end of its turn releases the hold at once.
+  await page.evaluate(() => { window.fixtureWaiter = true; });
+  await push(`p.account.userId = 'e'; p.sent = []; p.ui.firstRelayStatus = 'waiting'; p.ui.firstRelayId = ''; p.ui.firstLink = null;
+    p.ui.onboardingAgent = { ...p.ui.onboardingAgent, host: 'codex' };
+    p.ui.firstRelayIdeas = { id: 'setup_5', host: 'codex', kind: 'none', inviterName: '', inviterFirstName: '', orgName: '',
+      openedAt: new Date().toISOString(), agentStartedAt: new Date().toISOString(), ideas: ${ideas()}, ideasAt: new Date().toISOString(), pick: { ideaId: 'idea-1', mode: 'waiter', at: new Date().toISOString(), claimed: true, wrapUpAt: '' } };`);
+  await view.getByText('Codex is writing it.').waitFor();
+  await push(`p.sent.push({ relayId: 'r_e', createdAt: new Date().toISOString(), state: 'pending', recipient: { name: 'Sam' }, shareLink: { id: 'shl_e', url: 'https://sendrelays.com/s/e', state: 'unopened' } });
+    p.ui.firstRelayStatus = 'sent'; p.ui.firstRelayId = 'r_e'; p.ui.firstLink = { relayId: 'r_e', url: 'https://sendrelays.com/s/e', state: 'unopened', shareText: '' };`);
+  await page.waitForTimeout(300);
+  assert.equal(await view.getByText('Codex is writing it.').isVisible(), true);
+  const wrapped = Date.now();
+  await push(`p.ui.firstRelayIdeas.pick.wrapUpAt = new Date().toISOString();`);
+  await view.getByText('It’s ready to send.').waitFor({ timeout: 2000 });
+  assert.ok(Date.now() - wrapped < 2000, 'released by the check-in, not the timer');
 
   assert.deepEqual(errors, []);
   console.log(`First-Relay ideas renderer: chooser, add, finding, hint, picker, writing, invite, reopen and ready-to-send checks passed.${shots ? ` Screenshots in ${shots}.` : ''}`);

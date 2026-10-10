@@ -83,8 +83,10 @@ test("a slow redemption still answers the browser, and the listener times out on
   assert.equal(response.status, 303);
   await slow.closed;
 
-  const idle = await startLoopbackSignInListener({ timeoutMs: 1000, onCode: async () => ({}) });
+  // Start the clock before the listener: its lifetime timer starts inside the
+  // call, so timing from after it returned under-counts on a slow runner.
   const started = Date.now();
+  const idle = await startLoopbackSignInListener({ timeoutMs: 1000, onCode: async () => ({}) });
   await idle.closed;
   assert.ok(Date.now() - started >= 900, "closes at its lifetime, not before");
   await assert.rejects(request(idle.port, callbackPath(idle)), /ECONNREFUSED/);

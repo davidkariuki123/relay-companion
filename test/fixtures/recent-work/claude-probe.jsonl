@@ -1,0 +1,2 @@
+{"type": "user", "timestamp": "2026-10-10T07:00:00Z", "cwd": "/Users/alex/work/acme-pricing", "isSidechain": false, "userType": "external", "entrypoint": "claude-desktop", "message": {"role": "user", "content": "Reply with exactly PONG and nothing else."}}
+{"type": "assistant", "timestamp": "2026-10-10T07:00:05Z", "cwd": "/Users/alex/work/acme-pricing", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "text", "text": "PONG"}]}}

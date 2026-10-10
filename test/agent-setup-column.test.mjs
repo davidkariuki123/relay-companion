@@ -9,7 +9,6 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
   inspectAgentHostsAsync,
-  claudeRelayLog,
   entryValidity,
   inspectAgentHosts,
   parseProcessTable,
@@ -18,7 +17,7 @@ import {
 import { connectAgentHost } from "../src/install.js";
 
 const require = createRequire(import.meta.url);
-const { createAgentConnections } = require("../overlay/agent-connections.cjs");
+const { createAgentConnections, claudeConnectorState, withClaudeConnector } = require("../overlay/agent-connections.cjs");
 const here = path.dirname(fileURLToPath(import.meta.url));
 const inbox = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
 const main = fs.readFileSync(path.join(here, "../overlay/main.cjs"), "utf8");
@@ -42,7 +41,7 @@ function sandbox() {
 const at = (iso) => Date.parse(iso);
 const ps = (rows) => rows.map(([pid, ppid, command, startedAt = at("2026-10-07T10:00:00Z")]) => ({ uid: process.getuid?.(), pid, ppid, command, startedAt }));
 
-test("the process table, config readers and Claude's log are read exactly", () => {
+test("the process table and config readers are read exactly", () => {
   const rows = parseProcessTable("  501   812     1 Wed Oct  7 12:49:21 2026     /Applications/Claude.app/Contents/MacOS/Claude\n  0 1 0 Tue Oct  6 09:00:00 2026   /sbin/launchd\n");
   assert.equal(rows.length, 2);
   assert.deepEqual([rows[0].uid, rows[0].pid, rows[0].ppid, rows[0].command], [501, 812, 1, "/Applications/Claude.app/Contents/MacOS/Claude"]);
@@ -54,14 +53,6 @@ test("the process table, config readers and Claude's log are read exactly", () =
 
   assert.deepEqual(entryValidity({ command: "npx", args: [] }), { command: "npx", valid: false }, "a bare command cannot be found by a GUI app");
   assert.equal(entryValidity({ command: process.execPath, args: ["/nowhere/relay.js", "mcp"] }).valid, false, "a dead script is not valid");
-
-  const log = [
-    "2026-10-07T10:48:58.703Z [info] [relay] Server started and connected successfully",
-    "2026-10-07T13:15:12.469Z [error] [relay] Server disconnected. For troubleshooting guidance",
-    "2026-10-07T13:15:12.470Z [info] [other] Server started and connected successfully",
-  ].join("\n");
-  assert.deepEqual(claudeRelayLog(log, at("2026-10-07T10:00:00Z")), { started: at("2026-10-07T10:48:58.703Z"), failed: at("2026-10-07T13:15:12.469Z") });
-  assert.deepEqual(claudeRelayLog(log, at("2026-10-07T14:00:00Z")), { started: 0, failed: 0 }, "only since the app's launch");
 });
 
 test("each app on this computer has one true state, from its own config and processes", () => {
@@ -74,10 +65,11 @@ test("each app on this computer has one true state, from its own config and proc
   const now = at("2026-10-07T12:00:00Z");
   const state = (processes = []) => Object.fromEntries(inspectAgentHosts({ env, platform: "darwin", processes: ps(processes), now }).hosts.map((host) => [host.id, host]));
 
-  // Installed after Relay: nothing registered anywhere yet.
+  // Installed after Relay: nothing registered anywhere yet. The Claude app's
+  // chats use Relay's connector, which only the server knows: "checking".
   let hosts = state();
   assert.deepEqual(Object.values(hosts).map((h) => [h.id, h.installed, h.state]), [
-    ["claude-app", true, "available"], ["chatgpt-app", true, "available"], ["claude-code", true, "available"], ["codex", false, "absent"], ["conductor", true, "available"],
+    ["claude-app", true, "checking"], ["chatgpt-app", true, "available"], ["claude-code", true, "available"], ["codex", false, "absent"], ["conductor", true, "available"],
   ]);
 
   // Registered: the ChatGPT app (Codex) has Relay in new chats; nothing to restart.
@@ -86,30 +78,20 @@ test("each app on this computer has one true state, from its own config and proc
   hosts = state();
   assert.equal(hosts["chatgpt-app"].state, "connected");
   assert.equal(hosts["conductor"].state, "connected", "Conductor has Relay through Codex");
-  assert.equal(hosts["claude-app"].state, "connected", "not running: it loads Relay when it opens");
-
-  // The Claude app was already open and has not loaded it: one restart.
+  // A local Relay entry an older Relay wrote in the Claude app's config, a
+  // running app with no Relay since it opened, or a bridge still under it:
+  // none of it says anything about the connector, never a restart or a fix.
   const claudeMain = [100, 1, `${claude}/Contents/MacOS/Claude`, at("2026-10-07T11:00:00Z")];
-  hosts = state([claudeMain]);
-  assert.equal(hosts["claude-app"].state, "restart");
-  assert.equal(hosts["claude-app"].stopped, false);
-
-  // A Relay bridge running under it is the evidence that it works right now.
   const bridge = [101, 100, `${box.home}/.relay/bin/mcp-bridge --descriptor x`];
-  hosts = state([claudeMain, bridge]);
-  assert.equal(hosts["claude-app"].state, "connected");
-  assert.equal(hosts["claude-app"].live, true);
-  // Someone else's bridge, or another home's, is not this person's.
-  hosts = state([claudeMain, [102, 100, "/Users/other/.relay/bin/mcp-bridge --descriptor y"]]);
-  assert.equal(hosts["claude-app"].live, false);
-
-  // Started, then stopped (a Relay update): restart. Never started and failed: broken.
   const log = path.join(box.home, "Library", "Logs", "Claude", "mcp.log");
   box.write(log, "2026-10-07T11:00:05.000Z [info] [relay] Server started and connected successfully\n2026-10-07T11:30:00.000Z [error] [relay] Server disconnected.\n");
-  hosts = state([claudeMain]);
-  assert.deepEqual([hosts["claude-app"].state, hosts["claude-app"].stopped], ["restart", true]);
-  box.write(log, "2026-10-07T11:00:05.000Z [error] [relay] spawn ENOENT\n");
-  assert.equal(state([claudeMain])["claude-app"].state, "broken");
+  for (const rows of [[], [claudeMain], [claudeMain, bridge]]) {
+    const scan = inspectAgentHosts({ env, platform: "darwin", processes: ps(rows), now });
+    const app = scan.hosts.find((host) => host.id === "claude-app");
+    assert.deepEqual([app.state, app.registered, app.live, app.via, app.configPath], ["checking", false, false, "connector", ""]);
+    assert.equal(app.running, rows.length > 0);
+    assert.deepEqual([scan.places["claude-chat"].connected, scan.places["claude-chat"].action, scan.places["claude-chat"].reason], [null, undefined, undefined]);
+  }
 
   // A registration pointing at a deleted checkout is broken, not connected.
   box.write(path.join(box.home, ".claude.json"), JSON.stringify({ mcpServers: { relay: { command: process.execPath, args: ["/Users/old/relay/bin/relay.js", "mcp"] } } }));
@@ -119,6 +101,11 @@ test("each app on this computer has one true state, from its own config and proc
   hosts = state([[200, 1, `${chatgpt}/Contents/MacOS/ChatGPT`], [201, 200, `${chatgpt}/Contents/Resources/codex app-server`], [202, 201, `${box.home}/.relay/bin/mcp-bridge --descriptor x`]]);
   assert.equal(hosts["chatgpt-app"].live, true);
   assert.equal(hosts["claude-app"].live, false);
+  // No Claude app here: absent, and its chats are not a place on this computer.
+  fs.rmSync(claude, { recursive: true, force: true });
+  const gone = inspectAgentHosts({ env, platform: "darwin", processes: [], now });
+  assert.equal(gone.hosts.find((host) => host.id === "claude-app").state, "absent");
+  assert.deepEqual([gone.places["claude-chat"].installed, gone.places["claude-chat"].connected], [false, false]);
   fs.rmSync(box.root, { recursive: true, force: true });
 });
 
@@ -127,25 +114,26 @@ test("the pill's main process gets the same answer without blocking on a child p
   box.app("Claude");
   const env = { HOME: box.home, RELAY_OVERLAY_TEST_APPS_DIR: box.apps, RELAY_OVERLAY_TEST_BIN_DIR: box.bin };
   const answer = await inspectAgentHostsAsync({ env, platform: "darwin" });
-  assert.deepEqual(answer.hosts.map((host) => [host.id, host.state]), [["claude-app", "available"], ["chatgpt-app", "absent"], ["claude-code", "absent"], ["codex", "absent"], ["conductor", "absent"]]);
+  assert.deepEqual(answer.hosts.map((host) => [host.id, host.state]), [["claude-app", "checking"], ["chatgpt-app", "absent"], ["claude-code", "absent"], ["codex", "absent"], ["conductor", "absent"]]);
   fs.rmSync(box.root, { recursive: true, force: true });
 });
 
-test("Connect writes exactly what setup writes, for that one app", () => {
+test("Connect writes exactly what setup writes, for that one app, and never the Claude app's config", () => {
   const box = sandbox();
   const env = { HOME: box.home, RELAY_CONFIG_DIR: path.join(box.root, "relay"), CLAUDE_USER_DATA_DIR: path.join(box.home, "ClaudeData") };
   fs.mkdirSync(env.CLAUDE_USER_DATA_DIR, { recursive: true });
-  fs.writeFileSync(path.join(env.CLAUDE_USER_DATA_DIR, "claude_desktop_config.json"), JSON.stringify({ preferences: { keep: true }, mcpServers: { other: { command: "/bin/echo" } } }));
+  const desktopFile = path.join(env.CLAUDE_USER_DATA_DIR, "claude_desktop_config.json");
+  fs.writeFileSync(desktopFile, JSON.stringify({ preferences: { keep: true }, mcpServers: { other: { command: "/bin/echo" }, relay: { command: `${box.home}/.relay/bin/mcp-bridge`, args: ["--descriptor", "x"] } } }));
   const options = { homeDir: box.home, env, node: process.execPath };
 
   assert.deepEqual(connectAgentHost("anything", options), { ok: false, reason: "unknown_host" });
+  // The Claude app's chats use Relay's connector: nothing is written, and the
+  // local entry an older Relay wrote is taken out.
   const claude = connectAgentHost("claude-app", options);
-  assert.equal(claude.ok, true, JSON.stringify(claude));
-  assert.equal(claude.restart, true, "the Claude app reads its config at launch");
-  const desktop = JSON.parse(fs.readFileSync(path.join(env.CLAUDE_USER_DATA_DIR, "claude_desktop_config.json"), "utf8"));
-  assert.deepEqual(desktop.preferences, { keep: true }, "merged, never replaced");
-  assert.ok(desktop.mcpServers.other && desktop.mcpServers.relay);
-  assert.deepEqual(Object.keys(desktop.mcpServers.relay).sort().filter((key) => !["command", "args", "env"].includes(key)), [], "only the keys Claude accepts");
+  assert.deepEqual([claude.ok, claude.reason, claude.restart], [false, "claude_app_uses_connector", false]);
+  const desktop = JSON.parse(fs.readFileSync(desktopFile, "utf8"));
+  assert.deepEqual(desktop, { preferences: { keep: true }, mcpServers: { other: { command: "/bin/echo" } } });
+  assert.equal(fs.existsSync(path.join(box.home, ".relay", "bin", "mcp-launcher.cjs")), true, "the sandbox's launcher, untouched");
 
   // The ChatGPT app before Codex has ever run: ~/.codex is created.
   const codex = connectAgentHost("chatgpt-app", options);
@@ -164,48 +152,88 @@ test("Connect writes exactly what setup writes, for that one app", () => {
 
 test("the nudge names one app worth connecting, once, and connecting says what happens next", async () => {
   let hosts = [
-    { id: "claude-app", installed: true, state: "available", running: true, live: false },
+    { id: "claude-app", installed: true, state: "checking", running: true, live: false },
     { id: "chatgpt-app", installed: true, state: "available", running: false, live: false },
     { id: "conductor", installed: true, state: "available" },
     { id: "codex", installed: false, state: "absent" },
   ];
+  const places = { "claude-chat": { installed: true, host: "claude-app", connected: null, live: false, usedAt: 0 } };
   const store = {};
-  let connected = [];
+  const connected = [];
+  const claudeOpened = [];
+  let serverConnections = [];
   const connections = createAgentConnections({
-    inspect: async () => ({ hosts: hosts.map((host) => ({ ...host })), scannedAt: 1 }),
-    client: async () => ({ agentConnections: async () => ({ connections: [] }), disconnectAgentConnection: async () => ({ ok: true }) }),
+    inspect: async () => ({ hosts: hosts.map((host) => ({ ...host })), places, scannedAt: 1 }),
+    client: async () => ({ agentConnections: async () => ({ connections: serverConnections }), disconnectAgentConnection: async () => ({ ok: true }) }),
     runConnect: async (id) => {
       connected.push(id);
-      hosts = hosts.map((host) => host.id === id ? { ...host, state: id === "claude-app" ? "restart" : "connected" } : host);
-      return { ok: true, restart: id === "claude-app" };
+      hosts = hosts.map((host) => host.id === id ? { ...host, state: "connected" } : host);
+      return { ok: true };
     },
-    restartApp: async () => {},
+    connectClaude: async (key) => { claudeOpened.push(key); },
     store,
     persist: () => {},
   });
+  // Before the server has answered, the Claude app is never a nudge.
+  assert.deepEqual(connections.nudge("user:a"), null);
   await connections.refresh("user:a", { force: true });
+  // The account has no Claude connector: the Claude app is worth connecting.
   assert.deepEqual(connections.nudge("user:a"), { id: "claude-app", state: "available" });
+  assert.deepEqual(connections.snapshot("user:a").places["claude-chat"], { installed: true, host: "claude-app", connected: false, action: "connect", live: false, usedAt: 0 });
   connections.dismissNudge("user:a", "claude-app", "available");
   assert.deepEqual(connections.nudge("user:a"), { id: "chatgpt-app", state: "available" }, "waved away: the next one, never the same one again");
   assert.ok(store["user:a"].dismissed["claude-app:available"]);
 
+  // Connecting the Claude app opens Claude's add-connector screen; it never
+  // registers anything on this computer.
   await connections.connect("user:a", "claude-app");
-  assert.deepEqual(connected, ["claude-app"]);
-  assert.deepEqual(connections.snapshot("user:a").notes["claude-app"], { tone: "next", text: "" }, "registered, and a restart is the next step");
-  assert.deepEqual(connections.nudge("user:a"), { id: "claude-app", state: "restart" }, "a new state may be said once more");
+  assert.deepEqual([connected, claudeOpened], [[], ["user:a"]]);
+  assert.deepEqual(connections.snapshot("user:a").notes["claude-app"], { tone: "next", text: "" }, "Claude's screen is open: the next step is there");
+  assert.equal(connections.snapshot("user:a").busy["claude-app"], undefined);
+  // The server's list says the connector is there: Connected, no nudge.
+  serverConnections = [{ id: "c1", kind: "connector", surface: "claude", name: "Claude", createdAt: new Date().toISOString(), lastUsedAt: null }];
+  await connections.refresh("user:a", { force: true });
+  const snap = connections.snapshot("user:a");
+  assert.equal(snap.hosts.find((host) => host.id === "claude-app").state, "connected");
+  assert.equal(snap.places["claude-chat"].connected, true);
+  assert.equal(snap.places["claude-chat"].action, undefined);
+  assert.deepEqual(connections.nudge("user:a"), { id: "chatgpt-app", state: "available" });
   await connections.connect("user:a", "chatgpt-app");
+  assert.deepEqual(connected, ["chatgpt-app"]);
   assert.equal(connections.snapshot("user:a").notes["chatgpt-app"].tone, "done");
 
   // Conductor is a developer preview: never its own nudge without the row.
-  hosts = hosts.map((host) => ({ ...host, state: host.id === "conductor" ? "available" : host.installed ? "connected" : host.state }));
+  hosts = hosts.map((host) => ({ ...host, state: host.id === "conductor" ? "available" : host.id === "claude-app" ? "checking" : host.installed ? "connected" : host.state }));
   await connections.refresh("user:a", { force: true });
   assert.equal(connections.nudge("user:a"), null);
   assert.deepEqual(connections.nudge("user:a", { rider: true }), { id: "conductor", state: "available" });
-  await assert.rejects(connections.restart("user:a", "chatgpt-app"), /Only the Claude app/);
+  assert.equal(typeof connections.restart, "undefined", "there is no restart to ask for");
+});
+
+test("the Claude app's chats are the account's Claude connector, from the server's own list", () => {
+  const now = Date.parse("2026-10-10T12:00:00Z");
+  const iso = (days) => new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
+  assert.equal(claudeConnectorState(null, now), null, "not known is never a guess");
+  assert.equal(claudeConnectorState([], now), false);
+  assert.equal(claudeConnectorState([{ kind: "credential", surface: "claude", createdAt: iso(1) }], now), false, "a setup code is not the connector");
+  assert.equal(claudeConnectorState([{ kind: "connector", surface: "chatgpt", createdAt: iso(1) }], now), false);
+  assert.equal(claudeConnectorState([{ kind: "connector", surface: "claude", createdAt: iso(90), lastUsedAt: iso(2) }], now), true);
+  assert.equal(claudeConnectorState([{ kind: "connector", surface: "claude", createdAt: iso(90), lastUsedAt: iso(45) }], now), false, "a leftover Claude has not reached in 30 days");
+
+  const scan = { hosts: [{ id: "claude-app", installed: true, state: "checking" }, { id: "codex", installed: true, state: "connected" }],
+    places: { "claude-chat": { installed: true, connected: null }, "codex:terminal": { installed: true, connected: true } } };
+  assert.deepEqual(withClaudeConnector(scan, true).hosts[0], { id: "claude-app", installed: true, state: "connected", registered: true, valid: true });
+  assert.deepEqual(withClaudeConnector(scan, false).places["claude-chat"], { installed: true, connected: false, action: "connect" });
+  assert.deepEqual(withClaudeConnector(scan, null).hosts[0].state, "checking");
+  assert.deepEqual(withClaudeConnector(scan, null).places["claude-chat"].connected, null);
+  assert.equal(withClaudeConnector(scan, false).hosts[1], scan.hosts[1], "every other app is its own config's answer");
+  const absent = { hosts: [{ id: "claude-app", installed: false, state: "absent" }], places: { "claude-chat": { installed: false, connected: false } } };
+  assert.deepEqual(withClaudeConnector(absent, true).hosts[0].state, "absent");
+  assert.deepEqual(withClaudeConnector(absent, true).places["claude-chat"].connected, false);
 });
 
 test("the pill draws Your AIs from that evidence, first on the You page, with the inbox's one quiet word", () => {
-  for (const method of ["setupSnapshot", "setupConnect", "setupRestart", "setupDisconnect", "setupDismissNudge", "setupPrepareRun", "setupPollRun", "setupCopyRun", "setupOpenRun", "setupCancelRun"]) {
+  for (const method of ["setupSnapshot", "setupConnect", "setupDisconnect", "setupDismissNudge", "setupPrepareRun", "setupPollRun", "setupCopyRun", "setupOpenRun", "setupCancelRun"]) {
     assert.match(preload, new RegExp(`${method}: \\(userId`), `${method} is bridged with the account it is for`);
   }
   // Every verb answers only for the account still on screen.
@@ -214,8 +242,11 @@ test("the pill draws Your AIs from that evidence, first on the You page, with th
   assert.match(main, /ipcMain\.handle\("relay:setupPrepareRun", setupIpc\(async \(key, surface, place\) => \{\s*await agentOnboarding\.prepareRun\(/);
   // Connecting runs Relay's own registration code, never a hand edit.
   assert.match(main, /spawn\(node\.command, \[RELAY_CLI, "connect-host", hostId\]/);
-  // The test seam never touches a real app.
-  assert.match(main, /if \(testApps && !String\(host\.where \|\| ""\)\.startsWith\(testApps\)\) throw/);
+  // The Claude app's Connect is Claude's connector, never a local registration,
+  // and Relay never quits and reopens Claude.
+  assert.match(main, /connectClaude: \(key\) => agentOnboarding\.connectClaude\(key\)/);
+  assert.doesNotMatch(main, /restartAgentApp|relay:setupRestart|tell application id/);
+  assert.doesNotMatch(preload, /setupRestart/);
 
   const settings = inbox.slice(inbox.indexOf("function renderSettings()"), inbox.indexOf("function wireSettings()"));
   // Your AIs first; Slack, the other thing Relay connects to, shares its card
@@ -238,11 +269,15 @@ test("the pill draws Your AIs from that evidence, first on the You page, with th
   const status = inbox.slice(inbox.indexOf("function setupLocalStatus(host)"), inbox.indexOf("function setupDotHtml("));
   assert.match(status, /if \(host\.state === "available"\)/);
   assert.match(status, /if \(host\.state === "broken"\)/);
-  assert.match(status, /if \(host\.state === "restart"\)/);
   assert.match(status, /if \(host\.live\) return \{ dot:"live", text:`Connected · /);
-  // Disconnect asks twice; restart says what it does.
+  // Disconnect asks twice.
   assert.match(inbox, /if \(setupArmed !== id\) \{ setupArmed = id; renderSettings\(\); return; \}/);
-  assert.match(inbox, /title:"Quits and reopens Claude"/);
+  // No restart, no "stopped" alarm for the Claude app, anywhere in the pill.
+  for (const gone of [/Relay stopped in Claude’s chats/, /Restart Claude/, /data-setup-restart/, /setupRestart/, /Quits and reopens/, /"not_loaded"/, /state === "restart"/]) {
+    assert.doesNotMatch(inbox, gone);
+  }
+  // Connect all never opens Claude's connector screen behind the person's back.
+  assert.match(inbox, /host\.installed && host\.id !== "claude-app" && \["available", "broken"\]\.includes\(host\.state\)/);
   // Conductor exists here only for accounts offered it.
   assert.match(inbox, /const SETUP_RIDER = "conductor"; const setupRiderOffered = \(\) => payload\.features\?\.conductor === true;/);
 });

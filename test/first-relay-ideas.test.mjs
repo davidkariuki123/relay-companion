@@ -70,7 +70,7 @@ test("a setup belongs to one account and one AI, survives a restart, and ends", 
   assert.match(seen.agentInstruction, /run no setup commands and do not mention signing in/);
   const snapshot = store.snapshot("usr_a");
   assert.equal(snapshot.id, again.id);
-  assert.ok(snapshot.agentSeenAt, "the pill learns the AI has started");
+  assert.ok(snapshot.agentStartedAt, "the pill learns the AI has started");
   assert.equal(snapshot.inviterFirstName, "Sam");
   assert.equal(store.snapshot("usr_b"), null);
   store.markOpened();
@@ -78,6 +78,37 @@ test("a setup belongs to one account and one AI, survives a restart, and ends", 
   store.end();
   assert.equal(store.snapshot("usr_a"), null);
   assert.equal(other.current({ accountId: "usr_a" }).active, false);
+});
+
+test("opening the AI is not starting it: only the AI's first Relay tool call marks the setup started", async (t) => {
+  const directory = sandbox(t);
+  const store = createFirstRelayIdeas({ directory });
+  store.begin({ accountId: "usr_a", host: "codex" });
+  store.markOpened();
+  assert.ok(store.snapshot("usr_a").openedAt);
+  assert.equal(store.snapshot("usr_a").agentStartedAt, "", "the setup message may still be unsent in Codex's composer");
+  // recent work is enough on its own (an AI may skip current).
+  await firstRelayOnboardingCall({ identity: { userId: "usr_a" } }, "relay_onboarding_recent_work", {}, { store, readRecentWork: () => ({ days: 7, threads: [], sources: {} }) });
+  const started = store.snapshot("usr_a").agentStartedAt;
+  assert.ok(started, "the AI has started");
+  store.current({ accountId: "usr_a" });
+  assert.equal(store.snapshot("usr_a").agentStartedAt, started, "the first call's time is kept");
+  // A setup saved by the first release carries agentSeenAt: still started.
+  fs.writeFileSync(store.file, JSON.stringify({ ...store.read(), agentStartedAt: undefined, agentSeenAt: started }));
+  assert.equal(store.snapshot("usr_a").agentStartedAt, started);
+});
+
+test("an AI checking in after it took the pick tells the pill the chat has caught up", async (t) => {
+  const directory = sandbox(t);
+  const store = createFirstRelayIdeas({ directory });
+  store.begin({ accountId: "usr_a", host: "codex" });
+  assert.equal(store.noteWrapUp({ accountId: "usr_a" }), null, "nothing to note before a pick");
+  store.setIdeas(four(), { accountId: "usr_a" });
+  store.pick("idea-1", { accountId: "usr_a" });
+  assert.equal(store.noteWrapUp({ accountId: "usr_a" }), null, "nor before the AI has taken it");
+  await store.waitForPick({ accountId: "usr_a", sleep: async () => {} });
+  store.noteWrapUp({ accountId: "usr_a" });
+  assert.ok(store.snapshot("usr_a").pick.wrapUpAt);
 });
 
 test("a tap with an AI waiting is left for it; the wait returns the pick and claims it once", async (t) => {
@@ -101,8 +132,14 @@ test("a tap with an AI waiting is left for it; the wait returns the pick and cla
   assert.equal(result.picked.id, "idea-3");
   assert.equal(result.picked.prompt, "Make me a Relay asking for review 3.");
   // No inviter: write from what is known and mint at once, without approval.
-  assert.match(result.agentInstruction, /do not open other conversations or files to research it/);
-  assert.match(result.agentInstruction, /mint it at once with relay_share_link: minting sends nothing, so it needs no approval/);
+  // The chat leads: say the pick first, write without more reading, show the
+  // draft, then mint without approval.
+  assert.equal(result.nextMessage, "You picked “Review pricing copy 3”. Writing it now…");
+  assert.match(result.agentInstruction, /Before any other tool call or drafting, say exactly nextMessage in the chat/);
+  assert.match(result.agentInstruction, /no more tool calls, reading or research before the draft/);
+  assert.match(result.agentInstruction, /Show the draft in the chat before minting: "\{Name\} reads" with the forHuman, and "\{Name\}'s AI gets"/);
+  assert.match(result.agentInstruction, /mint it with relay_share_link \(minting sends nothing, so it needs no approval\)/);
+  assert.equal(pill.describe(pill.read()).nextMessage, result.nextMessage, "current repeats it to an AI that lost the result");
   assert.equal(pill.snapshot("usr_a").pick.claimed, true);
   // A repeated tap or wait is the same pick, never a second one.
   assert.equal(pill.pick("idea-1", { accountId: "usr_a" }).idea.id, "idea-3");
@@ -147,6 +184,7 @@ test("with an inviter, the picked idea is shown and approved before it is sent t
   const result = await store.waitForPick({ accountId: "usr_a", sleep: async () => {} });
   assert.deepEqual(result.inviter, { name: "Sam Rivera", relayUserId: "usr_sam" });
   assert.match(result.agentInstruction, /ask for explicit approval of that exact message, and only then send it with relay_send to relayUserId usr_sam/);
+  assert.match(result.agentInstruction, /^Before any other tool call or drafting, say exactly nextMessage/, "the invite path acknowledges the pick first too");
   assert.doesNotMatch(result.agentInstruction, /relay_share_link/);
   assert.match(store.current({ accountId: "usr_a" }).agentInstruction, /explicit approval/);
 });
@@ -173,13 +211,14 @@ test("the MCP tools run the whole conversation on this computer's files", async 
   const directory = sandbox(t);
   const store = createFirstRelayIdeas({ directory });
   const client = { identity: { userId: "usr_a" } };
-  const call = (name, args = {}, extra = {}) => firstRelayOnboardingCall(client, name, args, { store, readRecentWork: () => ({ days: 7, items: [{ app: "Codex", title: "", ask: "rewrite the pricing page", project: "site", at: "2026-10-10T08:00:00.000Z" }], sources: { codex: "threads", claudeCode: "none" } }), ...extra });
+  const call = (name, args = {}, extra = {}) => firstRelayOnboardingCall(client, name, args, { store, readRecentWork: () => ({ days: 7, threads: [{ app: "Codex", title: "Pricing page", project: "site", lastActiveAt: "2026-10-10T08:00:00.000Z", messageCount: 12, lastUserMessages: ["Sam needs the sheet by Thursday"], people: ["Sam"], recent: true }], sources: { codex: "threads", claudeCode: "none" } }), ...extra });
   assert.equal((await call("relay_onboarding_current")).active, false);
-  assert.deepEqual((await call("relay_onboarding_recent_work")).items, [], "nothing is read without an active setup");
+  assert.deepEqual((await call("relay_onboarding_recent_work")).threads, [], "nothing is read without an active setup");
   store.begin({ accountId: "usr_a", host: "codex" });
   assert.equal((await call("relay_onboarding_current")).active, true);
   const work = await call("relay_onboarding_recent_work");
-  assert.equal(work.items[0].ask, "rewrite the pricing page");
+  assert.deepEqual(work.threads[0].people, ["Sam"]);
+  assert.match(work.agentInstruction, /live open loops at the END of these threads/);
   assert.match(work.agentInstruction, /Do not recite this list/);
   await assert.rejects(call("relay_onboarding_ideas", { ideas: four().slice(0, 2) }), /exactly 4 ideas/);
   const shown = await call("relay_onboarding_ideas", { ideas: four() });
@@ -200,55 +239,6 @@ test("the helper's wait is shorter than an MCP host's", async (t) => {
   await firstRelayOnboardingCall({ identity: { userId: "usr_a" } }, "relay_onboarding_wait_pick", {}, { store, sessionContext: { sourceHost: "relay-agent-protocol" } });
   assert.deepEqual(limits, [WAIT_MAX_MS, HELPER_WAIT_MAX_MS]);
   assert.ok(directory);
-});
-
-test("recent work is short, newest first, read-only, and leaves out Relay's own setup and subagents", (t) => {
-  const root = sandbox(t);
-  const now = Date.parse("2026-10-10T12:00:00Z");
-  const projects = path.join(root, "claude", "projects");
-  fs.mkdirSync(path.join(projects, "-Users-me-site"), { recursive: true });
-  const session = (name, lines, mtime) => {
-    const file = path.join(projects, "-Users-me-site", name);
-    fs.writeFileSync(file, lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
-    fs.utimesSync(file, new Date(mtime), new Date(mtime));
-  };
-  session("a.jsonl", [
-    { type: "custom-title", customTitle: "Pricing page rewrite" },
-    { type: "user", isMeta: true, message: { content: "<command-name>/clear</command-name>" } },
-    { type: "user", cwd: "/Users/me/site", message: { content: [{ type: "text", text: "Rewrite the **pricing** page so the tiers are clearer" }] } },
-  ], now - 60_000);
-  session("b.jsonl", [{ type: "user", cwd: "/Users/me/site", message: { content: "Set up Relay with me." } }], now - 30_000);
-  session("old.jsonl", [{ type: "user", cwd: "/Users/me/site", message: { content: "Something from last month" } }], now - 20 * 86_400_000);
-  // Codex: no sqlite here, so the rollouts are read.
-  const day = path.join(root, "codex", "sessions", "2026", "10", "10");
-  fs.mkdirSync(day, { recursive: true });
-  const rollout = (name, lines, mtime) => {
-    const file = path.join(day, name);
-    fs.writeFileSync(file, lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
-    fs.utimesSync(file, new Date(mtime), new Date(mtime));
-  };
-  rollout("rollout-1.jsonl", [
-    { type: "session_meta", payload: { cwd: "/Users/me/api", source: "vscode", thread_source: "user" } },
-    { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "<environment_context>x</environment_context>" }] } },
-    { type: "event_msg", payload: { type: "user_message", message: "# Files mentioned by the user:\n\n## a.png: /tmp/a.png\n\n## My request:\nFix the flaky login test" } },
-  ], now - 10_000);
-  rollout("rollout-2.jsonl", [
-    { type: "session_meta", payload: { cwd: "/Users/me/api", source: { subagent: { other: "guardian" } }, thread_source: "subagent" } },
-    { type: "event_msg", payload: { type: "user_message", message: "Review this diff" } },
-  ], now - 5_000);
-  const before = fs.readdirSync(projects, { recursive: true }).length;
-  const result = recentWork({ codexHome: path.join(root, "codex"), claudeProjectsDir: projects, now, spawn: () => ({ status: 1 }) });
-  assert.deepEqual(result.items.map((item) => [item.app, item.title, item.ask, item.project]), [
-    ["Codex", "", "Fix the flaky login test", "api"],
-    ["Claude Code", "Pricing page rewrite", "Rewrite the pricing page so the tiers are clearer", "site"],
-  ]);
-  assert.deepEqual(result.sources, { codex: "sessions", claudeCode: "sessions" });
-  assert.equal(fs.readdirSync(projects, { recursive: true }).length, before, "nothing is written");
-  assert.ok(result.items.every((item) => !("rawAsk" in item) && !item.project.includes("/")), "only folder names, never paths");
-  // Asks are cut to a short snippet.
-  session("long.jsonl", [{ type: "user", cwd: "/x", message: { content: "word ".repeat(200) } }], now - 1000);
-  const long = recentWork({ claudeProjectsDir: projects, now, limit: 1 }).items[0];
-  assert.ok(long.ask.length <= 180 && long.ask.endsWith("…"));
 });
 
 test("choosing a local AI finishes the account step in the app, with no browser and no agent command", async (t) => {

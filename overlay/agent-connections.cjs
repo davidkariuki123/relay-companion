@@ -3,21 +3,56 @@
 // person uses: the apps on this computer (from their own config files and
 // running processes, src/agent-host-status.js) and the AIs connected from a
 // browser (from the server, /v1/agent/connections). This module owns the
-// facts and the three verbs: connect an app, restart the Claude app so it
-// loads Relay, and disconnect a browser AI. Chat AIs connect through the
-// first-run chooser's own setup request (agent-onboarding.cjs), never a
-// second flow.
+// facts and the two verbs: connect an app, and disconnect a browser AI. Chat
+// AIs connect through the first-run chooser's own setup request
+// (agent-onboarding.cjs), never a second flow.
+//
+// THE CLAUDE APP'S CHATS use Relay's hosted connector, never a local server
+// (David, 2026-10-10): its row is the account's own Claude connector, from
+// the server's list, and Connect opens Claude's add-connector screen. Nothing
+// on this computer can say it stopped, so there is never a restart to ask for.
 
 const LOCAL_TTL_MS = 2500;
 const SERVER_TTL_MS = 15_000;
-// A connect or restart outcome is said once, then the status line takes over.
+// A connect outcome is said once, then the status line takes over.
 const NOTE_MS = 12_000;
+// A connection Claude has not reached in this long is a leftover (removed in
+// Claude, never revoked here): the same rule as Your AIs' web rows.
+const CONNECTOR_LIVE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Does this account have Claude's hosted connector? true | false | null (not known). */
+function claudeConnectorState(connections, at) {
+  if (!Array.isArray(connections)) return null;
+  return connections.some((item) => {
+    if (item?.kind !== "connector" || item?.surface !== "claude") return false;
+    const seen = Date.parse(item.lastUsedAt || item.createdAt || "");
+    return Number.isFinite(seen) && at - seen < CONNECTOR_LIVE_MS;
+  });
+}
+
+/** The local scan, with the Claude app's chats decided by the account's connector. */
+function withClaudeConnector(scan, connector) {
+  if (!scan?.hosts) return scan;
+  const hosts = scan.hosts.map((host) => (host.id !== "claude-app" || !host.installed ? host : {
+    ...host,
+    registered: connector === true,
+    valid: connector === true,
+    state: connector === true ? "connected" : connector === false ? "available" : "checking",
+  }));
+  const chat = scan.places?.["claude-chat"];
+  if (!chat?.installed) return { ...scan, hosts };
+  const place = { ...chat, connected: connector };
+  delete place.action;
+  delete place.reason;
+  if (connector === false) place.action = "connect";
+  return { ...scan, hosts, places: { ...scan.places, "claude-chat": place } };
+}
 
 function createAgentConnections({
   inspect,              // async () => { hosts, scannedAt }
   client,               // async () => RelayClient
-  runConnect,           // async (hostId) => { ok, restart?, reason?, detail? }
-  restartApp,           // async (host) => void; resolves once the app is open again
+  runConnect,           // async (hostId) => { ok, reason?, detail? }
+  connectClaude = async () => { throw new Error("Claude connects with its connector."); }, // async (key) => opens Claude's add-connector screen
   store = {},           // persisted per account: { dismissed: { "<host>:<state>": iso } }
   persist = () => {},
   now = Date.now,
@@ -74,14 +109,21 @@ function createAgentConnections({
     return record.dismissed && typeof record.dismissed === "object" ? record.dismissed : {};
   }
 
+  /** The last local scan, with this account's Claude connector applied. */
+  function resolved(key) {
+    const known = key ? server.get(key) : null;
+    return withClaudeConnector(local, claudeConnectorState(known?.connections, now()));
+  }
+
   const api = {
     /** Everything the Setup page draws, from the last scans. */
     snapshot(key, options = {}) {
       const known = key ? server.get(key) : null;
+      const scan = resolved(key);
       return {
-        hosts: local?.hosts || null,
+        hosts: scan?.hosts || null,
         // Per place a person opens: what proves Relay worked there.
-        places: local?.places || null,
+        places: scan?.places || null,
         scannedAt: local?.scannedAt || 0,
         connections: known?.connections ?? null,
         connectionsError: known?.error || "",
@@ -99,19 +141,20 @@ function createAgentConnections({
      * working with Relay, and not already waved away in that same state.
      */
     nudge(key, { rider = false } = {}) {
-      if (!key || !local?.hosts) return null;
+      const scan = resolved(key);
+      if (!key || !scan?.hosts) return null;
       const dismissed = dismissedFor(key);
       const order = ["claude-app", "chatgpt-app", "claude-code", "codex", "conductor"];
-      const candidates = local.hosts
+      const candidates = scan.hosts
         // Conductor is offered only to accounts that have it (a developer preview).
-        .filter((host) => host.installed && (rider || host.id !== "conductor") && ["available", "restart", "broken"].includes(host.state)
+        .filter((host) => host.installed && (rider || host.id !== "conductor") && ["available", "broken"].includes(host.state)
           // Something broken stays until it is fixed (David, 2026-10-07); only an
           // invitation to connect a new app can be waved away.
           && (host.state !== "available" || !dismissed[`${host.id}:${host.state}`]))
         .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
       // Conductor rides Claude Code and Codex: never its own nudge while either is offered.
       const first = candidates.find((host) => host.id !== "conductor") || candidates[0];
-      return first ? { id: first.id, state: first.state, ...(first.stopped ? { stopped: true } : {}) } : null;
+      return first ? { id: first.id, state: first.state } : null;
     },
     dismissNudge(key, hostId, state) {
       if (!key || !hostId || !state) return api.snapshot(key);
@@ -120,7 +163,11 @@ function createAgentConnections({
       persist();
       return api.snapshot(key);
     },
-    /** Register Relay in one app, with the same code setup uses. */
+    /**
+     * Register Relay in one app, with the same code setup uses. The Claude
+     * app instead gets Relay's connector: Claude's add-connector screen
+     * opens, and the server's list turns its row Connected.
+     */
     async connect(key, hostId) {
       const host = (await scanLocal({ force: true }))?.hosts?.find((entry) => entry.id === hostId);
       if (!host?.installed) throw new Error("That app isn’t on this computer.");
@@ -128,40 +175,18 @@ function createAgentConnections({
       busy.set(hostId, "connecting");
       notes.delete(hostId);
       try {
-        const result = await runConnect(hostId);
-        if (!result?.ok) throw new Error(result?.detail || result?.reason || "connect failed");
-        const after = (await scanLocal({ force: true }))?.hosts?.find((entry) => entry.id === hostId);
-        if (after?.state === "restart" || (result.restart && after?.running && !after?.live)) note(hostId, "next", "");
-        else note(hostId, "done", "");
+        if (hostId === "claude-app") {
+          await connectClaude(key);
+          note(hostId, "next", "");
+        } else {
+          const result = await runConnect(hostId);
+          if (!result?.ok) throw new Error(result?.detail || result?.reason || "connect failed");
+          await scanLocal({ force: true });
+          note(hostId, "done", "");
+        }
       } catch (error) {
         console.error(`[overlay] connect ${hostId} failed:`, error && error.message);
         note(hostId, "error", "Couldn’t connect. Try again.");
-      } finally {
-        busy.delete(hostId);
-      }
-      return api.snapshot(key);
-    },
-    /** Quit and reopen an app so it loads Relay: only ever the Claude app. */
-    async restart(key, hostId) {
-      const host = (await scanLocal({ force: true }))?.hosts?.find((entry) => entry.id === hostId);
-      if (hostId !== "claude-app" || !host?.installed) throw new Error("Only the Claude app needs a restart.");
-      if (busy.has(hostId)) return api.snapshot(key);
-      busy.set(hostId, "restarting");
-      notes.delete(hostId);
-      try {
-        await restartApp(host);
-        // The app is up again; give it a moment to start its servers.
-        const deadline = now() + 25_000;
-        let after = null;
-        while (now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 900));
-          after = (await scanLocal({ force: true }))?.hosts?.find((entry) => entry.id === hostId);
-          if (after?.live) break;
-        }
-        note(hostId, after?.live ? "done" : "error", after?.live ? "" : "Claude reopened, but Relay hasn’t started there yet.");
-      } catch (error) {
-        console.error("[overlay] restart failed:", error && error.message);
-        note(hostId, "error", "Couldn’t restart Claude. Quit it from the menu bar, then open it again.");
       } finally {
         busy.delete(hostId);
       }
@@ -188,4 +213,4 @@ function createAgentConnections({
   return api;
 }
 
-module.exports = { createAgentConnections };
+module.exports = { createAgentConnections, claudeConnectorState, withClaudeConnector };

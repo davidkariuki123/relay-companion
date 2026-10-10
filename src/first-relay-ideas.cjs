@@ -97,17 +97,23 @@ function validateIdeas(input) {
   return ideas;
 }
 
-// What to do with the pick, by who the first Relay goes to. Writing starts
-// from what the AI already knows: the idea and the recent work it read.
-function pickedInstruction(state) {
-  const write = "Write this Relay now from the idea and what you already know; do not open other conversations or files to research it, and do not ask for more first. Draft it as the Writing a Relay section says, with forHuman in one or two plain spoken sentences and everything you know in forAgent.";
+// What to do with the pick, by who the first Relay goes to. David's live run
+// (2026-10-10): Codex worked for 87 seconds showing only "Working", and the
+// pill showed the minted link before the chat said anything, so the tap looked
+// like it did nothing. The chat now leads: say the pick first, draft without
+// any more reading, show the draft, then mint or ask.
+function nextMessageFor(idea) {
+  return `You picked “${clean(idea?.title) || "your idea"}”. Writing it now…`;
+}
+function pickedInstruction(state, idea) {
+  const first = `Before any other tool call or drafting, say exactly nextMessage in the chat ("${nextMessageFor(idea)}"). Then write it from this idea's prompt and what you already read: no more tool calls, reading or research before the draft, and do not ask for more first. Draft it as the Writing a Relay section says: forHuman in one or two plain spoken sentences, everything you know in forAgent.`;
   if (state.kind === "invite" && state.inviter) {
-    return `${write} It goes to ${state.inviter.name}, who is on Relay: show the recipient, the human message and the agent document, ask for explicit approval of that exact message, and only then send it with relay_send to relayUserId ${state.inviter.relayUserId || "(the inviter's)"}.`;
+    return `${first} It goes to ${state.inviter.name}, who is on Relay: show the recipient, the human message and the agent document, ask for explicit approval of that exact message, and only then send it with relay_send to relayUserId ${state.inviter.relayUserId || "(the inviter's)"}.`;
   }
   if (state.kind === "org" && state.org) {
-    return `${write} It goes to the ${state.org.name} group on Relay: show the recipient, the human message and the agent document, ask for explicit approval of that exact message, and only then send it with relay_send to groupId ${state.org.groupId || "(the organisation's)"}.`;
+    return `${first} It goes to the ${state.org.name} group on Relay: show the recipient, the human message and the agent document, ask for explicit approval of that exact message, and only then send it with relay_send to groupId ${state.org.groupId || "(the organisation's)"}.`;
   }
-  return `${write} Then mint it at once with relay_share_link: minting sends nothing, so it needs no approval. Show the url in full on its own line, say in one sentence that whoever gets it reads and replies in their browser with nothing to install, and offer to reword it (the link stays the same).`;
+  return `${first} Show the draft in the chat before minting: "{Name} reads" with the forHuman, and "{Name}'s AI gets" with a one- or two-line summary of the forAgent and its word count. Then mint it with relay_share_link (minting sends nothing, so it needs no approval) and end with the url on its own line, one sentence that whoever gets it reads and replies in their browser with nothing to install, and an offer to reword it (the link stays the same).`;
 }
 
 function createFirstRelayIdeas({ directory = defaultDirectory(), now = Date.now } = {}) {
@@ -167,7 +173,7 @@ function createFirstRelayIdeas({ directory = defaultDirectory(), now = Date.now 
         return current;
       }
       return write({ schema: 1, id: randomUUID(), accountId, host, ...destination,
-        createdAt: iso(), openedAt: "", agentSeenAt: "", ideas: [], ideasAt: "", pick: null, endedAt: "" });
+        createdAt: iso(), openedAt: "", agentStartedAt: "", ideas: [], ideasAt: "", pick: null, endedAt: "" });
     },
     /** The pill opened the chosen AI. Opening it again restarts the minute before "Press send". */
     markOpened() {
@@ -187,7 +193,8 @@ function createFirstRelayIdeas({ directory = defaultDirectory(), now = Date.now 
       if (!state) {
         return { active: false, agentInstruction: "No first-Relay setup is waiting in the Relay app. Help the person with Relay as usual; nothing needs setting up or signing in here." };
       }
-      const seen = state.agentSeenAt ? state : write({ ...state, agentSeenAt: iso() });
+      // The AI has started: the pill leaves "press send" for "finding ideas" on this marker.
+      const seen = state.agentStartedAt ? state : write({ ...state, agentStartedAt: iso() });
       return api.describe(seen);
     },
     describe(state) {
@@ -203,11 +210,11 @@ function createFirstRelayIdeas({ directory = defaultDirectory(), now = Date.now 
         ...(state.you ? { you: state.you } : {}),
         ideasWritten: state.ideas.length === IDEA_COUNT,
         ...(state.ideas.length ? { ideas: state.ideas } : {}),
-        ...(picked ? { picked, pickedVia: state.pick.mode } : {}),
+        ...(picked ? { picked, pickedVia: state.pick.mode, ...(state.pick.mode === "waiter" ? { nextMessage: nextMessageFor(picked) } : {}) } : {}),
         agentInstruction: picked
           ? state.pick.mode === "reopened"
             ? "The person already picked an idea while no AI was waiting, and the Relay app opened it in a new conversation. Nothing more to do here."
-            : pickedInstruction(state)
+            : pickedInstruction(state, picked)
           : state.ideas.length === IDEA_COUNT
             ? "Your ideas are in the Relay app. Call relay_onboarding_wait_pick until the person picks one."
             : `Follow the Relay skill's First Relay tutorial: read recent work with relay_onboarding_recent_work, then write four ideas with relay_onboarding_ideas${who ? `, all about what to send ${who}` : ""}. The account is already connected: run no setup commands and do not mention signing in.`,
@@ -219,10 +226,19 @@ function createFirstRelayIdeas({ directory = defaultDirectory(), now = Date.now 
       if (!state) throw new Error("No first-Relay setup is waiting in the Relay app.");
       if (state.pick) throw new Error("The person already picked an idea. Write that Relay instead of new ideas.");
       const ideas = validateIdeas(input);
-      const next = write({ ...state, ideas, ideasAt: iso(), agentSeenAt: state.agentSeenAt || iso() });
+      const next = write({ ...state, ideas, ideasAt: iso(), agentStartedAt: state.agentStartedAt || iso() });
       // The AI calls the waiting tool next; a tap in the gap still reaches it.
       heartbeat(next.id);
       return next;
+    },
+    /**
+     * The AI that took the pick checked in near the end of its turn. Cheap and
+     * best-effort: only a claimed pick in an active setup records it.
+     */
+    noteWrapUp({ accountId } = {}) {
+      const state = activeFor(accountId);
+      if (!state?.pick?.claimedAt || state.pick.mode !== "waiter") return null;
+      return write({ ...state, pick: { ...state.pick, wrapUpAt: iso() } });
     },
     /**
      * The pill: the person tapped an idea. With an AI waiting, the pick is
@@ -258,7 +274,7 @@ function createFirstRelayIdeas({ directory = defaultDirectory(), now = Date.now 
             return { waiting: false, picked: null, openedElsewhere: idea, agentInstruction: "The person picked an idea while no AI was waiting, so the Relay app opened it in a new conversation. Do not write it here; end your turn with one short line saying it opened there." };
           }
           if (!state.pick.claimedAt) write({ ...state, pick: { ...state.pick, claimedAt: new Date(now()).toISOString() } });
-          return { waiting: false, picked: idea, ...(state.inviter ? { inviter: state.inviter } : {}), ...(state.org ? { org: state.org } : {}), agentInstruction: pickedInstruction(state) };
+          return { waiting: false, picked: idea, nextMessage: nextMessageFor(idea), ...(state.inviter ? { inviter: state.inviter } : {}), ...(state.org ? { org: state.org } : {}), agentInstruction: pickedInstruction(state, idea) };
         }
         if (now() - lastBeat >= HEARTBEAT_MS) { heartbeat(state.id); lastBeat = now(); }
         if (signal?.aborted || shouldYield() || now() - started >= limit) {
@@ -279,10 +295,11 @@ function createFirstRelayIdeas({ directory = defaultDirectory(), now = Date.now 
         inviterFirstName: firstName(state.inviter?.name),
         orgName: state.org?.name || "",
         openedAt: state.openedAt || "",
-        agentSeenAt: state.agentSeenAt || "",
+        // Set by the AI's first onboarding tool call (current or recent work): it has started.
+        agentStartedAt: state.agentStartedAt || state.agentSeenAt || "",
         ideas: state.ideas.map(({ id, title, line, kind, recipientName }) => ({ id, title, line, kind, ...(recipientName ? { recipientName } : {}) })),
         ideasAt: state.ideasAt || "",
-        pick: state.pick ? { ideaId: state.pick.ideaId, mode: state.pick.mode, at: state.pick.at, claimed: Boolean(state.pick.claimedAt) } : null,
+        pick: state.pick ? { ideaId: state.pick.ideaId, mode: state.pick.mode, at: state.pick.at, claimed: Boolean(state.pick.claimedAt), wrapUpAt: state.pick.wrapUpAt || "" } : null,
       };
     },
   };

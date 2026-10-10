@@ -221,13 +221,13 @@ export async function firstRelayOnboardingCall(client, name, args = {}, { sessio
   if (name === "relay_onboarding_current") return store.current({ accountId });
   if (name === "relay_onboarding_recent_work") {
     const setup = store.current({ accountId });
-    if (!setup.active) return { items: [], agentInstruction: setup.agentInstruction };
+    if (!setup.active) return { threads: [], agentInstruction: setup.agentInstruction };
     const work = readRecentWork();
     return {
       ...work,
-      agentInstruction: work.items.length
-        ? "Use these only to suggest four first Relays the person would want to send someone this week. Do not recite this list or open the files it names."
-        : "Nothing recent was found. Suggest four first Relays from the project folder you are in, or four general ones.",
+      agentInstruction: work.threads.length
+        ? "Find the live open loops at the END of these threads (lastUserMessages and lastAssistantEnding): what someone is waiting on from the person, or what the person is waiting on from someone named in that thread. Pick four from four different threads by the Relay skill's First Relay method. Do not recite this list or open the files it names."
+        : "Nothing recent was found. Suggest four first Relays from the project folder you are in, or four useful general ones.",
     };
   }
   if (name === "relay_onboarding_ideas") {
@@ -1323,7 +1323,7 @@ export const TOOLS = [
   {
     name: "relay_onboarding_recent_work",
     description:
-      "During the first-Relay setup only: what the person worked on in the last week, read on this computer to suggest a first Relay. Returns, newest first, the title and first ask of their recent Codex threads and Claude Code sessions with the project folder's name, short and capped. Read-only; it never returns file contents or replies. Use it only to suggest ideas, and do not recite it back.",
+      "During the first-Relay setup only: where the person's recent work stands, read on this computer to find their first Relay. Returns up to 20 recent Codex threads and Claude Code sessions (the last 72 hours first, then the week), each with its title, project folder name, last activity, message count, the person's last few messages and the end of the AI's last reply, trimmed, and the people named there. Read-only and local; never file contents or tool output. Use it only to find ideas, and do not recite it back.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -2871,6 +2871,9 @@ async function handleAdmittedCall(client, name, args, {
         }),
       );
     case "relay_session_updates": {
+      // Agents check in just before their final response: after a first-Relay
+      // pick, that is the pill's cue that the chat has caught up with the link.
+      try { firstRelayIdeasStore().noteWrapUp({ accountId: client?.identity?.userId || "" }); } catch {}
       const board = sessionContext.sessionDigest;
       if (!board) {
         return text({ relays: [], topics: [], agentInstruction: "No event board for this session: Relay is not paired on this device, so nothing is tracked per session." });

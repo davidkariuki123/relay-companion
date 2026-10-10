@@ -428,7 +428,9 @@ const agentConnections = createAgentConnections({
   inspect: inspectAgentHostsNow,
   client: () => relayClient(),
   runConnect: connectAgentHostNow,
-  restartApp: restartAgentApp,
+  // The Claude app's chats use Relay's connector: its Connect opens Claude's
+  // add-connector screen, the same as the Claude web row's.
+  connectClaude: (key) => agentOnboarding.connectClaude(key),
   store: setupConnections,
   persist: () => writeOverlayPrefs(),
 });
@@ -5414,40 +5416,6 @@ function connectAgentHostNow(hostId) {
     });
   });
 }
-const execFilePromise = (file, args, options = {}) => new Promise((resolve, reject) => {
-  execFile(file, args, { timeout: 20_000, ...options }, (error, stdout) => (error ? reject(error) : resolve(String(stdout || ""))));
-});
-/**
- * Quit and reopen an app so it loads Relay (the Claude app reads its config
- * only at launch). A normal Quit, so the app may ask about unsaved work; if it
- * does not close, the person is told to quit it themselves.
- */
-async function restartAgentApp(host) {
-  const testApps = process.env.RELAY_OVERLAY_TEST_APPS_DIR;
-  if (testApps && !String(host.where || "").startsWith(testApps)) throw new Error("test seam: refusing a real app");
-  if (host.running) {
-    if (testApps) { try { process.kill(host.pid, "SIGTERM"); } catch {} }
-    else {
-      const bundle = (await execFilePromise("/usr/bin/plutil", ["-extract", "CFBundleIdentifier", "raw", "-o", "-", path.join(host.where, "Contents", "Info.plist")])).trim();
-      if (!/^[A-Za-z0-9.-]+$/.test(bundle)) throw new Error("unknown bundle");
-      await execFilePromise("/usr/bin/osascript", ["-e", `tell application id "${bundle}" to quit`]);
-    }
-    const deadline = Date.now() + 20_000;
-    for (;;) {
-      const still = (await inspectAgentHostsNow()).hosts.find((entry) => entry.id === host.id);
-      if (!still?.running) break;
-      if (Date.now() > deadline) throw new Error("the app did not quit");
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-  }
-  if (testApps) {
-    const executable = path.join(host.where, "Contents", "MacOS", path.basename(host.where, ".app"));
-    spawn(executable, [], { detached: true, stdio: "ignore" }).unref();
-  } else {
-    await execFilePromise("/usr/bin/open", [host.where]);
-  }
-}
-
 function conductorCapability() {
   return conductorAvailability({
     platform: process.platform,
@@ -10721,11 +10689,6 @@ ipcMain.handle("relay:setupSnapshot", setupIpc(async (key, options) => {
 }));
 ipcMain.handle("relay:setupConnect", setupIpc(async (key, hostId) => {
   await agentConnections.connect(key, String(hostId || ""));
-  pushInbox(true);
-  return setupSnapshot(key);
-}));
-ipcMain.handle("relay:setupRestart", setupIpc(async (key, hostId) => {
-  await agentConnections.restart(key, String(hostId || ""));
   pushInbox(true);
   return setupSnapshot(key);
 }));

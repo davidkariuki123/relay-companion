@@ -1,28 +1,25 @@
-// Registering Relay into the DESKTOP apps — Claude Desktop and the Codex app.
+// The DESKTOP apps — the Claude app and the Codex app — as Relay finds them.
 //
-// Most people who are sent a relay have a desktop app and no CLI. Until now
-// `installClaudeCode` wrote ~/.claude.json (the Claude *Code* CLI's file, which
-// the desktop app never reads) and refused to create it when absent, so a
-// desktop-only user was told "Claude Code was not found here, so it was skipped"
-// and ended up with nothing registered anywhere.
-//
-// Writing claude_desktop_config.json is the only unattended path that exists:
-// there is no CLI for Claude Desktop (`claude mcp add --scope` only ever writes
-// Claude Code's config) and no install deep link. `.mcpb` Desktop Extensions
-// cannot be installed without a human clicking "Install Extension?", so they are
-// a convenience, never a substitute.
+// The Claude app's chats use Relay through its hosted Relay CONNECTOR
+// (claude.ai / the Claude app → Settings → Connectors), never a local MCP
+// server (David, 2026-10-10). The Claude app starts local servers only when it
+// launches and never restarts one, so every Relay update left its chats with a
+// dead Relay ("Relay stopped in Claude's chats — Restart"); and a person who
+// also had the connector got two Relay tool sets, possibly for two different
+// accounts. So Relay no longer writes claude_desktop_config.json at all, and
+// every install, repair and update takes out the entry it once wrote there
+// (retireRelayFromClaudeDesktopConfig). Claude Code (~/.claude.json) is a
+// different product and keeps its local registration.
 
-import fs from "node:fs";
 import path from "node:path";
 import installedApps from "./installed-apps.cjs";
 
 /**
  * Every directory that might hold claude_desktop_config.json on this machine.
  *
- * Order matters only for reporting; we write to every candidate whose parent
- * already exists, because on Windows the app READS a virtualised MSIX path while
- * its own "Edit Config" button OPENS %APPDATA% — the two never sync, and picking
- * one silently registers nothing for half of users. The list is
+ * Order matters only for reporting; Relay clears its old entry from every
+ * candidate, because on Windows the app READS a virtualised MSIX path while its
+ * own "Edit Config" button OPENS %APPDATA% — the two never sync. The list is
  * installed-apps.cjs's, the one place Relay finds the AI apps (2026-10-09).
  */
 export function claudeDesktopConfigDirs(options = {}) {
@@ -33,131 +30,53 @@ export function claudeDesktopConfigPathIn(dir) {
   return path.join(dir, "claude_desktop_config.json");
 }
 
-/**
- * The entry Claude Desktop accepts, and nothing else.
- *
- * Its schema is exactly `command` (required), `args`, `env`, and an internal
- * `extensionId`. A `url`, `type` or `transport` key is not merely ignored — it
- * can make the app rewrite the file and drop the whole mcpServers section,
- * taking other tools' servers with it.
- */
-export function claudeDesktopEntry({ node, script, command, args, relayHome, maxOldSpaceMb = 32 }) {
-  const entry = command
-    ? { command, args: Array.isArray(args) ? args.map(String) : [] }
-    : { command: node, args: [`--max-old-space-size=${maxOldSpaceMb}`, script, "mcp"] };
-  if (relayHome) entry.env = { RELAY_HOME: relayHome };
-  return entry;
+// What Relay itself wrote into claude_desktop_config.json, in every shape it
+// ever wrote: the native bridge (~/.relay/bin/mcp-bridge[-<fingerprint>][.exe]),
+// Node running the stable launcher (~/.relay/bin/mcp-launcher.cjs), Node
+// running a package's or a checkout's bin/relay.js, or npx relay-companion. Only under the two
+// names Relay used. Anything else in that file is someone else's.
+const RELAY_BRIDGE_COMMAND = /[/\\]\.relay[/\\]bin[/\\]mcp-bridge(?:-[0-9a-f]{16})?(?:\.exe)?$/i;
+const RELAY_SCRIPT_ARG = /(?:[/\\]\.relay[/\\]bin[/\\]mcp-launcher\.cjs|(?:relay[^/\\]*|[/\\]companion)[/\\]bin[/\\]relay\.js)$/;
+const RELAY_PACKAGE_ARG = /^relay-companion(?:@\S*)?$/;
+
+/** Is this mcpServers entry one Relay wrote? Name AND command must both say so. */
+export function isRelayOwnedDesktopEntry(name, entry) {
+  if (name !== "relay" && name !== "relay_companion") return false;
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+  const args = Array.isArray(entry.args) ? entry.args.map(String) : [];
+  return RELAY_BRIDGE_COMMAND.test(String(entry.command || ""))
+    || args.some((arg) => RELAY_SCRIPT_ARG.test(arg) || RELAY_PACKAGE_ARG.test(arg));
 }
 
 /**
- * An entry this installer wrote whose target no longer exists.
+ * Take Relay's own entries out of a claude_desktop_config.json text, touching
+ * nothing else: every other server, `preferences`, `coworkUserFilesPath` and
+ * any key Relay does not know stay exactly as they were.
  *
- * Claude Desktop validates the schema, not the filesystem, so a stale entry
- * spawns and dies on every single app launch. David's machine has exactly this:
- * a hand-written `relay_companion` pointing at a deleted checkout, crash-looping
- * with MODULE_NOT_FOUND. Self-heal it rather than leaving a permanently broken
- * server in someone's config.
+ * @returns {{ text: string|null, removed: string[] }} text is null when there
+ *   is nothing of Relay's to remove (so the caller writes nothing at all).
+ * @throws when the text is not a JSON object: never guessed at, never clobbered.
  */
-export function isDeadRelayEntry(name, entry, exists = fs.existsSync) {
-  if (!entry || typeof entry !== "object") return false;
-  if (!/relay/i.test(String(name))) return false;
-  const args = Array.isArray(entry.args) ? entry.args : [];
-  const target = /[/\\]\.relay[/\\]bin[/\\]mcp-bridge(?:-[0-9a-f]{16})?(?:\.exe)?$/i.test(String(entry.command || ""))
-    ? String(entry.command)
-    : args.find((a) => typeof a === "string" && /relay[^/\\]*[/\\]bin[/\\]relay\.js$/.test(a));
-  if (!target) return false;
-  return !exists(target);
-}
-
-/**
- * A live entry under the pre-rename server name. Unlike a dead entry it spawns
- * fine — which is worse: it is a full duplicate of `relay`, so every Desktop
- * session carries the whole toolset twice and the doubled count helps push the
- * tools behind ToolSearch deferral. Installing under the current name is the
- * moment to retire it, existing target or not.
- */
-export function isLegacyRelayCompanionEntry(name, entry) {
-  if (name !== "relay_companion") return false;
-  if (!entry || typeof entry !== "object") return false;
-  const args = Array.isArray(entry.args) ? entry.args : [];
-  return /[/\\]\.relay[/\\]bin[/\\]mcp-bridge(?:-[0-9a-f]{16})?(?:\.exe)?$/i.test(String(entry.command || "")) || args.some(
-    (a) => typeof a === "string" && /relay[^/\\]*[/\\]bin[/\\](relay\.js|mcp-launcher\.cjs)$/.test(a),
-  );
-}
-
-/**
- * Merge our server into an existing config, touching nothing else.
- *
- * The live file holds `coworkUserFilesPath` and a `preferences` object with the
- * paired browser-extension device id, per-folder permission modes and consent
- * grants. The MCP docs say to "replace the contents of the configuration file";
- * for an installer that is destructive, so this merges and refuses to guess when
- * the JSON is unparseable.
- */
-export function mergeClaudeDesktopConfig(existingText, entry, { name = "relay", exists = fs.existsSync } = {}) {
-  let cfg = {};
-  const raw = (existingText || "").trim();
-  if (raw) {
-    try {
-      cfg = JSON.parse(raw);
-    } catch (error) {
-      throw new Error(`refusing to overwrite malformed claude_desktop_config.json: ${error.message}`);
-    }
+export function retireRelayFromClaudeDesktopConfig(existingText) {
+  const raw = String(existingText || "").trim();
+  if (!raw) return { text: null, removed: [] };
+  let cfg;
+  try {
+    cfg = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`refusing to rewrite malformed claude_desktop_config.json: ${error.message}`);
   }
   if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg)) {
-    throw new Error("refusing to write: claude_desktop_config.json is not a JSON object");
+    throw new Error("refusing to rewrite: claude_desktop_config.json is not a JSON object");
   }
-
-  const servers = cfg.mcpServers && typeof cfg.mcpServers === "object" && !Array.isArray(cfg.mcpServers)
-    ? { ...cfg.mcpServers }
-    : {};
-
-  const removed = [];
-  for (const [key, value] of Object.entries(servers)) {
-    if (key !== name && (isDeadRelayEntry(key, value, exists) || isLegacyRelayCompanionEntry(key, value))) {
-      delete servers[key];
-      removed.push(key);
-    }
-  }
-
-  // Always overwrite our own key. No-oping when it already exists is what lets a
-  // stale path survive upgrades forever.
-  servers[name] = entry;
-  cfg.mcpServers = servers;
+  const servers = cfg.mcpServers;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) return { text: null, removed: [] };
+  const removed = Object.keys(servers).filter((name) => isRelayOwnedDesktopEntry(name, servers[name]));
+  if (!removed.length) return { text: null, removed };
+  const kept = {};
+  for (const [name, value] of Object.entries(servers)) if (!removed.includes(name)) kept[name] = value;
+  cfg.mcpServers = kept;
   return { text: `${JSON.stringify(cfg, null, 2)}\n`, removed };
-}
-
-/**
- * Claude Desktop launches servers from a GUI context with a curated PATH that
- * contains no nvm/fnm/volta shims, so "npx" or a shim path resolves to nothing
- * and the server dies silently. Prefer a stable absolute node that resolves to
- * the same binary we are running, over the version-pinned Cellar path.
- */
-export function stableNodeCandidates() {
-  return ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"];
-}
-
-export function resolveStableNode({
-  execPath = process.execPath,
-  candidates = stableNodeCandidates(),
-  realpath = (p) => fs.realpathSync(p),
-  exists = fs.existsSync,
-} = {}) {
-  let target;
-  try {
-    target = realpath(execPath);
-  } catch {
-    return execPath;
-  }
-  for (const candidate of candidates) {
-    if (!exists(candidate)) continue;
-    try {
-      if (realpath(candidate) === target) return candidate;
-    } catch {
-      // Unreadable symlink; try the next one.
-    }
-  }
-  return execPath;
 }
 
 /** True when the Claude app is installed, whether or not a CLI is. */

@@ -464,7 +464,9 @@ test("setup preserves MCP and skill while retiring Relay hooks", () => {
   assert.match(setup, /installAgentSkills\(\)/);
   assert.match(setup, /installClaudeCode\(/);
   assert.match(setup, /installCodex\(/);
-  assert.match(setup, /installClaudeDesktop\(/);
+  // The Claude app uses Relay's connector: setup only takes out an old local entry.
+  assert.match(setup, /retireClaudeDesktopRegistration\(\)/);
+  assert.doesNotMatch(setup, /installClaudeDesktop|claude_desktop_config|mergeClaudeDesktopConfig/);
   assert.match(setup, /retireAgentHooks\(/);
   assert.match(setup, /if \(!hookRepair\.ok\) throw new Error/);
   assert.doesNotMatch(setup, /removeClaudeCodeMcpConfig|removeCodexMcpConfig|uninstallClaudeHooks|uninstallCodexHooks|installClaudeHooksWithStableLauncher|installCodexHooksWithStableLauncher/);

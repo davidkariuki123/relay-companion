@@ -3,10 +3,9 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   claudeDesktopConfigDirs,
   claudeDesktopConfigPathIn,
-  claudeDesktopEntry,
+  claudeDesktopPresent,
   codexAppPresent,
-  mergeClaudeDesktopConfig,
-  resolveStableNode,
+  retireRelayFromClaudeDesktopConfig,
 } from "./desktop-hosts.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -3060,24 +3059,11 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
     missing.push("Claude Code (registration failed)");
   }
 
-  // Claude DESKTOP is a separate product with its own config file, and it is what
-  // most people who get sent a relay actually have. Registering it is independent
-  // of the CLI: a desktop-only machine used to report "Claude Code was not found
-  // here, so it was skipped" and register nothing anywhere.
-  const claudeDesktop = process.platform === "linux"
-    ? { ok: false, reason: "unsupported_platform" }
-    : installClaudeDesktop(mcpBin, node);
-  if (process.platform !== "linux") {
-    if (claudeDesktop.ok) {
-      installed.push("Claude Desktop");
-      desktopRestarts.push("Claude Desktop");
-      if (claudeDesktop.swept?.length) sweptStaleEntries.push(...claudeDesktop.swept);
-    } else if (claudeDesktop.reason === "claude_desktop_not_found") {
-      missing.push("Claude Desktop");
-    } else {
-      missing.push("Claude Desktop (registration failed)");
-    }
-  }
+  // The Claude APP's chats use Relay's hosted connector, never a local server
+  // (David, 2026-10-10; desktop-hosts.js says why). Setup writes nothing into
+  // its config and takes out the entry an older Relay wrote there.
+  retireClaudeDesktopRegistration();
+  const claudeAppConnector = process.platform !== "linux" && claudeDesktopPresent();
   const codex = installCodex(mcpBin, node, { command: codexCommand });
   let codexHooks = null;
   if (codex.ok) {
@@ -3116,6 +3102,7 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
     sweptStaleEntries,
     skillInstall,
     agentProtocol,
+    claudeAppConnector,
   };
   } finally { lease.release(); }
 }
@@ -3153,7 +3140,8 @@ export function repairAgentMcpRegistrations({
   const claude = writeClaudeCodeMcpConfig(mcpBin, node, claudeConfigFile);
   const claudeTopicPolicy = claude.ok ? writeClaudeTopicToolPolicy(claudeSettingsFile) : null;
   const codex = writeCodexMcpConfig(mcpBin, node, codexConfigFile);
-  const claudeDesktop = installClaudeDesktop(mcpBin, node, { env: { ...process.env, HOME: homeDir } });
+  // The Claude app uses Relay's connector: take out the local entry, never add one.
+  const claudeDesktop = retireClaudeDesktopRegistration({ env: { ...process.env, HOME: homeDir } });
   // Retire old hooks after refreshing MCP registration and bounded tool rules.
   const hookRepair = retireAgentHooks({
     bin,
@@ -3174,7 +3162,9 @@ export function repairAgentMcpRegistrations({
  * already registered is rewritten in place (which also heals a dead path).
  * Never opts any other app in.
  *
- *   claude-app   Claude app chats: claude_desktop_config.json (restart needed)
+ *   claude-app   nothing: the Claude app's chats use Relay's hosted connector
+ *                (the pill opens Claude's add-connector screen instead); this
+ *                only takes out a local entry an older Relay wrote
  *   chatgpt-app  Codex in the ChatGPT app: ~/.codex/config.toml
  *   codex        the Codex CLI: the same config.toml
  *   claude-code  Claude Code: ~/.claude.json (its CLI when that file is absent)
@@ -3193,6 +3183,10 @@ export function connectAgentHost(host, {
 } = {}) {
   if (!["claude-app", "chatgpt-app", "codex", "claude-code", "conductor"].includes(host)) {
     return { ok: false, reason: "unknown_host" };
+  }
+  if (host === "claude-app") {
+    const claudeDesktop = retireClaudeDesktopRegistration({ env: { ...env, HOME: homeDir } });
+    return { ok: false, host, restart: false, reason: "claude_app_uses_connector", claudeDesktop };
   }
   try {
     node = persistentNodePath(node, { homeDir, env });
@@ -3218,18 +3212,6 @@ export function connectAgentHost(host, {
     const policy = writeClaudeTopicToolPolicy(claudeSettingsFile);
     return policy.ok ? written : policy;
   };
-  if (host === "claude-app") {
-    // A Claude app never opened yet has no folder: it reads this file on its
-    // first launch all the same.
-    if (process.platform === "darwin" && !env.CLAUDE_USER_DATA_DIR) {
-      const base = path.join(homeDir, "Library", "Application Support");
-      if (!["Claude", "Claude-3p"].some((name) => fs.existsSync(path.join(base, name)))) {
-        try { fs.mkdirSync(path.join(base, "Claude"), { recursive: true }); } catch {}
-      }
-    }
-    const result = installClaudeDesktop(mcpBin, node, { env: { ...env, HOME: homeDir } });
-    return { ...result, host, restart: result.ok };
-  }
   if (host === "chatgpt-app" || host === "codex") return { ...codex(), host, restart: false };
   if (host === "claude-code") return { ...claudeCode(), host, restart: false };
   // Conductor: whichever of its two agents can be registered here.
@@ -3259,24 +3241,6 @@ function codexConfigHasRelay(configPath) {
     .some((line) => line.trim() === "[mcp_servers.relay]");
 }
 
-function existingClaudeDesktopRelayConfigs({ homeDir, platform, env }) {
-  const configs = [];
-  for (const dir of claudeDesktopConfigDirs({ env: { ...env, HOME: homeDir }, platform })) {
-    const configPath = claudeDesktopConfigPathIn(dir);
-    if (!fs.existsSync(configPath)) continue;
-    try {
-      const config = readJsonObject(configPath);
-      if (config.mcpServers && typeof config.mcpServers === "object" && config.mcpServers.relay) {
-        configs.push(configPath);
-      }
-    } catch (error) {
-      const raw = fs.readFileSync(configPath, "utf8");
-      if (/"relay"\s*:/.test(raw)) throw error;
-    }
-  }
-  return configs;
-}
-
 /**
  * Candidate activation repair: refresh only registrations Relay already owns.
  * Unlike setup/repairAgentMcpRegistrations, this never opts a new host into MCP
@@ -3302,11 +3266,9 @@ export function repairExistingAgentRegistrations({
   }
   let claudeInstalled = false;
   let codexInstalled = false;
-  let claudeDesktopConfigs = [];
   try {
     claudeInstalled = claudeConfigHasRelay(claudeConfigFile);
     codexInstalled = codexConfigHasRelay(codexConfigFile);
-    claudeDesktopConfigs = existingClaudeDesktopRelayConfigs({ homeDir, platform, env });
   } catch (error) {
     return { ok: false, reason: "agent_config_unreadable", detail: error?.message || String(error) };
   }
@@ -3314,8 +3276,10 @@ export function repairExistingAgentRegistrations({
   let mcpBin = null;
   let claude = null;
   let codex = null;
-  let claudeDesktop = null;
-  if (claudeInstalled || codexInstalled || claudeDesktopConfigs.length) {
+  // The Claude app uses Relay's connector: an update takes out the local entry
+  // an older Relay wrote there (and never fails over a file it cannot read).
+  const claudeDesktop = retireClaudeDesktopRegistration({ env: { ...env, HOME: homeDir }, platform });
+  if (claudeInstalled || codexInstalled) {
     try {
       mcpBin = ensureStableMcpLauncher({ targetBin: bin, node, homeDir });
     } catch (error) {
@@ -3331,25 +3295,6 @@ export function repairExistingAgentRegistrations({
     if (codexInstalled) {
       codex = writeCodexMcpConfig(mcpBin, node, codexConfigFile);
     }
-    if (claudeDesktopConfigs.length) {
-      const launch = mcpLaunchCommand({ mcpBin, node: resolveStableNode({ execPath: node }) });
-      const entry = claudeDesktopEntry({
-        command: launch.command,
-        args: launch.args,
-        relayHome: env.RELAY_HOME || undefined,
-      });
-      const written = [];
-      try {
-        for (const configPath of claudeDesktopConfigs) {
-          const { text } = mergeClaudeDesktopConfig(fs.readFileSync(configPath, "utf8"), entry);
-          writeTextAtomic(configPath, text);
-          written.push(configPath);
-        }
-        claudeDesktop = { ok: true, configPaths: written };
-      } catch (error) {
-        claudeDesktop = { ok: false, reason: "claude_desktop_write_failed", detail: error?.message || String(error) };
-      }
-    }
   }
   const hookRepair = retireAgentHooks({
     bin,
@@ -3361,12 +3306,12 @@ export function repairExistingAgentRegistrations({
   });
   // Name the first surface that refused, so a caller that can only relay one
   // line (the update worker's log) still says which registration failed and why.
-  const failing = [["claude", claude], ["codex", codex], ["claude_desktop", claudeDesktop], ["hooks", hookRepair]]
+  const failing = [["claude", claude], ["codex", codex], ["hooks", hookRepair]]
     .find(([, result]) => result && result.ok === false);
   const reason = failing ? `${failing[0]}:${failing[1].reason || "failed"}` : undefined;
   const detail = failing ? String(failing[1].detail || failing[1].reason || "").slice(0, 600) : undefined;
   return {
-    ok: Boolean((!claude || claude.ok) && (!codex || codex.ok) && (!claudeDesktop || claudeDesktop.ok) && hookRepair.ok),
+    ok: Boolean((!claude || claude.ok) && (!codex || codex.ok) && hookRepair.ok),
     ...(reason ? { reason, detail } : {}),
     mcpBin,
     claude,
@@ -4360,54 +4305,49 @@ export function purgeLocalState({
 }
 
 /**
- * Register the Relay MCP into Claude DESKTOP.
+ * Take the local Relay server an older Relay wrote out of the Claude app's
+ * config, on every install, repair and update. The Claude app's chats use
+ * Relay's hosted connector instead (desktop-hosts.js says why); this never
+ * touches the connector, which lives on the server.
  *
- * Separate from `installClaudeCode` because they are different products with
- * different config files: the CLI reads ~/.claude.json, the desktop app reads
- * claude_desktop_config.json and never looks at the other. Writing that file is
- * the only unattended path — Claude Desktop has no CLI and no install deep link,
- * and a .mcpb extension cannot install without a human clicking a dialog.
- *
- * Writes every candidate directory that exists, because on Windows the app reads
- * a virtualised MSIX path while its own "Edit Config" button opens %APPDATA%.
+ * Only Relay's own entry goes (isRelayOwnedDesktopEntry: its name AND a
+ * command pointing at Relay's bridge or runtime); every other server and key
+ * stays. Atomic, because the app watches the file and may be running. Never
+ * creates a file that is absent. A file that cannot be read or parsed is left
+ * exactly as it is and reported, never a failure: this must not block an
+ * update. Idempotent: a second run finds nothing and writes nothing.
  */
-export function installClaudeDesktop(bin = relayBinPath(), node = stableNodePath(), { env = process.env } = {}) {
-  const dirs = claudeDesktopConfigDirs({ env });
-  if (!dirs.length) return { ok: false, reason: "claude_desktop_not_found" };
-
-  const launch = mcpLaunchCommand({ mcpBin: bin, node: resolveStableNode({ execPath: node }) });
-  const entry = claudeDesktopEntry({
-    command: launch.command,
-    args: launch.args,
-    relayHome: env.RELAY_HOME || undefined,
-  });
-
-  const written = [];
-  const swept = [];
-  let lastError = null;
+export function retireClaudeDesktopRegistration({
+  env = process.env,
+  platform = process.platform,
+  log = (line) => console.error(`[relay] ${line}`),
+} = {}) {
+  const removedFrom = [];
+  const removed = [];
+  const skipped = [];
+  let dirs = [];
+  try { dirs = claudeDesktopConfigDirs({ env, platform }); } catch {}
   for (const dir of dirs) {
     const configPath = claudeDesktopConfigPathIn(dir);
     try {
-      const existing = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : "";
-      const { text, removed } = mergeClaudeDesktopConfig(existing, entry);
-      // Atomic: the app watches this file and may be running.
-      const tmp = `${configPath}.${process.pid}.${Date.now()}.tmp`;
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(tmp, text, { mode: 0o600 });
-      fs.renameSync(tmp, configPath);
-      written.push(configPath);
-      swept.push(...removed);
+      if (!fs.existsSync(configPath)) continue;
+      const { text, removed: names } = retireRelayFromClaudeDesktopConfig(fs.readFileSync(configPath, "utf8"));
+      if (text === null) continue;
+      writeTextAtomic(configPath, text);
+      removedFrom.push(configPath);
+      removed.push(...names);
+      log(`Removed Relay's local server (${names.join(", ")}) from ${configPath}: the Claude app uses Relay's connector.`);
     } catch (error) {
-      lastError = error && error.message ? error.message : String(error);
+      const detail = error?.message || String(error);
+      skipped.push({ configPath, detail });
+      log(`Left ${configPath} as it is (${detail}).`);
     }
   }
-
-  if (!written.length) return { ok: false, reason: "claude_desktop_write_failed", detail: lastError };
-  return { ok: true, method: "desktop_config", configPaths: written, swept };
+  return { ok: true, method: "connector", removedFrom, removed: [...new Set(removed)], skipped };
 }
 
 /**
- * The uninstall twin of installClaudeDesktop. Without it every uninstalled
+ * Uninstall's sweep of the Claude app's config. Without it every uninstalled
  * machine kept an orphaned `relay` stdio server that Claude Desktop tried, and
  * failed, to start on every launch — forever.
  *

@@ -74,7 +74,6 @@ test("the pill draws the ideas flow for local AIs and keeps the chooser and chat
   for (const copy of [
     "Finding ideas for your first Relay.",
     "is looking at what you’ve worked on lately, so it can suggest something to send. Nothing goes to anyone yet.",
-    "Press send in ${esc(name)}.",
     "What do you need from ${who ? esc(who) : \"someone\"} this week?",
     "Suggested by ${esc(name)} from your recent chats",
     "invited you, so they’re in your contacts",
@@ -85,6 +84,13 @@ test("the pill draws the ideas flow for local AIs and keeps the chooser and chat
     "had stopped, so we opened it again with this typed in.",
   ]) assert.ok(flow.includes(copy), `copy: ${copy}`);
   assert.doesNotMatch(flow, /Skip/, "the picker has no skip link");
+  // Opening the AI is not starting it: only the AI's first tool call moves the pill on.
+  assert.match(flow, /const started = Boolean\(mine && \(mine\.agentStartedAt \|\| mine\.agentSeenAt \|\| \(mine\.ideas \|\| \[\]\)\.length\)\);/);
+  assert.doesNotMatch(flow.slice(0, flow.indexOf("const started")), /openedAt \|\|/);
+  assert.match(html, /Press send in \$\{esc\(option\.name\)\}\./, "the press-send hint lives on the Add Relay screen");
+  // The chat leads the pill after the mint.
+  assert.match(html, /if \(status === "sent" && holdFirstLinkForChat\(\)\) return;/);
+  assert.match(html, /const FIRST_LINK_HOLD_MS = 4000;/);
   assert.match(flow, /const FIRST_RELAY_HINT_MS = 60_000;|FIRST_RELAY_HINT_MS/);
   assert.match(html, /const FIRST_RELAY_HINT_MS = 60_000;/);
   assert.match(html, /Which AI do you use most\?/, "the chooser is unchanged");

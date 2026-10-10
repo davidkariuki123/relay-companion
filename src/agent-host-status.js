@@ -8,7 +8,6 @@
 //   registered  the app's own config names Relay (the same files setup writes)
 //   valid       the command that entry runs exists on disk
 //   live        a Relay MCP bridge is running under that app at this moment
-//   started     (Claude app) its own mcp.log says Relay started after launch
 //
 // And, per PLACE a person opens (2026-10-09, `places`): Claude Code in the
 // Claude app and in Terminal share one config but are two places, as are the
@@ -20,10 +19,13 @@
 // cannot parse it (Conductor's bundled one, measured) is broken there,
 // whatever the file says.
 //
-// The Claude app reads its config once, at launch, so a registration it has
-// not loaded yet is "restart", not "connected". Codex (the ChatGPT app and the
-// CLI) and Claude Code start their tools per chat, so a new chat picks a fresh
-// registration up and there is no restart to ask for.
+// The Claude app's chats use Relay's hosted CONNECTOR, never a local server
+// (David, 2026-10-10; desktop-hosts.js says why), so nothing on this computer
+// says whether they have Relay: the account's own connections on the server
+// do. Here the Claude app is only installed or not ("checking" until the pill
+// adds the server's answer, agent-connections.cjs). Codex (the ChatGPT app and
+// the CLI) and Claude Code start their tools per chat, so a new chat picks a
+// fresh registration up and there is no restart to ask for.
 //
 // Nothing here writes. Connecting goes through install.js (connectAgentHost),
 // the same registration code setup and repair use.
@@ -33,15 +35,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import installedApps from "./installed-apps.cjs";
-import { claudeDesktopConfigDirs, claudeDesktopConfigPathIn } from "./desktop-hosts.js";
 import { HOST_PLACES, placeOfAncestry, readHostEvidence } from "./host-evidence.js";
 import { readHostHistory } from "./host-history.js";
 
 export const AGENT_HOST_IDS = Object.freeze(["claude-app", "chatgpt-app", "claude-code", "codex", "conductor"]);
-
-/** A bridge started this long after the app is still "starting", not missing. */
-const CLAUDE_STARTUP_GRACE_MS = 20_000;
-const LOG_TAIL_BYTES = 512 * 1024;
 
 function exists(file) {
   try { return Boolean(file) && fs.existsSync(file); } catch { return false; }
@@ -106,36 +103,9 @@ function readProcesses() {
 
 const BRIDGE = /[/\\]\.relay[/\\]bin[/\\]mcp-(bridge|launcher)|[/\\]bin[/\\]relay\.js\s+mcp\b/;
 
-/** The Claude app's own account of Relay's server since a given time. */
-export function claudeRelayLog(text, since = 0) {
-  let started = 0;
-  let failed = 0;
-  for (const line of String(text || "").split("\n")) {
-    if (!line.includes("[relay]")) continue;
-    const at = Date.parse(line.slice(0, 24));
-    if (!Number.isFinite(at) || at < since) continue;
-    if (/Server started and connected successfully/.test(line)) started = Math.max(started, at);
-    else if (/\[error\]/.test(line) || /Server disconnected|failed|ENOENT|MODULE_NOT_FOUND/i.test(line)) failed = Math.max(failed, at);
-  }
-  return { started, failed };
-}
-
-function tail(file, bytes = LOG_TAIL_BYTES) {
-  try {
-    const size = fs.statSync(file).size;
-    const fd = fs.openSync(file, "r");
-    try {
-      const length = Math.min(size, bytes);
-      const buffer = Buffer.alloc(length);
-      fs.readSync(fd, buffer, 0, length, size - length);
-      return buffer.toString("utf8");
-    } finally { fs.closeSync(fd); }
-  } catch { return ""; }
-}
-
 /**
  * @returns {{ hosts: Array<{ id: string, installed: boolean, where: string, registered: boolean, valid: boolean,
- *   running: boolean, live: boolean, state: "absent"|"available"|"broken"|"restart"|"connected", configPath: string,
+ *   running: boolean, live: boolean, state: "absent"|"available"|"broken"|"checking"|"connected", configPath: string,
  *   startedAt: number }>, scannedAt: number }}
  */
 export function inspectAgentHosts({
@@ -155,7 +125,6 @@ export function inspectAgentHosts({
   hostChecks = null,
   now = Date.now(),
 } = {}) {
-  const mac = platform === "darwin";
   // Which apps are installed is installed-apps.cjs's answer, the same one
   // Open in and Tasks use (2026-10-09); this file adds whether Relay works in
   // each. The sandbox folders stand in for this computer's own apps.
@@ -173,17 +142,10 @@ export function inspectAgentHosts({
   const claudeDesktopCode = appsDir ? path.join(homeDir, "Library", "Application Support", "Claude", "claude-code") : installed.claudeAppCode;
 
   // Registrations, from the same files setup writes.
-  const desktopDirs = mac || platform === "win32"
-    ? claudeDesktopConfigDirs({ env: { ...env, HOME: homeDir }, platform, exists: (dir) => exists(dir) })
-    : [];
-  const desktopConfig = desktopDirs.length
-    ? desktopDirs.map(claudeDesktopConfigPathIn).find(exists) || claudeDesktopConfigPathIn(desktopDirs[0])
-    : claudeApp ? path.join(homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json") : "";
   const claudeCodeConfig = env.CLAUDE_CODE_CONFIG || path.join(homeDir, ".claude.json");
   const codexConfig = env.CODEX_CONFIG || path.join(env.CODEX_HOME || path.join(homeDir, ".codex"), "config.toml");
   let codexText = "";
   try { codexText = fs.readFileSync(codexConfig, "utf8"); } catch {}
-  const desktopEntry = desktopConfig ? jsonRelayEntry(desktopConfig) : null;
   const codeEntry = jsonRelayEntry(claudeCodeConfig);
   const codexEntry = tomlRelayEntry(codexText);
 
@@ -234,7 +196,6 @@ export function inspectAgentHosts({
     }
   }
 
-  const desktopValid = entryValidity(desktopEntry).valid;
   const codeValid = entryValidity(codeEntry).valid;
   const codexValid = entryValidity(codexEntry).valid;
 
@@ -243,29 +204,15 @@ export function inspectAgentHosts({
   const conductorMain = mainOf(conductorApp);
 
   const hosts = [];
-  // THE CLAUDE APP. Chats and Cowork read claude_desktop_config.json at launch.
+  // THE CLAUDE APP. Its chats use Relay's hosted connector: whether this
+  // account has it is the server's answer, which the pill adds
+  // (agent-connections.cjs). A local Relay bridge under the app (an entry an
+  // older Relay wrote, until an update takes it out) is not that answer.
   {
     const installed = Boolean(claudeApp);
-    const running = Boolean(claudeMain);
-    const startedAt = claudeMain?.startedAt || 0;
-    let state = !installed ? "absent" : !desktopEntry ? "available" : !desktopValid ? "broken" : "connected";
-    let stoppedAfterStart = false;
-    if (state === "connected" && running && !live.has("claude-app")) {
-      const log = claudeRelayLog(tail(path.join(homeDir, "Library", "Logs", "Claude", "mcp.log")), startedAt);
-      // Claude starts every server it knows at launch and keeps it running,
-      // so a registration with no Relay bridge under the app and no start in
-      // its log since launch is one it has not loaded. (Its config file's
-      // date says nothing: Claude rewrites that file itself all the time.)
-      // Started, then stopped (a Relay update restarts its service, and the
-      // Claude app never starts a server twice): a restart brings it back.
-      // Failed without ever starting since launch: the registration itself
-      // is the problem.
-      if (log.failed > log.started && !log.started) state = "broken";
-      else if (log.failed > log.started) { state = "restart"; stoppedAfterStart = true; }
-      else if (!log.started && now - startedAt > CLAUDE_STARTUP_GRACE_MS) state = "restart";
-    }
-    hosts.push({ id: "claude-app", installed, where: claudeApp, registered: Boolean(desktopEntry), valid: desktopValid,
-      running, live: live.has("claude-app"), state, stopped: state === "restart" && stoppedAfterStart, configPath: desktopConfig, startedAt, pid: claudeMain?.pid || 0 });
+    hosts.push({ id: "claude-app", installed, where: claudeApp, via: "connector", registered: false, valid: false,
+      running: Boolean(claudeMain), live: false, state: installed ? "checking" : "absent", configPath: "",
+      startedAt: claudeMain?.startedAt || 0, pid: claudeMain?.pid || 0 });
   }
   // THE CHATGPT APP, which is also Codex's desktop app: ~/.codex/config.toml.
   {
@@ -306,11 +253,10 @@ export function inspectAgentHosts({
   // there since. Past tool calls and the API refusing Relay's tools are kept
   // underneath as the evidence; the person never has to read them.
   const conductorBin = (name) => path.join(homeDir, "Library", "Application Support", "com.conductor.app", "bin", name);
-  const claudeHost = hosts[0];
   const code = { registered: Boolean(codeEntry), valid: codeValid };
   const codex = { registered: Boolean(codexEntry), valid: codexValid };
   const defs = {
-    "claude-chat": { installed: Boolean(claudeApp), registered: Boolean(desktopEntry), valid: desktopValid, host: "claude-app" },
+    "claude-chat": { installed: Boolean(claudeApp), host: "claude-app" },
     "claude-code:app": { installed: exists(claudeDesktopCode), ...code, host: "claude-code" },
     "claude-code:terminal": { installed: Boolean(claudeCli), ...code, host: "claude-code" },
     "claude-code:conductor": { installed: Boolean(conductorApp) && exists(conductorBin("claude")), ...code, host: "conductor" },
@@ -331,15 +277,16 @@ export function inspectAgentHosts({
     let action = "";
     let reason = "";
     if (!def.installed) { connected = false; }
+    // The Claude app's chats: the account's connector decides, on the server
+    // (agent-connections.cjs). Not known here, so never a guess either way.
+    else if (place === "claude-chat") { connected = null; }
     else if (!def.registered) { action = "connect"; }
     else if (!def.valid) { action = "fix"; reason = "registration_missing_files"; }
-    else if (place === "claude-chat" && claudeHost.state === "restart") { action = "restart"; reason = claudeHost.stopped ? "stopped" : "not_loaded"; }
-    else if (place === "claude-chat" && claudeHost.state === "broken") { action = "fix"; reason = "failed_to_start"; }
     else if (check?.ok === false) { action = "fix"; reason = check.reason || "app_check_failed"; }
     // Measured: Claude Code 2.1.156's API refused Relay's tool list; nothing
     // Relay can rewrite fixes an old app, so the words say what will.
     else if (refusedAt > usedAt) { reason = "app_too_old"; }
-    else if (check?.ok === true || (place === "claude-chat" && claudeHost.state === "connected")) { connected = true; }
+    else if (check?.ok === true) { connected = true; }
     // The app has not answered yet: a Relay call in a session open right now
     // is proof enough; otherwise wait rather than guess.
     else if (livePlaces.has(place) && usedAt > 0 && usedAt >= livePlaces.get(place) - 60_000) { connected = true; }

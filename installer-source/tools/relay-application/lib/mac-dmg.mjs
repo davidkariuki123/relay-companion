@@ -1,6 +1,6 @@
 // The Mac installer disk image: a volume named "Install Relay" whose Finder
-// window shows one large Relay icon on a picture that says "Install Relay" and
-// "Double-click to install". There is no Applications folder and no arrow:
+// window shows one large Relay icon set into a sentence on the picture,
+// "Double-click [Relay] to install." There is no Applications folder and no arrow:
 // dragging is a file copy that never opens Relay (founder, 0.1.624, 2026-10-10),
 // while double-clicking opens Relay, which moves itself into Applications,
 // ejects this volume and carries straight on into setup (app/main.cjs). Finder
@@ -15,7 +15,8 @@
 // nothing that looks for /Applications/Relay.app finds it; the updater archive
 // and the install proofs name Relay.app too. A label cannot be set any other
 // way (.DS_Store has no display-name record, and a localized bundle name would
-// rename the installed app as well), so the picture carries the words.
+// rename the installed app as well), so the picture carries the words, and
+// Finder's own "Relay" under the icon finishes the sentence.
 //
 // Everything here is plain Node with no native modules and no Finder
 // scripting, so it runs headless on a hosted runner and gives the same layout
@@ -40,13 +41,17 @@ export const BACKGROUND_NAME = "background.tiff";
 export const DMG_VOLUME_NAME = "Install Relay";
 export const PREVIEW_DMG_VOLUME_NAME = "Relay Migration Preview";
 export const dmgVolumeName = ({ preview = false } = {}) => preview ? PREVIEW_DMG_VOLUME_NAME : DMG_VOLUME_NAME;
-// The words on the picture (render-dmg-background.mjs draws them).
+// The words on the picture (render-dmg-background.mjs draws them): a small
+// eyebrow, the sentence either side of the icon, and one plain note.
 export const DMG_TEXT = Object.freeze({
-  title: "Install Relay",
-  caption: "Double-click to install. Relay opens and finishes setting up.",
+  eyebrow: "Install Relay",
+  lead: "Double-click",
+  trail: "to install.",
+  note: "It moves itself into Applications and opens. There\u2019s nothing to drag.",
 });
-// Window content is the picture's size. Icon positions are icon centres in
-// the window's content coordinates, as Finder stores them.
+// WindowBounds is the whole window, so Finder shows the picture's top 640 x 368
+// under its 32 pt title bar and the bottom 32 pt never appear. Icon positions
+// are icon centres in the window's content coordinates, as Finder stores them.
 export const DMG_LAYOUT = Object.freeze({
   window: Object.freeze({ x: 200, y: 120, width: 640, height: 400 }),
   iconSize: 160,
@@ -54,10 +59,11 @@ export const DMG_LAYOUT = Object.freeze({
   // The picture's own paper colour (#faf9f5), behind anything it leaves bare.
   backgroundColor: Object.freeze([0xfa / 255, 0xf9 / 255, 0xf5 / 255]),
   // Finder draws the name this far below the icon centre (macOS 26, 160 pt
-  // icon, 13 pt text). The picture sets a plate there; see the renderer.
+  // icon, 13 pt text): black, in light and dark mode alike, because the
+  // window has a picture (see the renderer).
   labelOffset: 100,
-  // The one icon, centred under the title.
-  app: Object.freeze({ x: 320, y: 226 }),
+  // The one icon, centred, standing in the sentence's line.
+  app: Object.freeze({ x: 320, y: 168 }),
   filesystem: "HFS+",
 });
 
