@@ -187,14 +187,16 @@ test("the shipped MCP catalog is send · receive · open: no native-session reac
     "relay_chats_list", "relay_chat_fetch", "relay_chat_send", "relay_message_edit", "relay_message_delete", "relay_mark_read",
     "relay_inbox_delete", "relay_recently_deleted_list", "relay_recently_deleted_restore", "relay_files_fetch", "relay_file_download",
     "relay_settings",
+    // First-run onboarding, for every new account (2026-10-10).
+    "relay_onboarding_current", "relay_onboarding_recent_work", "relay_onboarding_ideas", "relay_onboarding_wait_pick",
   ]);
   // A developer on production gets the same catalog as every ordinary user.
   const productionDeveloper = productFeatures({ env: {}, user: DEVELOPER });
   assert.deepEqual(toolsForAccount(productionDeveloper).map((tool) => tool.name), ordinary);
   // The complete catalog requires the role and the dev channel together.
   const developer = productFeatures({ env: { RELAY_UPDATE_CHANNEL: "dev" }, user: DEVELOPER });
-  assert.equal(toolsForAccount(developer).length, 47);
-  assert.equal(toolsForAccount({ ...developer, orgAdmin: true }).length, 51);
+  assert.equal(toolsForAccount(developer).length, 51);
+  assert.equal(toolsForAccount({ ...developer, orgAdmin: true }).length, 55);
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_task_unclaim"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_edit"));
   assert.ok(toolsForAccount(developer).some((tool) => tool.name === "relay_message_delete"));

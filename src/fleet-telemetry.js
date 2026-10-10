@@ -46,12 +46,21 @@ function failureTelemetry(updateState) {
     const value = updateState?.[slot];
     const count = Number(value?.count);
     if (!value || !Number.isFinite(count) || count <= 0) continue;
+    // A superseded recovery keeps its episode key (the stuck candidate) and says
+    // which release it is actually trying, so the fleet sees "0.1.510 via 0.1.624"
+    // rather than four weeks of an apparently identical retry.
+    const launched = typeof value.launched === "string" ? value.launched.trim() : "";
+    const target = String(value.target || "").trim();
+    const exhaustedAt = isoFromMillis(value.exhaustedAt);
     failures.push({
       kind,
-      target: String(value.target || "").trim().slice(0, 80),
+      target: (launched && !target.endsWith(`:${launched}`) ? `${target} via ${launched}` : target).slice(0, 80),
       count: Math.min(1_000_000, Math.floor(count)),
       firstAt: isoFromMillis(value.firstAt),
       lastAt: isoFromMillis(value.lastAt),
+      // Only a parked recovery reports this, so an API that predates the field
+      // rejects nothing but the reports of machines that have already given up.
+      ...(exhaustedAt ? { exhaustedAt } : {}),
     });
   }
   return failures;

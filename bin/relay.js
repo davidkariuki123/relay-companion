@@ -974,7 +974,11 @@ async function cmdDoctor(flags = {}) {
   }
   for (const record of canonicalFailures) {
     const since = record.firstAt ? new Date(Number(record.firstAt)).toISOString() : "unknown";
-    console.log(`  CANONICAL ${record.label.toUpperCase()} FAILING: ${record.count} attempt(s) at ${record.target} since ${since}`);
+    const via = record.launched && !record.target.endsWith(`:${record.launched}`) ? ` (now trying ${record.launched})` : "";
+    console.log(`  CANONICAL ${record.label.toUpperCase()} FAILING: ${record.count} attempt(s) at ${record.target}${via} since ${since}`);
+    if (record.exhaustedAt) {
+      console.log(`    automatic retries parked since ${new Date(record.exhaustedAt).toISOString()}; a newer release or \`relay update\` retries now`);
+    }
     console.log(`    cause: see ${updateLogPath}`);
   }
   // The canonical runtime itself: pointer state, disk footprint, live workers, and
@@ -1322,7 +1326,21 @@ async function main() {
     case "onboarding": {
       const [operation, ...args] = rest;
       const value = flag => args[args.indexOf(flag) + 1];
-      if (!["start", "status", "ready"].includes(operation) || !args.includes("--run")) throw new Error("Use onboarding start|status|ready --run RUN_ID");
+      // The first-Relay tools without MCP: the same handlers, on this
+      // computer's setup files. ideas reads {"ideas":[...]} on stdin.
+      const firstRelay = { current: "relay_onboarding_current", "recent-work": "relay_onboarding_recent_work", ideas: "relay_onboarding_ideas", "wait-pick": "relay_onboarding_wait_pick" }[operation];
+      if (firstRelay) {
+        const { firstRelayOnboardingCall } = await import("../src/mcp.js");
+        let input = {};
+        if (operation === "ideas") {
+          let raw = "";
+          for await (const chunk of process.stdin) raw += chunk;
+          input = JSON.parse(raw || "{}");
+        }
+        const result = await firstRelayOnboardingCall(new RelayClient(), firstRelay, input, { sessionContext: { sourceHost: "relay-agent-protocol" } });
+        console.log(JSON.stringify(result, null, 2)); return;
+      }
+      if (!["start", "status", "ready"].includes(operation) || !args.includes("--run")) throw new Error("Use onboarding current|recent-work|ideas|wait-pick, or onboarding start|status|ready --run RUN_ID");
       const { callDesktopOnboarding } = await import("../src/desktop-onboarding-bridge.js");
       const identity = operation === "ready" ? await new RelayClient().me() : null;
       const result = await callDesktopOnboarding({ directory: path.dirname(configPath()), operation, run: value("--run"),

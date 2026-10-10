@@ -1500,6 +1500,8 @@ const RELAY_CLAUDE_TOPIC_POLICY_TOOLS = [
   // The API enforces a one-time account grant before either Topic write.
   "mcp__relay__relay_topic_post",
   "mcp__relay__relay_topic_edit",
+  // Shows first-run ideas in this computer's Relay app; it sends nothing.
+  "mcp__relay__relay_onboarding_ideas",
 ];
 
 const RELAY_CLAUDE_ALLOWED_TOOLS = [
@@ -2071,7 +2073,9 @@ export function codexRelayMcpTomlSection(
   ].join("\n");
 }
 
-const RELAY_CODEX_TOPIC_TOOL_POLICY = ["relay_topic_post", "relay_topic_edit"];
+// relay_onboarding_ideas only shows first-run ideas in this computer's Relay
+// app; a host prompt before it would interrupt the person's first minute.
+const RELAY_CODEX_TOPIC_TOOL_POLICY = ["relay_topic_post", "relay_topic_edit", "relay_onboarding_ideas"];
 
 function withCodexTopicToolPolicy(config) {
   let next = config;
@@ -3467,6 +3471,30 @@ export function ensureWindowsAutostartTasks({
   return { attempted: true, missing, shortcutMissing, ok: Boolean(result.ok), result };
 }
 
+/**
+ * Which tree supplies the independent recovery bundle a repair installs.
+ *
+ * Normally the tree being registered. A rollback, though, runs the FAILED
+ * candidate's `repair-runtime --target-bin <previous>` to restore an older
+ * runtime, and releases before 0.1.510 ship no recovery engine at all
+ * (`bootstrap/recovery-runner.cjs` is missing). Copying that tree's bootstrap
+ * produced a bundle whose self-check could never pass, so every rollback to a
+ * 0.1.490 runtime failed with `recovery-bundle-verification-failed` and the
+ * journal stayed `recovery-required` (two Macs retried hourly from 2026-09-13
+ * to 2026-10-10, 640+ attempts each). The running tree carries a verified
+ * engine; the recovery launcher is independent of the runtime it watches, so
+ * a newer engine guarding an older runtime is the intended shape (see
+ * installRecovery's "old rollback repairs through the newer engine").
+ */
+export function recoveryBundleSourceRoot(bin, {
+  ownPackageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+  existsSync = fs.existsSync,
+} = {}) {
+  const targetRoot = path.resolve(path.dirname(bin), "..");
+  if (existsSync(path.join(targetRoot, "bootstrap", "recovery-runner.cjs"))) return targetRoot;
+  return ownPackageRoot;
+}
+
 export function repairDesktopSurfaces({
   bin = relayBinPath(),
   node = stableNodePath(),
@@ -3511,7 +3539,7 @@ export function repairDesktopSurfaces({
     return { ok: false, daemon: failure, pill: failure, updateAgents };
   }
   lease.assert();
-  const recovery = recoveryInstaller({ packageRoot: path.resolve(path.dirname(bin), ".."), node, platform, runCommand, reload, homeDir });
+  const recovery = recoveryInstaller({ packageRoot: recoveryBundleSourceRoot(bin), node, platform, runCommand, reload, homeDir });
   if (!recovery.ok) return { ok: false, daemon: recovery, pill: recovery, recovery };
   lease.assert();
   const pill = installPillAutostart(bin, { platform, runCommand, reload, homeDir, claim, node, env });

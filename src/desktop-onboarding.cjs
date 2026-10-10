@@ -34,7 +34,7 @@ function reduce(state, event) {
   }
   const stage = transitions[state.stage][event.type];
   if (!stage) throw new Error(`Cannot ${event.type} from ${state.stage}`);
-  if (event.type === "AGENT_STARTED" && (event.guideVersion !== GUIDE_VERSION || !["codex", "claude_code"].includes(event.host))) throw new Error("Read the current local guide with Claude Code or Codex");
+  if (event.type === "AGENT_STARTED" && (event.guideVersion !== GUIDE_VERSION || !["codex", "claude_code", "conductor"].includes(event.host))) throw new Error("Read the current local guide with Claude Code or Codex");
   if (event.type === "ACCOUNT_SAVED" && !event.accountId) throw new Error("Missing verified account");
   const finishingUnstarted = event.type === "COMPLETED" && state.stage === "prompt" && !state.accountId && Boolean(event.accountId);
   if (["HOST_VERIFIED", "SEND_CONFIRMED", "LINK_CREATED", "COMPLETED"].includes(event.type) && !finishingUnstarted

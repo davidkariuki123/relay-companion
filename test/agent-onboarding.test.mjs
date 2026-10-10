@@ -93,9 +93,10 @@ test("local agents open with their own scheme only when the app is here", async 
   const h = harness({ schemes: { "codex://": "Codex" } });
   const key = "user:usr_alex";
   h.onboarding.choose(key, "codex");
-  assert.deepEqual(h.onboarding.snapshot(key).openable, { "claude-code": false, codex: true, claudeApp: false });
-  await h.onboarding.open(key, "Help me connect the Relay app");
-  assert.equal(h.opened[0], `codex://threads/new?prompt=${encodeURIComponent("Help me connect the Relay app")}`);
+  assert.deepEqual(h.onboarding.snapshot(key).openable, { "claude-code": false, codex: true, conductor: false, claudeApp: false });
+  await h.onboarding.open(key, "Set up Relay with me.");
+  assert.equal(h.opened[0], `codex://threads/new?prompt=${encodeURIComponent("Set up Relay with me.")}`);
+  assert.equal(h.copied.at(-1), "Set up Relay with me.");
   h.onboarding.choose(key, "claude-code");
   await assert.rejects(() => h.onboarding.open(key, "prompt"), /Copy the prompt/);
   h.onboarding.markConnected(key);

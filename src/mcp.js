@@ -18,8 +18,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { RelayClient } from "./client.js";
 import { CHAT_READ_TOOLS, recordReadTiming, withReadContext } from "./read-context.js";
 import { accountDriftMessage } from "./account.js";
-import { apiUrl, readConfig } from "./config.js";
-import { storeDir } from "./host-paths.js";
+import fs from "node:fs";
+import path from "node:path";
+import { apiUrl, configDir, readConfig } from "./config.js";
+import { claudeProjectsDir, codexHome, codexStateDbPath, storeDir } from "./host-paths.js";
 import { createHostWitness } from "./host-evidence.js";
 import { resolveAccountProductFeatures, retryAccountProductFeatures } from "./product-features.js";
 import { recordOutboundTaskOrigin } from "./task-completion-wake.js";
@@ -196,6 +198,55 @@ async function relaySettingsCall(client, args, { features, sessionContext }) {
     };
   }
   return { ...result, agentInstruction: `Agents cannot change this. Tell the person they can do it in the Relay app under ${result.where}.` };
+}
+
+// YOUR FIRST RELAY (2026-10-10): the four local onboarding tools. The account
+// is the one this session is bound to; a setup begun for another account on
+// this computer is not this session's.
+function firstRelayIdeasStore() {
+  const { createFirstRelayIdeas } = require("./first-relay-ideas.cjs");
+  return createFirstRelayIdeas({ directory: configDir() });
+}
+function updateDrainStarted() {
+  try {
+    const drain = path.join(configDir(), "recovery", "activity", "drain.json");
+    const pid = Number(JSON.parse(fs.readFileSync(drain, "utf8"))?.pid);
+    if (!Number.isSafeInteger(pid) || pid < 1) return false;
+    process.kill(pid, 0);
+    return true;
+  } catch (error) { return error?.code === "EPERM"; }
+}
+export async function firstRelayOnboardingCall(client, name, args = {}, { sessionContext = DEFAULT_MCP_SESSION_CONTEXT, signal, store = firstRelayIdeasStore(), readRecentWork = defaultRecentWork } = {}) {
+  const accountId = client?.identity?.userId || "";
+  if (name === "relay_onboarding_current") return store.current({ accountId });
+  if (name === "relay_onboarding_recent_work") {
+    const setup = store.current({ accountId });
+    if (!setup.active) return { items: [], agentInstruction: setup.agentInstruction };
+    const work = readRecentWork();
+    return {
+      ...work,
+      agentInstruction: work.items.length
+        ? "Use these only to suggest four first Relays the person would want to send someone this week. Do not recite this list or open the files it names."
+        : "Nothing recent was found. Suggest four first Relays from the project folder you are in, or four general ones.",
+    };
+  }
+  if (name === "relay_onboarding_ideas") {
+    const state = store.setIdeas(args.ideas, { accountId });
+    return {
+      shown: true,
+      ideas: state.ideas.map(({ id, title }) => ({ id, title })),
+      agentInstruction: "The four ideas are in the Relay app. In your reply, first explain Relay in one or two sentences, then say the ideas are in Relay and to pick one there. Then call relay_onboarding_wait_pick.",
+    };
+  }
+  // The protocol helper reaches this through the daemon, whose call budget is
+  // shorter than an MCP host's.
+  const viaHelper = sessionContext?.sourceHost === "relay-agent-protocol";
+  const { WAIT_MAX_MS, HELPER_WAIT_MAX_MS } = require("./first-relay-ideas.cjs");
+  return store.waitForPick({ accountId, timeoutMs: viaHelper ? HELPER_WAIT_MAX_MS : WAIT_MAX_MS, signal, shouldYield: updateDrainStarted });
+}
+function defaultRecentWork() {
+  const { recentWork } = require("./recent-work.cjs");
+  return recentWork({ codexHome: codexHome(), codexStateDb: codexStateDbPath(), claudeProjectsDir: claudeProjectsDir() });
 }
 
 // With milestone Relays off, the catalog stops inviting the unasked mint:
@@ -1259,6 +1310,58 @@ export const TOOLS = [
       required: ["action"],
     },
   },
+  // YOUR FIRST RELAY (2026-10-10). The Relay app opens the person's AI with
+  // "Set up Relay with me." after it has connected their account itself; these
+  // four tools are that whole first-run conversation, all local to this
+  // computer (src/first-relay-ideas.cjs, src/recent-work.cjs).
+  {
+    name: "relay_onboarding_current",
+    description:
+      "Call first when the person asks to set up Relay or to start their first Relay. Returns the first-Relay setup the Relay app has waiting on this computer: whether one is active, who the first Relay can go to (an inviter, an organisation, or nobody yet), and any ideas or pick so far. The Relay app has already connected the account, so nothing is installed, signed in or approved here. When active is false, help the person with Relay as usual.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "relay_onboarding_recent_work",
+    description:
+      "During the first-Relay setup only: what the person worked on in the last week, read on this computer to suggest a first Relay. Returns, newest first, the title and first ask of their recent Codex threads and Claude Code sessions with the project folder's name, short and capped. Read-only; it never returns file contents or replies. Use it only to suggest ideas, and do not recite it back.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "relay_onboarding_ideas",
+    description:
+      "During the first-Relay setup only: show exactly four ideas for the person's first Relay in the Relay app, where they pick one. Each idea is something they would want to send someone this week, with a prompt you can act on from what you know now. Shows them on this computer only; sends nothing to anyone. Refuses an idea that is too long and names it, so shorten and call again with all four. Then call relay_onboarding_wait_pick.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ideas: {
+          type: "array",
+          minItems: 4,
+          maxItems: 4,
+          description: "Exactly four ideas.",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "At most six words, e.g. 'Review the pricing page copy'." },
+              line: { type: "string", description: "At most nine words saying what the Relay asks or tells." },
+              kind: { type: "string", enum: ["review", "answer", "handoff", "update"], description: "review asks for feedback, answer asks a question, handoff passes work on, update tells news." },
+              prompt: { type: "string", description: "The full request you would act on if they pick this idea, in the person's voice, e.g. 'Make me a Relay asking Sam to review the pricing page copy we rewrote today…'." },
+              recipientName: { type: "string", description: "Who it is for, when the idea names someone." },
+            },
+            required: ["title", "line", "kind", "prompt"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["ideas"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "relay_onboarding_wait_pick",
+    description:
+      "During the first-Relay setup only, after relay_onboarding_ideas: wait for the person to pick one of the ideas in the Relay app. Returns { picked } when they tap one, or { waiting: true } after about four minutes; call it again until they pick. Reads only this computer's setup and tells the Relay app an AI is waiting.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
 ].map((tool) => READ_ONLY_RELAY_TOOL_NAMES.has(tool.name)
   ? { ...tool, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } }
   : ["relay_topic_post", "relay_topic_edit"].includes(tool.name)
@@ -1268,6 +1371,11 @@ export const TOOLS = [
 export const ORDINARY_RELAY_TOOL_NAMES = new Set([
   // The person's own Relay settings, for every account.
   "relay_settings",
+  // The first-run conversation every new account has (first-relay-ideas.cjs).
+  "relay_onboarding_current",
+  "relay_onboarding_recent_work",
+  "relay_onboarding_ideas",
+  "relay_onboarding_wait_pick",
   "relay_file_download",
   "relay_files_fetch",
   "relay_send",
@@ -2241,6 +2349,9 @@ export function relayCallErrorResult(err) {
 }
 
 export async function handleCall(client, name, args, options = {}) {
+  // Waiting for a tap in the pill holds no work an update could interrupt, so
+  // it never keeps an update waiting; it also returns as soon as one starts.
+  if (name === "relay_onboarding_wait_pick") return handleAdmittedCall(client, name, args, options);
   const release = require("../bootstrap/update-activity.cjs").beginCall();
   try {
     const run = () => handleAdmittedCall(client, name, args, options);
@@ -2253,6 +2364,7 @@ async function handleAdmittedCall(client, name, args, {
   features = { requests: true },
   sessionContext = DEFAULT_MCP_SESSION_CONTEXT,
   recordTaskOrigin = recordOutboundTaskOrigin,
+  signal,
 } = {}) {
   if (ORG_ADMIN_TOOLS.has(name) && features.orgAdmin !== true) throw new Error("Organisation onboarding is available only to Relay staff.");
   if (
@@ -2579,6 +2691,11 @@ async function handleAdmittedCall(client, name, args, {
     case "relay_settings": {
       return text(await relaySettingsCall(client, args, { features, sessionContext }));
     }
+    case "relay_onboarding_current":
+    case "relay_onboarding_recent_work":
+    case "relay_onboarding_ideas":
+    case "relay_onboarding_wait_pick":
+      return text(await firstRelayOnboardingCall(client, name, args, { sessionContext, signal }));
     case "relay_share_link": {
       const action = String(args.action || "mint").trim().toLowerCase();
       if (!["mint", "revoke"].includes(action)) {

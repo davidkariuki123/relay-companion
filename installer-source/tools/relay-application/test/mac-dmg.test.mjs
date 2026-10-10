@@ -4,22 +4,33 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
-import { DMG_LAYOUT, DMG_BACKGROUND, BACKGROUND_DIRECTORY, BACKGROUND_NAME, binaryPlist, parseBinaryPlist, real,
-  aliasRecord, parseAlias, dsStore, readDsStore, finderRecords, buildMacDmg, assertVolumeLayout } from "../lib/mac-dmg.mjs";
+import { DMG_LAYOUT, DMG_BACKGROUND, DMG_VOLUME_NAME, PREVIEW_DMG_VOLUME_NAME, DMG_TEXT, dmgVolumeName, BACKGROUND_DIRECTORY, BACKGROUND_NAME,
+  binaryPlist, parseBinaryPlist, real, aliasRecord, parseAlias, dsStore, readDsStore, finderRecords, buildMacDmg, assertVolumeLayout } from "../lib/mac-dmg.mjs";
 
-const alias = () => aliasRecord({ volumeName: "Relay", volumeCreated: new Date("2026-10-08T10:00:00Z"), mountPoint: "/Volumes/Relay",
+const alias = () => aliasRecord({ volumeName: DMG_VOLUME_NAME, volumeCreated: new Date("2026-10-08T10:00:00Z"), mountPoint: "/Volumes/Install Relay",
   relativePath: `${BACKGROUND_DIRECTORY}/${BACKGROUND_NAME}`, fileCreated: new Date("2026-10-08T10:00:01Z"), cnid: 634, parentCnid: 633, cnidPath: [633] });
 
-test("the install window puts Relay on the left, Applications on the right, at 128 points in a 640 x 400 window", () => {
-  const { window, app, applications, iconSize } = DMG_LAYOUT;
+// Founder, 0.1.624 on a real Mac (2026-10-10): the window said "Drag Relay to
+// Applications", the drag copied the app, and then nothing opened.
+test("the install window is one large Relay icon in the middle of a 640 x 400 window, with nothing to drag it onto", () => {
+  const { window, app, iconSize } = DMG_LAYOUT;
   assert.deepEqual([window.width, window.height], [640, 400]);
-  assert.equal(iconSize, 128);
-  assert.equal(app.y, applications.y, "one row");
-  assert.ok(app.x < window.width / 2 && applications.x > window.width / 2, "app left, Applications right");
-  for (const { x, y } of [app, applications]) {
-    assert.ok(x - iconSize / 2 >= 0 && x + iconSize / 2 <= window.width, "icon inside the window");
-    assert.ok(y + DMG_LAYOUT.labelOffset + 12 <= window.height - 32, "name inside the content below a title bar");
-  }
+  assert.ok(iconSize >= 160, "one large icon");
+  assert.equal(app.x, window.width / 2, "centred");
+  assert.equal(DMG_LAYOUT.applications, undefined, "no Applications folder");
+  assert.ok(app.x - iconSize / 2 >= 0 && app.x + iconSize / 2 <= window.width, "icon inside the window");
+  assert.ok(app.y - iconSize / 2 >= 132, "icon below the title and caption");
+  assert.ok(app.y + DMG_LAYOUT.labelOffset + 12 <= window.height - 32, "name inside the content below a title bar");
+  const records = finderRecords({ backgroundAlias: alias() });
+  assert.deepEqual(records.filter(record => record.code === "Iloc").map(record => record.name), ["Relay.app"]);
+});
+
+test("the volume is called Install Relay, previews keep their own name, and the picture says double-click", () => {
+  assert.equal(DMG_VOLUME_NAME, "Install Relay");
+  assert.equal(dmgVolumeName(), "Install Relay");
+  assert.equal(dmgVolumeName({ preview: true }), PREVIEW_DMG_VOLUME_NAME);
+  assert.equal(PREVIEW_DMG_VOLUME_NAME, "Relay Migration Preview");
+  assert.deepEqual({ ...DMG_TEXT }, { title: "Install Relay", caption: "Double-click to install. Relay opens and finishes setting up." });
 });
 
 // Read every image directory in a (big-endian or little-endian) TIFF.
@@ -77,14 +88,14 @@ test("binary property lists round-trip, and macOS reads them the same way", () =
 test("the background alias names the volume, the folder and the picture by name, id and path", () => {
   const bytes = alias();
   const parsed = parseAlias(bytes);
-  assert.equal(parsed.volumeName, "Relay");
+  assert.equal(parsed.volumeName, "Install Relay");
   assert.equal(parsed.filename, BACKGROUND_NAME);
   assert.equal(parsed.fsType, "H+");
   assert.equal(parsed.posixPath, "/.background/background.tiff");
-  assert.equal(parsed.carbonPath, "Relay:.background:background.tiff");
+  assert.equal(parsed.carbonPath, "Install Relay:.background:background.tiff");
   assert.equal(parsed.tags[0].toString(), ".background");
   assert.equal(parsed.tags[1].readUInt32BE(0), 633);
-  assert.equal(parsed.tags[19].toString(), "/Volumes/Relay");
+  assert.equal(parsed.tags[19].toString(), "/Volumes/Install Relay");
   assert.equal(bytes.readUInt32BE(46), 633, "parent folder id");
   assert.equal(bytes.readUInt32BE(114), 634, "file id");
   assert.equal(bytes.readUInt32BE(38), Math.floor(Date.parse("2026-10-08T10:00:00Z") / 1000) + 2_082_844_800, "volume date in Mac time");
@@ -99,7 +110,7 @@ test(".DS_Store is a valid buddy-allocated tree Finder can read, and the same in
   assert.equal(file.readUInt32BE(0), 1);
   assert.equal(file.toString("ascii", 4, 8), "Bud1");
   const read = readDsStore(file);
-  assert.deepEqual(read.map(record => `${record.name}/${record.code}`), [".:bwsp", ".:icvp", ".:vSrn", ".:vstl", "Applications:Iloc", "Relay.app:Iloc"].map(name => name.replace(":", "/")));
+  assert.deepEqual(read.map(record => `${record.name}/${record.code}`), [".:bwsp", ".:icvp", ".:vSrn", ".:vstl", "Relay.app:Iloc"].map(name => name.replace(":", "/")));
   // Every byte of the 2 GiB address space is either one allocated block or on
   // exactly one free list, as the allocator requires.
   const infoAt = 4 + file.readUInt32BE(8);
@@ -121,7 +132,7 @@ test(".DS_Store is a valid buddy-allocated tree Finder can read, and the same in
   for (const [offset, size] of blocks) assert.ok(4 + offset + size <= file.length);
 });
 
-test("built image opens to the install layout", { skip: process.platform !== "darwin" && "needs macOS hdiutil" }, (t) => {
+test("built image opens to the one-icon install window", { skip: process.platform !== "darwin" && "needs macOS hdiutil" }, (t) => {
   const work = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "relay-dmg-test-"));
   const mount = path.join(work, "mount");
   t.after(() => {
@@ -132,15 +143,18 @@ test("built image opens to the install layout", { skip: process.platform !== "da
   fs.mkdirSync(path.join(app, "Contents/MacOS"), { recursive: true });
   fs.writeFileSync(path.join(app, "Contents/Info.plist"), "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>CFBundleName</key><string>Relay</string></dict></plist>");
   const dmg = path.join(work, "Relay.dmg");
-  buildMacDmg({ app, output: dmg, volumeName: "Relay", temporary: work });
+  buildMacDmg({ app, output: dmg, temporary: work });
   const info = spawnSync("/usr/bin/hdiutil", ["imageinfo", dmg], { encoding: "utf8" });
   assert.match(info.stdout, /UDZO|read-only compressed/);
   fs.mkdirSync(mount);
   const attach = spawnSync("/usr/bin/hdiutil", ["attach", dmg, "-readonly", "-nobrowse", "-noautoopen", "-mountpoint", mount], { encoding: "utf8" });
   assert.equal(attach.status, 0, attach.stderr);
   try {
-    const found = assertVolumeLayout(mount, { volumeName: "Relay" });
+    const found = assertVolumeLayout(mount);
+    assert.equal(found.alias.volumeName, "Install Relay");
     assert.equal(found.icvp.textSize, DMG_LAYOUT.textSize);
-    assert.deepEqual(fs.readdirSync(mount).filter(name => !name.startsWith(".")).sort(), ["Applications", "Relay.app"]);
+    assert.deepEqual(fs.readdirSync(mount).filter(name => !name.startsWith(".")).sort(), ["Relay.app"]);
+    // The gate holds the image to the new volume name, not the old one.
+    assert.throws(() => assertVolumeLayout(mount, { volumeName: "Relay" }));
   } finally { spawnSync("/usr/bin/hdiutil", ["detach", mount]); }
 });

@@ -1,6 +1,8 @@
 // Run only on a disposable public GitHub Mac. The downloaded application is
-// never patched. CDP observes the renderer and sends ordinary mouse input;
-// relocation, relaunch and activation execute through the shipped UI.
+// never patched. Opened from its disk image, the shipped app installs itself
+// (no drag, no button: founder, 0.1.624, 2026-10-10), so CDP only observes the
+// renderer and sends no input; relocation, relaunch and activation all run as
+// they do for a person who double-clicks Relay in the "Install Relay" window.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -110,11 +112,8 @@ async function cdp(url) {
 }
 
 const domState = `(() => {
-  const e = document.querySelector('#install') || document.querySelector('#prepareAction');
-  const r = e?.getBoundingClientRect();
   const notice = document.querySelector('.notice');
-  return { text: document.body.innerText, notice: notice && !notice.hidden ? notice.innerText : '',
-    button: e && !e.disabled && r.width > 0 ? { x:r.x+r.width/2, y:r.y+r.height/2 } : null };
+  return { text: document.body.innerText, notice: notice && !notice.hidden ? notice.innerText : '' };
 })()`;
 
 async function installerPage(port) {
@@ -124,14 +123,10 @@ async function installerPage(port) {
   } catch { return null; }
 }
 
-export async function clickInstallButton(client, button, onReleaseSent) {
-  await client.send("Input.dispatchMouseEvent", { type: "mousePressed", ...button, button: "left", clickCount: 1 });
-  const released = client.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...button, button: "left", clickCount: 1 });
-  // A successful move can kill the renderer before Chromium acknowledges the
-  // mouse-up. Remember the sent input before awaiting that acknowledgement;
-  // the installed app and runtime postconditions remain the success authority.
-  onReleaseSent();
-  await released;
+// The window a person sees after double-clicking Relay on the disk image,
+// already moving Relay into Applications with nothing clicked.
+export function installingOnItsOwn(url, text) {
+  return typeof url === "string" && url.endsWith("/native-install.html") && /Installing Relay/.test(text || "");
 }
 
 export async function main(inputs) {
@@ -149,7 +144,7 @@ export async function main(inputs) {
   const proof = { schema: 1, ...inputs, platform, workflowSha: process.env.GITHUB_SHA,
     runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT,
     ok: false, checks: [], browserDownloadTested: false, quarantineLaunchTested: false,
-    signInTested: false, rebootTested: false, interaction: "CDP mouse input in stock signed renderer" };
+    signInTested: false, rebootTested: false, interaction: "none: the stock signed app installs itself; CDP only observes" };
   const mounts = [];
   let lastText = "", phase = "verify-download";
   const record = name => { proof.checks.push(name); console.log(`PASS ${name}`); };
@@ -194,10 +189,10 @@ export async function main(inputs) {
     const artifact = receipt.artifacts.find(item => (item.artifact || item.filename).endsWith(".dmg"));
     proof.candidateOrigin = "retained-signed-candidate";
     const target = mountVerified(path.join(directory, artifact.artifact || artifact.filename), "candidate", manifest, artifact);
-    // The signed image a person opens shows the install window: Relay left,
-    // Applications right, the background picture and a 640 x 400 window.
-    const { assertVolumeLayout } = await import(pathToFileURL(path.join(repo, "installer-source/tools/relay-application/lib/mac-dmg.mjs")));
-    assertVolumeLayout(path.dirname(target.app), { volumeName: "Relay",
+    // The signed image a person opens is the "Install Relay" window: one Relay
+    // icon, no Applications folder, the background picture, a 640 x 400 window.
+    const { assertVolumeLayout, DMG_VOLUME_NAME } = await import(pathToFileURL(path.join(repo, "installer-source/tools/relay-application/lib/mac-dmg.mjs")));
+    assertVolumeLayout(path.dirname(target.app), { volumeName: DMG_VOLUME_NAME,
       background: path.join(repo, "installer-source/tools/relay-application/lib/mac-dmg-background.tiff") });
     record("dmg-install-window-layout");
     return target;
@@ -313,7 +308,7 @@ export async function main(inputs) {
     phase = "open-installer-ui";
     run("/usr/bin/open", ["-n", "-a", target.app, "--args", `--remote-debugging-port=${port}`], { env: appEnv });
     const openedAt = Date.now(), deadline = openedAt + 8 * 60_000;
-    let clicked = false, firstHeartbeat;
+    let started = false, firstHeartbeat;
     while (Date.now() < deadline) {
       const page = await installerPage(port);
       if (page) {
@@ -321,20 +316,20 @@ export async function main(inputs) {
         try {
           client = await cdp(page.webSocketDebuggerUrl);
           const state = (await client.send("Runtime.evaluate", { expression: domState, returnByValue: true })).result?.value;
+          if (state?.notice) throw Object.assign(Error(`Installer UI: ${state.notice}`), { installerFailure: true });
+          // Recorded before anything slower: the move can close this renderer
+          // at any moment. Nothing is clicked and the preload bridge is never
+          // called; the window moves Relay into Applications by itself.
+          if (!started && installingOnItsOwn(page.url, state?.text)) {
+            started = true; phase = "relocate-and-activate";
+            record("stock-installer-ui-opened"); record("install-started-without-input");
+          }
           if (state?.text && state.text !== lastText) {
             lastText = state.text;
             fs.writeFileSync(path.join(evidence, "last-ui.txt"), lastText);
             console.log(`UI: ${lastText.slice(0, 1200)}`);
             const screenshot = await client.send("Page.captureScreenshot");
             fs.writeFileSync(path.join(evidence, "last-ui.png"), Buffer.from(screenshot.data, "base64"));
-          }
-          if (state?.notice) throw Object.assign(Error(`Installer UI: ${state.notice}`), { installerFailure: true });
-          if (!clicked && state?.button && page.url.endsWith("native-install.html")) {
-            record("stock-installer-ui-opened");
-            // Ordinary renderer input; never call the privileged preload bridge.
-            await clickInstallButton(client, state.button, () => {
-              clicked = true; phase = "relocate-and-activate"; record("install-button-input-sent");
-            });
           }
         } catch (error) {
           if (error.installerFailure) throw error;
@@ -343,7 +338,7 @@ export async function main(inputs) {
           proof.lastObserverError = error.message;
         } finally { client?.close(); }
       }
-      if (clicked && fs.existsSync(path.join(relayRoot, "runtime/current.json"))) {
+      if (started && fs.existsSync(path.join(relayRoot, "runtime/current.json"))) {
         let current, journal;
         try { current = read(path.join(relayRoot, "runtime/current.json")); journal = read(path.join(relayRoot, "application-migration.json")); }
         catch { await sleep(1500); continue; }
@@ -373,10 +368,9 @@ export async function main(inputs) {
               if (isRecovery(inputs.mode)) {
                 assert.equal(read(path.join(relayRoot, "runtime/installer-recovery.json")).state, "complete");
                 record("installer-recovery-complete");
-                // Only the DMG's install button is ever clicked, so a completed
-                // recovery is setup that started on its own. Recorded from the
-                // outcome: a fast handoff can close the setup window before any
-                // observer poll sees it.
+                // Nothing is ever clicked, so a completed recovery is setup that
+                // started on its own. Recorded from the outcome: a fast handoff
+                // can close the setup window before any observer poll sees it.
                 record("setup-started-without-input");
               }
               proof.ok = true; return proof;
@@ -384,8 +378,10 @@ export async function main(inputs) {
           }
         }
       }
-      if (!clicked && Date.now() - openedAt > 90_000) throw Error(`Installer UI could not be driven: ${lastText || proof.lastObserverError || "No renderer available"}`);
-      await sleep(1500);
+      if (!started && Date.now() - openedAt > 90_000) throw Error(`Installer UI was not seen installing: ${lastText || proof.lastObserverError || "No renderer available"}`);
+      // The window shows "Installing Relay…" for a moment before the move
+      // holds the app; look often until it has been seen.
+      await sleep(started ? 1500 : 250);
     }
     throw Error(`Timed out at ${phase}. Last UI: ${lastText || "No installer renderer available"}`);
   } catch (error) {

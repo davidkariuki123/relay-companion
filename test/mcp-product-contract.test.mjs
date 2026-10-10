@@ -62,6 +62,10 @@ const EXPECTED_TOOLS = [
   "relay_connector_request_approval",
   "relay_connector_call_tool",
   "relay_settings",
+  "relay_onboarding_current",
+  "relay_onboarding_recent_work",
+  "relay_onboarding_ideas",
+  "relay_onboarding_wait_pick",
 ];
 
 test("the complete MCP catalog has unique, internally valid model contracts", () => {

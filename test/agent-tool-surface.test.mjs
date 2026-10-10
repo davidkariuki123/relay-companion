@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createRequire } from 'node:module';
 import { createAgentToolSurface } from '../src/agent-tool-surface.js';
 import { TOOLS, toolsForAccount } from '../src/mcp.js';
 
@@ -62,13 +63,27 @@ const cases = {
   relay_connector_request_approval: [{ provider: 'test', toolName: 'write', approvalSummary: 'Write one item', idempotencyKey: key }, 'requestToolApproval'],
   relay_connector_call_tool: [{ provider: 'test', toolName: 'read', arguments: {}, idempotencyKey: key }, 'callTool'],
   relay_settings: [{ action: 'list' }, null],
+  // First-run onboarding reads and writes only this computer's setup file.
+  relay_onboarding_current: [{}, null],
+  relay_onboarding_recent_work: [{}, null],
+  relay_onboarding_ideas: [{ ideas: [1, 2, 3, 4].map((n) => ({ title: `Idea ${n}`, line: 'A short line', kind: 'update', prompt: `Write idea ${n}.` })) }, null],
+  relay_onboarding_wait_pick: [{}, null],
 };
 function surface(client, options = {}) {
   return createAgentToolSurface(client, { featuresReader: async () => features, ...options });
 }
 
-test('every current MCP capability is discoverable and reaches its canonical handler without MCP', async () => {
+test('every current MCP capability is discoverable and reaches its canonical handler without MCP', async (t) => {
   assert.deepEqual(Object.keys(cases).sort(), TOOLS.map(t => t.name).sort(), 'new MCP capabilities require a handler exercise here');
+  // The onboarding tools read a first-run setup from the config directory and
+  // recent work from the AI hosts' homes: point every one at an empty sandbox.
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-tool-onboarding-'));
+  const saved = Object.fromEntries(['RELAY_CONFIG_DIR', 'CODEX_HOME', 'CODEX_STATE_DB', 'CLAUDE_HOME', 'CLAUDE_PROJECTS_DIR'].map((name) => [name, process.env[name]]));
+  t.after(() => { for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } fs.rmSync(sandbox, { recursive: true, force: true }); });
+  Object.assign(process.env, { RELAY_CONFIG_DIR: sandbox, CODEX_HOME: path.join(sandbox, 'codex'), CODEX_STATE_DB: path.join(sandbox, 'codex', 'state_5.sqlite'), CLAUDE_HOME: path.join(sandbox, 'claude'), CLAUDE_PROJECTS_DIR: path.join(sandbox, 'claude', 'projects') });
+  const { createFirstRelayIdeas } = createRequire(import.meta.url)('../src/first-relay-ideas.cjs');
+  const setup = createFirstRelayIdeas({ directory: sandbox });
+  setup.begin({ accountId: 'usr_test', host: 'codex' });
   const calls = [];
   const client = new Proxy({}, { get: (_, method) => async (...args) => {
     calls.push({ method, args });
@@ -78,6 +93,8 @@ test('every current MCP capability is discoverable and reaches its canonical han
   assert.deepEqual((await api.list(caller)).tools, toolsForAccount(features, 'codex'));
   for (const [name, [args, expectedMethod]] of Object.entries(cases)) {
     calls.length = 0;
+    // The person taps an idea before the AI waits, so the wait returns at once.
+    if (name === 'relay_onboarding_wait_pick') setup.pick('idea-2');
     const result = await api.call(name, args, caller);
     assert.notEqual(result.isError, true, `${name}: ${JSON.stringify(result)}`);
     // The event board reads local snapshots, never the API.

@@ -95,3 +95,86 @@ test("only the main installer frame on a Mac outside Applications may move the a
     assert.deepEqual(actions(app), []);
   }
 });
+
+// Founder, 0.1.624 (2026-10-10): opening Relay from the disk image installs
+// it. The window starts the move itself, and the copy in Applications ejects
+// the "Install Relay" image it came from.
+const installVolume = "/Volumes/Install Relay";
+const detached = app => app.processes.filter(([command, verb]) => command === "/usr/bin/hdiutil" && verb === "detach").map(([, , mount]) => mount);
+
+test("the handoff names the Install Relay image the app was opened from", async () => {
+  const app = await applicationMain();
+  assert.equal((await app.relocate()).ok, true);
+  const written = handoffWritten(app);
+  assert.equal(written.volume, installVolume);
+  assert.equal(written.appName, "Relay.app");
+  assert.deepEqual(app.processes.map(([command, verb]) => `${command} ${verb}`), ["/usr/bin/hdiutil info", "/usr/bin/plutil -convert"]);
+});
+
+// The bytes the relocation handler wrote, read back from the recorded move.
+function handoffWritten(app) {
+  const move = app.calls.find(call => call.action === "move");
+  return JSON.parse(move.handoff);
+}
+
+test("a translocated app finds its image only when exactly one mounted image holds this exact build", async () => {
+  const bundle = "/private/var/folders/xy/abc/T/AppTranslocation/4F1C2D3E-0000-4000-8000-000000000000/d/Relay.app";
+  const other = { mount: "/Volumes/Relay 0.1.500", receipt: { ...candidate, applicationVersion: "0.1.500" } };
+  let app = await applicationMain({ bundle, mounts: [other, { mount: installVolume, receipt: candidate }] });
+  assert.equal((await app.relocate()).ok, true);
+  assert.equal(handoffWritten(app).volume, installVolume);
+  app = await applicationMain({ bundle, mounts: [{ mount: installVolume, receipt: candidate }, { mount: "/Volumes/Install Relay 1", receipt: candidate }] });
+  assert.equal((await app.relocate()).ok, true);
+  assert.equal(handoffWritten(app).volume, null, "two copies of this build: eject neither");
+  app = await applicationMain({ bundle: "/Users/test/Downloads/Relay.app" });
+  assert.equal((await app.relocate()).ok, true);
+  assert.equal(handoffWritten(app).volume, null, "not on a disk image");
+});
+
+test("hdiutil failing never stops the install", async () => {
+  const app = await applicationMain({ hdiutil: () => { throw Error("hdiutil: info failed"); } });
+  assert.equal((await app.relocate()).ok, true);
+  assert.equal(handoffWritten(app).volume, null);
+  assert.deepEqual(actions(app), ["write", "move"]);
+});
+
+test("the window starting the move and Try again never run two moves at once", async () => {
+  const pending = Promise.withResolvers();
+  const app = await applicationMain({ existing: earlier, trash: () => pending.promise });
+  const first = app.relocate(), second = app.relocate();
+  pending.resolve();
+  assert.deepEqual((await Promise.all([first, second])).map(result => result.ok), [true, true]);
+  assert.deepEqual(actions(app), ["trash", "write", "move"]);
+});
+
+test("the copy in Applications ejects exactly the image it came from, once it is open", async () => {
+  const handoff = { version: candidate.version, runtimeSourceSha: candidate.runtimeSourceSha, startedAt: new Date().toISOString(), volume: installVolume, appName: "Relay.app" };
+  const app = await applicationMain({ installed: true, handoff });
+  assert.equal(app.files.has(app.handoff), false, "the handoff is consumed");
+  assert.deepEqual(detached(app), [], "not before Electron's own eject has had its turn");
+  assert.ok(app.timers.some(timer => timer.ms >= 5000));
+  await app.runTimers();
+  assert.deepEqual(detached(app), [installVolume]);
+  assert.ok(!app.processes.some(args => args.includes("-force")), "never forced");
+});
+
+test("an image already ejected, holding another build, or refusing to eject is left alone", async () => {
+  const handoff = { version: candidate.version, runtimeSourceSha: candidate.runtimeSourceSha, volume: installVolume, appName: "Relay.app" };
+  let app = await applicationMain({ installed: true, handoff, mounts: [] });
+  await app.runTimers();
+  assert.deepEqual(detached(app), [], "already ejected by Electron");
+  app = await applicationMain({ installed: true, handoff, mounts: [{ mount: installVolume, receipt: { ...candidate, applicationVersion: "0.1.569" } }] });
+  await app.runTimers();
+  assert.deepEqual(detached(app), [], "another Relay's image");
+  app = await applicationMain({ installed: true, handoff, hdiutil: args => { if (args[0] === "detach") throw Error("resource busy"); } });
+  await app.runTimers();
+  assert.deepEqual(detached(app), [installVolume], "tried once, failure ignored");
+  for (const volume of ["/", "/Volumes", "/Users/test", "/Volumes/Install Relay/../..", "/private/tmp/mount"]) {
+    app = await applicationMain({ installed: true, handoff: { ...handoff, volume }, mounts: [{ mount: volume, receipt: candidate }] });
+    await app.runTimers();
+    assert.deepEqual(detached(app), [], volume);
+  }
+  app = await applicationMain({ installed: true, handoff: { ...handoff, version: "0.1.500" } });
+  await app.runTimers();
+  assert.deepEqual(detached(app), [], "a handoff from another build ejects nothing");
+});

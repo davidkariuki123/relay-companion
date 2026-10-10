@@ -635,11 +635,12 @@ async function sendTutorial(approved, draft) {
   }
 }
 
-// The tutorial's second half (2026-09-13): a Relay for someone who is not on
-// Relay. Like the hello, the approved draft and one idempotency key are frozen
-// before the mint, so an uncertain result is retried with the identical body
-// and nothing is minted twice. The result carries the url and shareText: the
-// person's own message, then the one sentence the recipient needs.
+// The first link (2026-09-13): a Relay for someone who is not on Relay. The
+// draft and one idempotency key are frozen before the mint, so an uncertain
+// result is retried with the identical body and nothing is minted twice. The
+// result carries the url and shareText. Minting delivers nothing (the person
+// shares the url), so since 2026-10-10 it needs no approval flag; --approved
+// is still accepted from older instructions.
 const SHARE_DRAFT_FIELDS = ["recipientName", "title", "forHuman", "forAgent", "kind"];
 async function shareLinkTutorial(rest) {
   const config = readConfig();
@@ -656,18 +657,17 @@ async function shareLinkTutorial(rest) {
   if (share.state === "minted" && share.url) {
     return { ok: true, status: "already_minted", relayId: share.relayId || "", url: share.url, shareText: share.shareText || "" };
   }
-  if (!rest.includes("--approved")) throw new Error("Relay's first link requires --approved after the person explicitly approves the exact draft.");
   const draft = rest.includes("--draft-stdin") ? parseJson(await readStdin(), "Relay link draft") : null;
   if (draft && (typeof draft !== "object" || Array.isArray(draft) || typeof draft.forHuman !== "string" || !draft.forHuman.trim()
     || Object.keys(draft).some((key) => !SHARE_DRAFT_FIELDS.includes(key))
     || Object.entries(draft).some(([key, value]) => key !== "forHuman" && typeof value !== "string"))) {
-    throw new Error("The link draft must contain the approved non-empty forHuman and only recipientName, title, forAgent or kind besides it.");
+    throw new Error("The link draft must contain a non-empty forHuman and only recipientName, title, forAgent or kind besides it.");
   }
-  if (!draft && !share.payload) throw new Error("Relay's first link needs the approved draft: pass --draft-stdin with its JSON.");
+  if (!draft && !share.payload) throw new Error("Relay's first link needs its draft: pass --draft-stdin with its JSON.");
   const key = String(share.idempotencyKey || "").length >= 8 ? share.idempotencyKey : randomUUID();
   const proposed = draft ? { ...draft, idempotencyKey: key } : null;
   if (share.payload && proposed && JSON.stringify(proposed) !== JSON.stringify(share.payload)) {
-    throw new Error("This first link was already attempted. Retry its exact approved draft; do not change it after an uncertain result.");
+    throw new Error("This first link was already attempted. Retry its exact draft; do not change it after an uncertain result. To reword it afterwards, edit the minted message: the url stays the same.");
   }
   const body = share.payload || proposed;
   config.tutorial = { ...tutorial, share: { ...share, idempotencyKey: key, payload: body, state: "attempting", updatedAt: now() } };
@@ -1003,7 +1003,7 @@ async function main(argv = process.argv.slice(2)) {
       "relay-protocol mark-read <relay-id> [idempotency-key]",
       "relay-protocol tutorial-send --approved [--draft-stdin] # optional JSON: exact approved forHuman and forAgent",
       "relay-protocol tutorial-skip",
-      "relay-protocol share-link --approved --draft-stdin # JSON: exact approved forHuman, optional recipientName, title, forAgent; returns url and shareText, minted once",
+      "relay-protocol share-link --draft-stdin # JSON: forHuman, optional recipientName, title, forAgent; mints the first link once (minting sends nothing); returns url and shareText",
       "relay-protocol share-link --skip",
       "relay-protocol opening-preference desktop|terminal|other [claude|codex]",
       "relay-protocol send             # read body with stable idempotencyKey from stdin",

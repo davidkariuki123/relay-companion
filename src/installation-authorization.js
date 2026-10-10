@@ -5,6 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import atomicJson from "./atomic-json.cjs";
 import { persistPairedAccount } from "./account.js";
+import { signedInPage, startLoopbackSignInListener } from "./loopback-signin.js";
 import {
   apiUrl,
   configPath,
@@ -39,6 +40,12 @@ const AUTHORIZATION_STATUSES = new Set([
 ]);
 const RESUMABLE_STATUSES = new Set(["pending_identity", "pending_approval", "approved", "consumed"]);
 const REQUEST_TIMEOUT_MS = 20_000;
+const LOOPBACK_HEARTBEAT_MS = 5_000;
+const LOOPBACK_REGISTER_TIMEOUT_MS = 10_000;
+const LOOPBACK_STATUSES = new Set(["pending_identity", "pending_approval"]);
+// The server answered for good: an older API without the route, a setup that
+// is approved in the app, or a finished authorization. Stop asking.
+const LOOPBACK_REFUSED_HTTP = new Set([400, 401, 403, 404, 409, 410]);
 
 function statePath() {
   return path.join(path.dirname(configPath()), INSTALLATION_AUTHORIZATION_FILE);
@@ -384,6 +391,13 @@ export function createInstallationAuthorizationController({
     requireNativeCredential: true,
   }),
   onConnected = async () => {},
+  // Same-device sign-in (browser-v1 only): a one-shot 127.0.0.1 listener the
+  // website hands the approval code to instead of asking for a Connect click.
+  loopbackListener = startLoopbackSignInListener,
+  loopbackHeartbeatMs = LOOPBACK_HEARTBEAT_MS,
+  // Called after the browser's code approved this setup. The app brings the
+  // pill forward; consumption still runs through state()/resume() as before.
+  onLoopbackApproved = async () => {},
 } = {}) {
   const base = normalizeApiBase(apiBase);
   const trustedWebOrigin = normalizeWebOrigin(installationWebUrl({ apiUrl: apiBase, webUrl: webBase }));
@@ -394,6 +408,11 @@ export function createInstallationAuthorizationController({
   async function safeInstallationKey() {
     try { return (await installationKey()) || null; } catch { return null; }
   }
+  const loopbackEnabled = approvalSurface === "browser-v1" && typeof loopbackListener === "function";
+  // At most one listener, for the current authorization. Authorizations whose
+  // handoff ran (or the server refused) never start another listener.
+  let loopback = null;
+  const loopbackRetired = new Set();
   let beginInFlight = null;
   let consumeInFlight = null;
   let resumeInFlight = null;
@@ -420,7 +439,101 @@ export function createInstallationAuthorizationController({
     return validateSecret(result.value, state.authorizationId, trustedWebOrigin);
   }
 
+  function stopLoopback() {
+    const current = loopback;
+    loopback = null;
+    if (!current) return;
+    clearInterval(current.heartbeat);
+    void current.listener.close();
+  }
+
+  async function registerLoopback(current, secret) {
+    if (loopback !== current || !current.listener.isOpen()) return;
+    try {
+      await postJson(
+        fetchImpl,
+        base,
+        `/v1/installation-authorizations/${encodeURIComponent(current.authorizationId)}/loopback`,
+        { clientSecret: secret.clientSecret, redirectUri: current.listener.redirectUri, state: current.listener.state },
+        LOOPBACK_REGISTER_TIMEOUT_MS,
+      );
+    } catch (error) {
+      // Without a registration the website shows its Connect button, so a
+      // refusal costs nothing. A network blip retries on the next heartbeat.
+      if (LOOPBACK_REFUSED_HTTP.has(error?.status) && loopback === current) {
+        loopbackRetired.add(current.authorizationId);
+        stopLoopback();
+      }
+    }
+  }
+
+  async function ensureLoopback(durable, secret) {
+    if (!loopbackEnabled || !durable || !LOOPBACK_STATUSES.has(durable.status)) return;
+    if (loopbackRetired.has(durable.authorizationId)) return;
+    if (loopback?.authorizationId === durable.authorizationId && loopback.listener.isOpen()) return { registered: Promise.resolve() };
+    stopLoopback();
+    const remaining = Date.parse(durable.expiresAt) - now();
+    if (!(remaining > 0)) return;
+    const authorizationId = durable.authorizationId;
+    let listener;
+    try {
+      listener = await loopbackListener({
+        timeoutMs: remaining,
+        fallbackUrl: `${trustedWebOrigin}/activate/${encodeURIComponent(authorizationId)}?handoff=failed`,
+        onCode: (code) => redeemLoopbackCode(authorizationId, code),
+      });
+    } catch {
+      return; // No loopback port: the browser falls back to Connect.
+    }
+    const current = { authorizationId, listener, heartbeat: null };
+    loopback = current;
+    current.heartbeat = setInterval(() => { void registerLoopback(current, secret); }, loopbackHeartbeatMs);
+    current.heartbeat.unref?.();
+    void listener.closed.then(() => {
+      clearInterval(current.heartbeat);
+      if (loopback === current) loopback = null;
+    });
+    return { registered: registerLoopback(current, secret) };
+  }
+
+  async function redeemLoopbackCodeInternal(authorizationId, code) {
+    // One code, one attempt: whatever happens next, the website takes over
+    // (signed in, or its Connect button) and this setup never listens again.
+    loopbackRetired.add(authorizationId);
+    const { state: durable, secret } = await activeContext();
+    if (durable.authorizationId !== authorizationId) throw new Error("Relay setup changed.");
+    let consent = null;
+    if (durable.status !== "approved" && durable.status !== "consumed") {
+      try {
+        const approved = await postJson(
+          fetchImpl,
+          base,
+          `/v1/installation-authorizations/${encodeURIComponent(authorizationId)}/loopback-approve`,
+          { clientSecret: secret.clientSecret, codeVerifier: secret.codeVerifier, code },
+        );
+        if (approved.status !== "approved") throw new InstallationRequestError("invalid_response", 200);
+        consent = approved.onboardingContext || null;
+      } catch (error) {
+        // The approval may have committed before its response was lost.
+        const refreshed = await stateInternal().catch(() => null);
+        if (refreshed?.status !== "approved") throw error;
+      }
+      const latest = (await readDurable()) || durable;
+      const context = onboardingContext(consent);
+      await durableStore.write({ ...latest, status: "approved", ...(context ? { onboardingContext: context } : {}) });
+    }
+    const current = await readDurable();
+    try { await onLoopbackApproved(publicState(current)); } catch {}
+    const inviter = consent?.outcome !== "self" ? consent?.inviter?.name : "";
+    return { html: signedInPage({ platform, inviterName: inviter || "", orgName: consent?.org?.name || "" }) };
+  }
+
+  function redeemLoopbackCode(authorizationId, code) {
+    return serialize(() => redeemLoopbackCodeInternal(authorizationId, code));
+  }
+
   async function removeAuthorization() {
+    stopLoopback();
     const removed = await secretStore.delete();
     if (!removed?.ok) {
       throw new Error("Relay could not remove the one-time setup authorization from protected storage.");
@@ -429,6 +542,7 @@ export function createInstallationAuthorizationController({
   }
 
   async function expire(state) {
+    stopLoopback();
     const expired = { ...state, status: "expired" };
     await durableStore.write(expired);
     // Keep the public tombstone after deleting the one-time secret. It is what
@@ -591,6 +705,9 @@ export function createInstallationAuthorizationController({
     };
     await durableStore.write(next);
     if (status === "expired") return expire(next);
+    // Covers an app restarted mid-sign-in: the browser can still hand off here.
+    if (LOOPBACK_STATUSES.has(status)) await ensureLoopback(next, secret);
+    else stopLoopback();
     return publicState(next);
   }
 
@@ -608,6 +725,9 @@ export function createInstallationAuthorizationController({
       fragment.set("switchAccount", "1");
       target.hash = fragment.toString();
     }
+    // Listen before the browser opens, so the website can hand the sign-in
+    // straight back to this computer when it finishes.
+    await (await ensureLoopback(durable, secret))?.registered;
     const opened = await openExternal(target.toString());
     if (opened === false) throw new Error("Relay could not open the secure sign-in page.");
     return publicState(durable);
@@ -679,7 +799,8 @@ export function createInstallationAuthorizationController({
         fetchImpl,
         base,
         `/v1/installation-authorizations/${encodeURIComponent(durable.authorizationId)}/approve`,
-        { clientSecret: secret.clientSecret },
+        // The verifier binds approval to this app's PKCE pair (older APIs ignore it).
+        { clientSecret: secret.clientSecret, codeVerifier: secret.codeVerifier },
       );
       if (approved.status !== "approved") throw new InstallationRequestError("invalid_response", 200);
       durable.status = "approved";
@@ -715,6 +836,7 @@ export function createInstallationAuthorizationController({
     await durableStore.write(connected);
     const issuedOnKey = await safeInstallationKey();
     await persistAccount(issuedOnKey ? { ...registration, installationKey: issuedOnKey } : registration);
+    stopLoopback();
     const removed = await secretStore.delete();
     if (removed?.ok) await durableStore.remove();
     try { await onConnected(registration); } catch {}
@@ -786,5 +908,9 @@ export function createInstallationAuthorizationController({
     return serialize(restartInternal);
   }
 
-  return { state, begin, resume, restart, signIn: (options = {}) => google({ ...options, browserSignIn: true }), google, emailStart, emailVerify, approve, cancel };
+  return {
+    state, begin, resume, restart, signIn: (options = {}) => google({ ...options, browserSignIn: true }), google, emailStart, emailVerify, approve, cancel,
+    // Tests and shutdown: release the loopback port.
+    close: () => stopLoopback(),
+  };
 }

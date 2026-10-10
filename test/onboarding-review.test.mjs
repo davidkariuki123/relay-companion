@@ -67,8 +67,8 @@ test("local rehearsal uses the real helper, contains sends, rejects other origin
   // The second half: the practice server mints a link and the pill's state
   // carries the message to send, composed from the same shared source.
   const draft = { recipientName: "Priya", forHuman: "Here is where the plan stands.", forAgent: "Practice context." };
-  assert.equal((await run("share-link", "--draft-stdin", { input: JSON.stringify(draft) })).code, 1, "approval is still a real step");
-  const minted = await run("share-link", "--approved", "--draft-stdin", { input: JSON.stringify(draft) });
+  // Minting sends nothing, so the first link needs no approval flag (2026-10-10).
+  const minted = await run("share-link", "--draft-stdin", { input: JSON.stringify(draft) });
   assert.equal(minted.code, 0, minted.error);
   const link = JSON.parse(minted.out);
   assert.equal(link.url.startsWith(review.url + "/s/"), true, "practice links stay on the local server");

@@ -244,6 +244,11 @@ contextBridge.exposeInMainWorld("relay", {
   // only status + verified account summary and can request the next human act.
   installationAuthState: () => ipcRenderer.invoke("relay:installationAuthState"),
   installationAuthResume: () => ipcRenderer.invoke("relay:installationAuthResume"),
+  onInstallationAuthChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("relay:installationAuthChanged", listener);
+    return () => ipcRenderer.removeListener("relay:installationAuthChanged", listener);
+  },
   // Restart is an explicit human act. Main deletes only the one-time
   // installation-authorization namespace, and does so before minting again.
   installationAuthRestart: () => ipcRenderer.invoke("relay:installationAuthRestart"),
@@ -254,6 +259,9 @@ contextBridge.exposeInMainWorld("relay", {
   onboardingPollAgent: (userId) => ipcRenderer.invoke("relay:onboardingPollAgent", String(userId || "")),
   onboardingCopyAgentRequest: (userId) => ipcRenderer.invoke("relay:onboardingCopyAgentRequest", String(userId || "")),
   onboardingOpenAgent: (userId) => ipcRenderer.invoke("relay:onboardingOpenAgent", String(userId || "")),
+  // Your first Relay (2026-10-10): tap one of the AI's ideas; bring the AI forward.
+  onboardingPickIdea: (userId, ideaId) => ipcRenderer.invoke("relay:onboardingPickIdea", String(userId || ""), String(ideaId || "")),
+  onboardingFocusAgent: (userId) => ipcRenderer.invoke("relay:onboardingFocusAgent", String(userId || "")),
   onboardingConnectClaude: (userId) => ipcRenderer.invoke("relay:onboardingConnectClaude", String(userId || "")),
   onboardingConnectChatGptApp: (userId) => ipcRenderer.invoke("relay:onboardingConnectChatGptApp", String(userId || "")),
   // SETUP (2026-10-07): every AI's connection, and the verbs to connect them.
@@ -269,7 +277,7 @@ contextBridge.exposeInMainWorld("relay", {
   setupCancelRun: (userId) => ipcRenderer.invoke("relay:setupCancelRun", String(userId || "")),
   setupConnectClaude: (userId) => ipcRenderer.invoke("relay:setupConnectClaude", String(userId || "")),
   setupConnectChatGptApp: (userId) => ipcRenderer.invoke("relay:setupConnectChatGptApp", String(userId || "")),
-  copyFirstLinkMessage: (userId) => ipcRenderer.invoke("relay:copyFirstLinkMessage", userId),
+  copyFirstLink: (userId) => ipcRenderer.invoke("relay:copyFirstLink", userId),
   installationAuthSignIn: (options = {}) => ipcRenderer.invoke("relay:installationAuthSignIn", { forceAccountSelection: options?.forceAccountSelection === true }),
   installationAuthGoogle: (options = {}) => ipcRenderer.invoke("relay:installationAuthGoogle", {
     forceAccountSelection: options?.forceAccountSelection === true,

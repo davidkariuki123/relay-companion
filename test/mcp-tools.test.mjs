@@ -36,13 +36,14 @@ test("local MCP marks every retrieval tool read-only without marking writes", ()
     "relay_chat_fetch", "relay_recently_deleted_list", "relay_file_download",
     "relay_topics_list", "relay_topic_fetch", "relay_topic_context",
     "relay_topic_threads", "relay_connector_list_tools",
+    "relay_onboarding_current", "relay_onboarding_recent_work", "relay_onboarding_wait_pick",
   ]);
   assert.deepEqual(READ_ONLY_RELAY_TOOL_NAMES, expected);
   assert.deepEqual(
     new Set(TOOLS.filter((tool) => tool.annotations?.readOnlyHint === true).map((tool) => tool.name)),
     expected,
   );
-  for (const name of ["relay_topic_post", "relay_topic_edit", "relay_send", "relay_connector_call_tool", "relay_mark_read"]) {
+  for (const name of ["relay_topic_post", "relay_topic_edit", "relay_send", "relay_connector_call_tool", "relay_mark_read", "relay_onboarding_ideas"]) {
     assert.notEqual(TOOLS.find((tool) => tool.name === name)?.annotations?.readOnlyHint, true, name);
   }
   for (const name of ["relay_topic_post", "relay_topic_edit"]) {
@@ -1641,7 +1642,8 @@ test("obsolete coordination protocol is absent and rejected before any API call"
   // state an agent sets on its own, so a human-initiated pull clears unread
   // and sends the read receipt — without it the sender sees "delivered"
   // forever). relay_acknowledge stays retired.
-  assert.equal(TOOLS.length, 51, "the full model catalog contains only current product tools");
+  // The four first-run onboarding tools joined on 2026-10-10.
+  assert.equal(TOOLS.length, 55, "the full model catalog contains only current product tools");
 
   const client = new Proxy({}, {
     get() { throw new Error("removed tool must not touch the API client"); },

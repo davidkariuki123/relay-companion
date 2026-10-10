@@ -89,11 +89,16 @@ test("Relay skill teaches one direct HTTPS product and an approved inviter hello
   assert.match(skillText, /authenticated HTTPS protocol/);
   assert.match(skillText, /POST \/v1\/agent\/authorizations/);
   assert.match(skillText, /POST \/v1\/agent\/authorizations\/:id\/consume/);
-  assert.match(skillText, /Hi — I’ve just joined you on Relay\./);
-  assert.match(skillText, /Never send the tutorial message automatically/);
-  assert.match(skillText, /Human payload/);
-  assert.match(skillText, /Agent payload/);
+  // The first-run tutorial (2026-10-10): ideas picked in the Relay app; a
+  // first Relay to an inviter is shown and approved before it is sent, and a
+  // first link is minted at once because minting sends nothing.
+  assert.match(skillText, /relay_onboarding_current/);
+  assert.match(skillText, /relay_onboarding_wait_pick/);
+  assert.match(skillText, /ask for explicit approval of that exact message/);
+  assert.match(skillText, /never authorize a send/);
+  assert.match(skillText, /Minting sends nothing, so it needs no approval/);
   assert.match(skillText, /accepted or queued/);
+  assert.doesNotMatch(skillText, /Invite someone to Relay|opening-preference desktop|three paths/);
   assert.match(skillText, /absolute directory containing this loaded/);
   assert.match(skillText, /only if the `relay`\s+executable is already available/);
   assert.match(skillText, /run `inbox`[\s\S]*run `read`[\s\S]*run `mark-read`/);
@@ -180,7 +185,8 @@ test("thin and full package CLIs expose the bundled protocol helper without hand
   assert.equal(help.code, 0, help.stderr);
   assert.match(help.stdout, /connect-start/);
   assert.match(help.stdout, /tutorial-send --approved/);
-  assert.match(help.stdout, /share-link --approved --draft-stdin/);
+  assert.match(help.stdout, /share-link --draft-stdin/);
+  assert.doesNotMatch(help.stdout, /share-link --approved/);
   assert.doesNotMatch(help.stdout, /accessToken|clientSecret|codeVerifier/);
 });
 
@@ -225,7 +231,7 @@ test("custom tutorial freezes both documents across an uncertain result, support
   assert.equal(requests.length, 2, "skip sends nothing");
 });
 
-test("the first link is minted once from the approved draft, retried unchanged after an uncertain result, and can be skipped", async (t) => {
+test("the first link is minted once from its draft without an approval flag, retried unchanged after an uncertain result, and can be skipped", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-first-link-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const requests = [];
@@ -251,20 +257,19 @@ test("the first link is minted once from the approved draft, retried unchanged a
   fs.writeFileSync(configFile, JSON.stringify(initial));
   const env = { RELAY_CONFIG_DIR: root, RELAY_AGENT_CONFIG: configFile, RELAY_AGENT_LOCAL: path.join(root, "absent"), RELAY_AGENT_ALLOW_LOOPBACK: "1" };
   const draft = { recipientName: "Priya", title: "Where the plan stands", forHuman: "Here is where the plan stands.", forAgent: "The approved context." };
-  const unapproved = await runProtocol(["share-link", "--draft-stdin"], { env, input: JSON.stringify(draft) });
-  assert.equal(unapproved.code, 1);
-  assert.match(unapproved.stderr, /--approved/);
-  assert.equal(requests.length, 0, "approval is the only thing that mints");
-  const badField = await runProtocol(["share-link", "--approved", "--draft-stdin"], { env, input: JSON.stringify({ ...draft, recipient: { email: "x@example.test" } }) });
-  assert.equal(badField.code, 1, "only the approved draft fields are accepted");
-  assert.equal((await runProtocol(["share-link", "--approved", "--draft-stdin"], { env, input: JSON.stringify(draft) })).code, 1, "an uncertain result is reported");
+  const badField = await runProtocol(["share-link", "--draft-stdin"], { env, input: JSON.stringify({ ...draft, recipient: { email: "x@example.test" } }) });
+  assert.equal(badField.code, 1, "only the draft's own fields are accepted");
+  assert.equal(requests.length, 0);
+  // Minting sends nothing, so no approval flag is needed (2026-10-10).
+  assert.equal((await runProtocol(["share-link", "--draft-stdin"], { env, input: JSON.stringify(draft) })).code, 1, "an uncertain result is reported");
   assert.equal(requests.length, 1);
   assert.equal(JSON.parse(fs.readFileSync(configFile)).tutorial.share.state, "attempting");
   assert.equal((await runProtocol(["share-link", "--skip"], { env })).code, 1, "an uncertain mint cannot be hidden as skipped");
+  // An older instruction's --approved is still accepted, and still cannot change the frozen draft.
   const changed = await runProtocol(["share-link", "--approved", "--draft-stdin"], { env, input: JSON.stringify({ ...draft, forHuman: "Changed" }) });
-  assert.match(changed.stderr, /exact approved draft/);
+  assert.match(changed.stderr, /exact draft/);
   assert.equal(requests.length, 1);
-  const retry = await runProtocol(["share-link", "--approved"], { env });
+  const retry = await runProtocol(["share-link"], { env });
   assert.equal(retry.code, 0, retry.stderr);
   assert.deepEqual(requests[0], requests[1], "the retry carries the identical body and key");
   assert.equal(requests[1].idempotencyKey.length >= 8, true);

@@ -11,13 +11,11 @@ const slice = (start, end) => {
   return html.slice(i, j);
 };
 
-// THE CHAPTER AFTER THE FIRST SEND (David, 2026-09-13). The send used to end
-// onboarding and drop the person into the room. Now it opens three screens:
-// the celebration (ten seconds, or Continue), Your first link (the tutorial's
-// second half: ask your agent for a relay about something you're working on,
-// and the screen shows the message to send once the link exists), and Grow
-// your network last, whose Open Relay button ends onboarding and opens the
-// room of the relay you wrote. The handoff screen before the send is unchanged.
+// THE CHAPTER AFTER THE FIRST SEND (David, 2026-09-13; trimmed 2026-10-10).
+// A hello to an inviter is celebrated (ten seconds, or Continue); a first
+// Relay that was a link lands on It's ready to send instead. Slack follows
+// when offered, and then the chapter ends by itself, opening the room of the
+// relay you wrote: no second link lesson and no Grow your network screen.
 
 test("before the send, the handoff screen stays; after it, the chapter renders", () => {
   const stage = slice('if (signupStage === "first-relay") {', 'if (signupStage === "restart-required") {');
@@ -46,43 +44,30 @@ test("the celebration auto-advances after twelve seconds and Continue skips the 
   assert.match(html, /function firstRelayCelebrationMs\(\) \{ return Number\(window\.__relayCelebrationMs\) > 0 \? Number\(window\.__relayCelebrationMs\) : 12000; \}/);
   // The aha from both sides: the message the reader reads, and the count of what their AI got.
   assert.match(chapter, /firstRelayPreviewHtml\(\)/);
-  assert.match(chapter, /setTimeout\(\(\) => \{[\s\S]*?chapter\.stage = "link"; renderSignup\(\);[\s\S]*?\}, firstRelayCelebrationMs\(\)\)/);
+  assert.match(chapter, /setTimeout\(\(\) => \{[\s\S]*?chapter\.stage = stageAfterFirstLink\(\); renderSignup\(\);[\s\S]*?\}, firstRelayCelebrationMs\(\)\)/);
   assert.match(chapter, /Your first Relay is sent\./);
   assert.match(chapter, /su-relay-moment/);
   assert.match(chapter, /su-countdown/);
   assert.match(chapter, /id="suCelebrationContinue" type="button">Continue</);
-  assert.match(chapter, /suCelebrationContinue"\)\?\.addEventListener\("click", \(\) => advanceFirstRelayChapter\("link"\)\)/);
+  assert.match(chapter, /suCelebrationContinue"\)\?\.addEventListener\("click", \(\) => advanceFirstRelayChapter\(stageAfterFirstLink\(\)\)\)/);
   // A first send that was itself a link has no hello to celebrate.
-  assert.match(chapter, /if \(chapter\.stage === "celebrate" && link && link\.relayId === payload\.ui\?\.firstRelayId\) chapter\.stage = "link";/);
+  assert.match(chapter, /if \(chapter\.stage === "celebrate" && firstRelayWasLink\) chapter\.stage = "link";/);
   // The countdown keeps moving: the squares hop until the bar fills.
   assert.match(html, /@keyframes su-relay-hop/);
   assert.match(html, /\.su-countdown > span \{[^}]*animation:su-countdown var\(--su-countdown-ms, 10s\) linear forwards;/);
   assert.match(html, /prefers-reduced-motion:reduce\) \{\s*\.su-first-relay-sent \.su-relay-moment i/);
 });
 
-test("Your first link asks for a relay in the person's own words, then shows the message to send", () => {
+test("after the first Relay there is no second link lesson and no Grow your network: the chapter ends by opening Relay", () => {
   const chapter = slice("  function renderFirstRelayChapter() {", "  // OPEN RELAY (2026-09-13)");
-  assert.match(chapter, /Now relay someone who isn’t on Relay\./);
-  assert.match(chapter, /\$\{esc\(onboardingAgentFor\(\)\?\.name \|\| "Your agent"\)\} is asking who it’s for\. <strong>Answer there<\/strong>, and your link shows up here, ready to send\./);
-  assert.doesNotMatch(chapter, /Priya|cutover|DKIM|Postmark/, "no hard-coded situation");
-  assert.match(chapter, /This screen updates when your link is ready\./);
-  assert.match(chapter, /id="suLinkSkip" type="button">Skip for now</);
-  assert.match(chapter, /Your link is ready\./);
-  assert.match(chapter, /id="suFirstLinkText">\$\{displayShareText\}/);
-  assert.match(chapter, /Send it wherever you talk to them\. They can ask their own AI to reply\. Their reply will appear inside your Relay app, even if they don’t have Relay\./);
-  assert.doesNotMatch(chapter, /Their reply lands here as its own chat\./);
-  // A link that was itself the first Relay wears the celebration on this
-  // screen, since it never had one of its own.
-  assert.match(chapter, /const firstRelayWasLink = link\.relayId === payload\.ui\?\.firstRelayId;/);
-  assert.match(chapter, /su-first-link\$\{firstRelayWasLink \? " su-first-relay-sent" : ""\}/);
-  assert.match(chapter, /\$\{firstRelayWasLink \? '<div class="su-relay-moment" aria-hidden="true">/);
-  assert.match(chapter, /\$\{firstRelayWasLink \? "Your first Relay" : "Your first link"\}/);
-  assert.match(chapter, /id="suLinkCopy"[^>]*>\$\{chapter\.linkCopied \? "Copied" : "Copy message"\}/);
+  assert.doesNotMatch(chapter, /Now relay someone who isn’t on Relay|id="suLinkSkip"|renderNetworkScreen\(/);
+  assert.match(chapter, /It’s ready to send\./);
   assert.match(chapter, /id="suLinkContinue"[^>]*>Continue</);
-  // Your Slack comes next when Slack is on and not yet connected; Grow your
-  // network is still the last screen.
   assert.match(chapter, /suLinkContinue"\)\?\.addEventListener\("click", \(\) => advanceFirstRelayChapter\(stageAfterFirstLink\(\)\)\)/);
-  assert.match(chapter, /if \(chapter\.stage === "slack"\) \{ renderSlackOnboarding\(chapter\); return; \}\s*renderNetworkScreen\("Last step"\);\s*\}/, "Grow your network is the last screen");
+  assert.match(chapter, /if \(chapter\.stage === "slack"\) \{ renderSlackOnboarding\(chapter\); return; \}\s*renderFirstRelayFinish\(chapter\);\s*\}/, "the chapter ends after Slack");
+  // The end saves both chapters by itself, once, and offers Try again on a failure.
+  assert.match(chapter, /if \(!chapter\.finishStarted\) \{ chapter\.finishStarted = true; setTimeout\(\(\) => \{ void finishNetworkInvitation\(\); \}, 0\); \}/);
+  assert.match(chapter, /id="suFinishRetry" type="button"[^>]*>Try again</);
 });
 
 test("Grow your network has no agent tutorial block and ends with Open Relay", () => {

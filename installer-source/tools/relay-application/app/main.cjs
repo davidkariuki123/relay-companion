@@ -4,13 +4,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { pathToFileURL } = require("node:url");
-const { spawn } = require("node:child_process");
+const { spawn, execFile } = require("node:child_process");
 const { inspectInstallation, planMigration } = require("./migration.cjs");
 const { parseRelayDeepLink } = require("./deep-link.cjs");
 const { integrationStatus } = require("./integration-status.cjs");
 const { pillIsUp, pillOffersFullApp } = require("./pill-status.cjs");
 const { createRelayOpener } = require("./open-relay.cjs");
 const { relocationPlan } = require("./relocation.cjs");
+const { createVolumeTools } = require("./dmg-volume.cjs");
 // Standard local origin lets sandboxed education frames load bundled assets
 // without granting them same-origin access to the installer's privileged bridge.
 protocol.registerSchemesAsPrivileged([{ scheme: "relay-setup", privileges: { standard: true, secure: true } }]);
@@ -151,7 +152,11 @@ app.whenReady().then(() => {
     }
     return net.fetch(pathToFileURL(file).href);
   });
-  // Sized and centred like the pill that takes its place once Relay is ready.
+  // Opened from the "Install Relay" disk image (anywhere outside Applications),
+  // Relay installs itself: the window says "Installing Relay…" and calls
+  // application:relocate on its own, with no drag and no button (founder,
+  // 0.1.624, 2026-10-10). Sized and centred like the pill that takes its place
+  // once Relay is ready.
   const animatedInstall = application && candidate.desktopOnboarding && process.platform === "darwin" && !app.isInApplicationsFolder();
   const win = new BrowserWindow({ width: 344, height: 524, minWidth: 344, minHeight: 524, ...(application && candidate.desktopOnboarding ? {frame:false,transparent:true,resizable:false} : {useContentSize:true}), autoHideMenuBar: true, title: "Relay", show: false,
     // The page follows the system appearance; match it before first paint.
@@ -164,25 +169,37 @@ app.whenReady().then(() => {
     if (setupProgress.canCancel && setupChild?.connected) setupChild.send({ action: "cancel-download" }, () => {});
   });
   const ownSender = (event) => event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame;
+  const volumes = createVolumeTools({ execFile, readCandidate: file => JSON.parse(fs.readFileSync(file, "utf8")) });
+  let relocating = null;
   ipcMain.handle("application:relocate", async (event) => {
     if (!ownSender(event) || !application || process.platform !== "darwin" || app.isInApplicationsFolder()) throw new Error("Installation is unavailable from this window");
-    // An earlier Relay in Applications (often the copy whose first setup
-    // failed) goes to the Trash, where it can still be recovered, so the move
-    // below has no conflict to refuse (relocation.cjs).
-    const destination = path.join("/Applications", path.basename(path.resolve(path.dirname(process.execPath), "../..")));
-    const plan = relocationPlan(destination, candidate);
-    if (plan.action === "refuse") throw new Error(plan.message);
-    if (plan.action === "replace") {
-      try { await shell.trashItem(destination); }
-      catch { throw new Error("Relay could not replace the older Relay in Applications. Move it to the Trash, then try again."); }
-    }
-    const handoff = path.join(app.getPath("userData"), "installation-handoff.json");
-    fs.writeFileSync(handoff, JSON.stringify({version:candidate.version, runtimeSourceSha:candidate.runtimeSourceSha, startedAt:new Date().toISOString()}), {mode:0o600});
-    let moved = false;
-    try { moved = app.moveToApplicationsFolder({ conflictHandler: () => false }); }
-    finally { if (!moved) fs.rmSync(handoff, {force:true}); }
-    if (!moved) throw new Error("Relay could not move to Applications. Move any Relay app in Applications to the Trash, then try again.");
-    return { ok: true };
+    // One move at a time: the window starts it on its own, and Try again
+    // must never overlap a move still under way.
+    if (relocating) return relocating;
+    relocating = (async () => {
+      // An earlier Relay in Applications (often the copy whose first setup
+      // failed) goes to the Trash, where it can still be recovered, so the move
+      // below has no conflict to refuse (relocation.cjs).
+      const bundle = path.resolve(path.dirname(process.execPath), "../..");
+      const destination = path.join("/Applications", path.basename(bundle));
+      const plan = relocationPlan(destination, candidate);
+      if (plan.action === "refuse") throw new Error(plan.message);
+      if (plan.action === "replace") {
+        try { await shell.trashItem(destination); }
+        catch { throw new Error("Relay could not replace the older Relay in Applications. Move it to the Trash, then try again."); }
+      }
+      // The disk image this copy runs from, for the copy in Applications to
+      // eject once it is open (dmg-volume.cjs). Unknown is fine: nothing is ejected.
+      const volume = await volumes.find({ bundlePath: bundle, candidate });
+      const handoff = path.join(app.getPath("userData"), "installation-handoff.json");
+      fs.writeFileSync(handoff, JSON.stringify({version:candidate.version, runtimeSourceSha:candidate.runtimeSourceSha, startedAt:new Date().toISOString(), volume, appName:path.basename(bundle)}), {mode:0o600});
+      let moved = false;
+      try { moved = app.moveToApplicationsFolder({ conflictHandler: () => false }); }
+      finally { if (!moved) fs.rmSync(handoff, {force:true}); }
+      if (!moved) throw new Error("Relay could not move to Applications. Move any Relay app in Applications to the Trash, then try again.");
+      return { ok: true };
+    })().finally(() => { relocating = null; });
+    return relocating;
   });
   ipcMain.handle("migration:inspect", (event) => {
     if (!ownSender(event)) throw new Error("Invalid caller");
@@ -282,7 +299,14 @@ app.whenReady().then(() => {
     const handoff = path.join(app.getPath("userData"), "installation-handoff.json");
     try {
       const pending = JSON.parse(fs.readFileSync(handoff, "utf8"));
-      if (pending.version === candidate.version && pending.runtimeSourceSha === candidate.runtimeSourceSha) fs.rmSync(handoff);
+      if (pending.version === candidate.version && pending.runtimeSourceSha === candidate.runtimeSourceSha) {
+        fs.rmSync(handoff);
+        // The "Install Relay" disk image has done its job. Electron's mover
+        // ejects it about five seconds after the move; this is the second
+        // attempt, for a translocated app or a busy first try. Setup carries
+        // on regardless of the outcome.
+        if (pending.volume) setTimeout(() => { volumes.eject({ mount: pending.volume, appName: pending.appName, candidate }); }, 8000);
+      }
     } catch (error) { if (error.code !== "ENOENT") console.error("Installation handoff could not be read:", error.message); }
   }
   if (state.setUp && !animatedInstall) {

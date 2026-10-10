@@ -133,9 +133,11 @@ export async function startAgentLocalServer({ client, accountId, apiUrl, file = 
       if (!chunk.includes(10)) return;
       consumed = true;
       socket.setTimeout(LOCAL_TOOL_TIMEOUT_MS);
-      chain = chain.then(async () => {
+      let request = null;
+      try { request = JSON.parse(Buffer.concat(chunks).toString("utf8").trim()); } catch { /* answered below */ }
+      const answer = async () => {
         try {
-          const request = JSON.parse(Buffer.concat(chunks).toString("utf8").trim());
+          if (!request) throw new Error("Relay's local request was unreadable.");
           const actual = Buffer.from(String(request.capability || ""));
           const expected = Buffer.from(capability);
           if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw Object.assign(new Error("Local Relay authorization failed."), { code: "local_authorization_failed", status: 401 });
@@ -144,7 +146,11 @@ export async function startAgentLocalServer({ client, accountId, apiUrl, file = 
         } catch (error) {
           socket.end(JSON.stringify({ error: error.code || "local_request_failed", status: error.status, message: error.message }) + "\n");
         }
-      });
+      };
+      // Waiting for a first-run pick only reads a local file; holding the
+      // queue for it would stall every other helper call behind it.
+      if (request?.method === "POST" && request?.path === "/local/tools/call" && request?.body?.name === "relay_onboarding_wait_pick") void answer();
+      else chain = chain.then(answer);
     });
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(endpoint, resolve); });

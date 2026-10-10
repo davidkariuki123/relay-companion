@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { assertNewOutput } from "./prepare.mjs";
-import { buildMacDmg } from "./lib/mac-dmg.mjs";
+import { buildMacDmg, dmgVolumeName } from "./lib/mac-dmg.mjs";
 
 // Separate from packaging: a build never discovers a certificate. This runs
 // either in sign-application-mac.yml, where the mac-signing environment lends
@@ -50,11 +50,12 @@ run("xcrun", ["stapler", "validate", appPath]);
 run("spctl", ["--assess", "--type", "execute", "--verbose=2", appPath]);
 if (createHash("sha256").update(fs.readFileSync(node)).digest("hex") !== candidate.nodeSha256) throw new Error("Nested signing changed the sealed Node runtime");
 const dmg = path.join(root, `${preview ? "Relay-Migration-Preview" : "Relay"}-${candidate.applicationVersion || candidate.version}-${candidate.platform}.dmg`);
-// The disk image opens as the install window: Relay.app left, an arrow, the
-// Applications folder right, on a picture that says what to do. See
-// lib/mac-dmg.mjs; the layout is checked on the mounted volume before the
-// image is compressed, then signed and notarized below exactly as before.
-buildMacDmg({ app: appPath, output: dmg, volumeName: preview ? "Relay Migration Preview" : "Relay", run });
+// The disk image mounts as "Install Relay" and opens as the install window:
+// one Relay icon on a picture that says to double-click it. Relay then moves
+// itself into Applications (app/main.cjs). See lib/mac-dmg.mjs; the layout is
+// checked on the mounted volume before the image is compressed, then signed
+// and notarized below exactly as before.
+buildMacDmg({ app: appPath, output: dmg, volumeName: dmgVolumeName({ preview }), run });
 run("codesign", ["--sign", identity, ...keychainArgs, "--timestamp", dmg]);
 const authArgs = ["--keychain-profile", keychainProfile, ...(auth.keychain ? ["--keychain", auth.keychain] : [])];
 const submission = JSON.parse(run("xcrun", ["notarytool", "submit", dmg, ...authArgs, "--wait", "--output-format", "json"]));

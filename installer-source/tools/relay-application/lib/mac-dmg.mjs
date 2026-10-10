@@ -1,8 +1,21 @@
-// The Mac installer disk image: Relay.app on the left, an arrow, the
-// Applications folder on the right, on a picture that says "Drag Relay to
-// Applications". Finder reads all of that from two hidden files on the volume:
+// The Mac installer disk image: a volume named "Install Relay" whose Finder
+// window shows one large Relay icon on a picture that says "Install Relay" and
+// "Double-click to install". There is no Applications folder and no arrow:
+// dragging is a file copy that never opens Relay (founder, 0.1.624, 2026-10-10),
+// while double-clicking opens Relay, which moves itself into Applications,
+// ejects this volume and carries straight on into setup (app/main.cjs). Finder
+// reads the window from two hidden files on the volume:
 // .background/background.tiff and a .DS_Store that names the picture, the
-// window size, the icon size and where each icon sits.
+// window size, the icon size and where the icon sits.
+//
+// The bundle inside stays Relay.app, so Finder labels the icon "Relay". Naming
+// it "Install Relay.app" would carry that name everywhere the app goes:
+// Electron's moveToApplicationsFolder keeps the bundle's file name, so it would
+// install as /Applications/Install Relay.app (and so would a drag), where
+// nothing that looks for /Applications/Relay.app finds it; the updater archive
+// and the install proofs name Relay.app too. A label cannot be set any other
+// way (.DS_Store has no display-name record, and a localized bundle name would
+// rename the installed app as well), so the picture carries the words.
 //
 // Everything here is plain Node with no native modules and no Finder
 // scripting, so it runs headless on a hosted runner and gives the same layout
@@ -22,19 +35,29 @@ import { fileURLToPath } from "node:url";
 export const DMG_BACKGROUND = path.join(path.dirname(fileURLToPath(import.meta.url)), "mac-dmg-background.tiff");
 export const BACKGROUND_DIRECTORY = ".background";
 export const BACKGROUND_NAME = "background.tiff";
+// The volume a person sees mount, and the Finder window's title. Read-only
+// previews keep their own name so they are never mistaken for Relay.
+export const DMG_VOLUME_NAME = "Install Relay";
+export const PREVIEW_DMG_VOLUME_NAME = "Relay Migration Preview";
+export const dmgVolumeName = ({ preview = false } = {}) => preview ? PREVIEW_DMG_VOLUME_NAME : DMG_VOLUME_NAME;
+// The words on the picture (render-dmg-background.mjs draws them).
+export const DMG_TEXT = Object.freeze({
+  title: "Install Relay",
+  caption: "Double-click to install. Relay opens and finishes setting up.",
+});
 // Window content is the picture's size. Icon positions are icon centres in
 // the window's content coordinates, as Finder stores them.
 export const DMG_LAYOUT = Object.freeze({
   window: Object.freeze({ x: 200, y: 120, width: 640, height: 400 }),
-  iconSize: 128,
+  iconSize: 160,
   textSize: 13,
   // The picture's own paper colour (#faf9f5), behind anything it leaves bare.
   backgroundColor: Object.freeze([0xfa / 255, 0xf9 / 255, 0xf5 / 255]),
-  // Finder draws each name this far below its icon centre (macOS 26, 128 pt
-  // icons, 13 pt text). The picture sets a plate there; see the renderer.
-  labelOffset: 83,
-  app: Object.freeze({ x: 170, y: 220 }),
-  applications: Object.freeze({ x: 470, y: 220 }),
+  // Finder draws the name this far below the icon centre (macOS 26, 160 pt
+  // icon, 13 pt text). The picture sets a plate there; see the renderer.
+  labelOffset: 100,
+  // The one icon, centred under the title.
+  app: Object.freeze({ x: 320, y: 226 }),
   filesystem: "HFS+",
 });
 
@@ -367,7 +390,6 @@ export function finderRecords({ appName = "Relay.app", backgroundAlias, layout =
     { name: ".", code: "vSrn", type: "long", value: 1 },
     { name: ".", code: "vstl", type: "type", value: "icnv" },
     { name: appName, code: "Iloc", type: "blob", value: iconLocation(layout.app) },
-    { name: "Applications", code: "Iloc", type: "blob", value: iconLocation(layout.applications) },
   ];
 }
 
@@ -397,15 +419,16 @@ export function inspectVolumeLayout(mount, { appName = "Relay.app" } = {}) {
   const icvp = parseBinaryPlist(find(".", "icvp"));
   const bwsp = parseBinaryPlist(find(".", "bwsp"));
   const alias = parseAlias(icvp.backgroundImageAlias);
-  return { records, icvp, bwsp, alias, app: position(appName), applications: position("Applications") };
+  const placed = records.filter(record => record.code === "Iloc").map(record => record.name);
+  return { records, icvp, bwsp, alias, placed, app: position(appName) };
 }
 
-export function assertVolumeLayout(mount, { volumeName = "Relay", layout = DMG_LAYOUT, background = DMG_BACKGROUND, appName = "Relay.app" } = {}) {
+export function assertVolumeLayout(mount, { volumeName = DMG_VOLUME_NAME, layout = DMG_LAYOUT, background = DMG_BACKGROUND, appName = "Relay.app" } = {}) {
   const found = inspectVolumeLayout(mount, { appName });
   const { x, y, width, height } = layout.window;
-  assert.deepEqual(found.app, { x: layout.app.x, y: layout.app.y }, "Relay.app sits on the left");
-  assert.deepEqual(found.applications, { x: layout.applications.x, y: layout.applications.y }, "Applications sits on the right");
-  assert.ok(found.app.x < found.applications.x);
+  assert.deepEqual(found.placed, [appName], "Relay is the only icon in the window");
+  assert.deepEqual(found.app, { x: layout.app.x, y: layout.app.y }, "Relay sits in the middle");
+  assert.equal(found.app.x, width / 2);
   assert.equal(found.bwsp.WindowBounds, `{{${x}, ${y}}, {${width}, ${height}}}`);
   for (const key of ["ShowToolbar", "ShowStatusBar", "ShowSidebar", "ShowPathbar", "ShowTabView"]) assert.equal(found.bwsp[key], false, key);
   assert.equal(found.icvp.iconSize, layout.iconSize);
@@ -415,7 +438,9 @@ export function assertVolumeLayout(mount, { volumeName = "Relay", layout = DMG_L
   assert.equal(found.alias.posixPath, `/${BACKGROUND_DIRECTORY}/${BACKGROUND_NAME}`);
   assert.equal(found.alias.carbonPath, `${volumeName}:${BACKGROUND_DIRECTORY}:${BACKGROUND_NAME}`);
   assert.ok(fs.readFileSync(path.join(mount, BACKGROUND_DIRECTORY, BACKGROUND_NAME)).equals(fs.readFileSync(background)), "the committed background");
-  assert.equal(fs.readlinkSync(path.join(mount, "Applications")), "/Applications");
+  // Nothing to drag onto: an Applications link would invite the copy that
+  // never opens Relay.
+  assert.deepEqual(fs.readdirSync(mount).filter(name => !name.startsWith(".")), [appName], "only Relay is on the volume");
   assert.ok(fs.statSync(path.join(mount, appName)).isDirectory());
   return found;
 }
@@ -442,7 +467,7 @@ function defaultRun(command, args) {
 }
 const defaultSleep = seconds => spawnSync("sleep", [String(seconds)]);
 
-export function buildMacDmg({ app, output, volumeName = "Relay", layout = DMG_LAYOUT, background = DMG_BACKGROUND,
+export function buildMacDmg({ app, output, volumeName = DMG_VOLUME_NAME, layout = DMG_LAYOUT, background = DMG_BACKGROUND,
   run = defaultRun, sleep = defaultSleep, temporary = os.tmpdir() }) {
   if (process.platform !== "darwin") throw new Error("Building a Mac disk image requires macOS");
   assert.ok(path.isAbsolute(app) && app.endsWith(".app"), "app must be an absolute .app path");
@@ -453,7 +478,6 @@ export function buildMacDmg({ app, output, volumeName = "Relay", layout = DMG_LA
   try {
     fs.mkdirSync(image);
     fs.cpSync(app, path.join(image, path.basename(app)), { recursive: true, verbatimSymlinks: true });
-    fs.symlinkSync("/Applications", path.join(image, "Applications"));
     // Room for the picture and .DS_Store beyond what hdiutil sizes for the app.
     const extra = Math.ceil(fs.statSync(background).size / 1_048_576) + 16;
     const megabytes = Math.ceil(Number(run("/usr/bin/du", ["-sk", image]).trim().split(/\s+/)[0]) / 1024 * 1.2) + extra;

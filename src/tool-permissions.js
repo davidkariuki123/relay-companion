@@ -18,4 +18,9 @@ export const READ_ONLY_RELAY_TOOL_NAMES = new Set([
   "relay_topic_context",
   "relay_topic_threads",
   "relay_connector_list_tools",
+  // First-run setup: these read this computer's setup and recent-work titles.
+  // The waiting tool also tells the Relay app an AI is listening.
+  "relay_onboarding_current",
+  "relay_onboarding_recent_work",
+  "relay_onboarding_wait_pick",
 ]);

@@ -118,6 +118,28 @@ export async function startDesktopOnboardingBridge({ directory, authorization, v
       if (state.stage === "teaching" && relayId) return emit("SEND_CONFIRMED", {accountId,relayId});
       return state;
     }),
+    /**
+     * The person chose a local AI in the pill (2026-10-10). The app finishes
+     * the account step the AI's start and ready used to run, so the AI opens
+     * on a connected account and runs no setup commands. Signed in already,
+     * this never opens a browser. Returns the run at teaching or later.
+     */
+    prepareLocalAgent: (host) => serialize(async () => {
+      if (!["codex", "claude_code", "conductor"].includes(host)) throw new Error("Choose Claude Code, Codex or Conductor.");
+      if (["cancelled", "complete"].includes(state.stage)) return state;
+      if (!(await isPaired())) throw new Error("Sign in to Relay first.");
+      if (state.stage === "prompt") await emit("AGENT_STARTED", { guideVersion: GUIDE_VERSION, host });
+      if (state.stage === "connecting") {
+        const account = await verifyAccount();
+        await emit("ACCOUNT_SAVED", { accountId: account?.id, ...(account?.onboardingContext ? { context: { ...state.context, ...account.onboardingContext } } : {}) });
+      }
+      if (state.stage === "verifying") {
+        const account = await verifyAccount();
+        if (account?.id !== state.accountId) throw new Error("Relay account changed. Choose your AI again.");
+        await emit("HOST_VERIFIED", { accountId: account.id });
+      }
+      return state;
+    }),
     complete: (accountId) => serialize(async () => {
       if (state.stage === "complete") return state;
       const account = await verifyAccount();
@@ -130,7 +152,8 @@ export async function startDesktopOnboardingBridge({ directory, authorization, v
       atomicWrite(descriptor, { endpoint, capability, run: state.id, guideVersion: GUIDE_VERSION });
       await onChange(state); return state;
     }),
-    close: async () => { clearInterval(poll); await queue; await new Promise(resolve => server.close(resolve)); fs.rmSync(descriptor, { force: true }); } };
+    // A refused operation leaves the queue rejected; closing still closes.
+    close: async () => { clearInterval(poll); await queue.catch(() => {}); await new Promise(resolve => server.close(resolve)); fs.rmSync(descriptor, { force: true }); } };
 }
 export async function callDesktopOnboarding({ directory, operation, run, host, guideVersion, accountId }) {
   const descriptor = JSON.parse(fs.readFileSync(path.join(directory, "onboarding-bridge.json"), "utf8"));

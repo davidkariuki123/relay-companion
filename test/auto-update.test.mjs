@@ -550,7 +550,7 @@ test("slow canonical staging never launches a duplicate worker inside its full t
   assert.equal(launched.length, 1);
 });
 
-import { readMigrationFailure, RECOVERY_SUPERSEDE_AFTER } from "../src/auto-update.js";
+import { readMigrationFailure, RECOVERY_SUPERSEDE_AFTER, RECOVERY_EXHAUSTED_AFTER } from "../src/auto-update.js";
 
 // ---- the canonical migration must back off across daemon restarts -----------
 // Launching a migration quiesces and exits the daemon, launchd restarts it, and the
@@ -975,22 +975,24 @@ test("a Windows autostart repoint launches repair-runtime through the hidden WMI
 // Six 0.1.490 machines spent 2026-09-13 retrying the same 0.1.510 recovery every
 // hour. A candidate that has failed this often will not pass on the next identical
 // attempt; once the channel has moved on, the newer release supersedes it.
-function supersedingUpdater({ statePath, launched, now, latest, releasePolicy }) {
+function supersedingUpdater({ statePath, launched, now, latest, releasePolicy, manual = false, candidate = "0.1.510", log = () => {}, checkIntervalMs }) {
   return createAutoUpdater({
     useCanonicalRuntime: true,
     platform: "darwin",
     packageRoot: "/opt/homebrew/lib/node_modules/relay-companion",
     getCurrentVersion: () => "0.1.490",
     getCanonicalRuntime: () => null,
-    getCanonicalRuntimeState: () => ({ state: "recovery-required", candidate: { version: "0.1.510" } }),
-    getLatestVersion: async () => latest,
+    getCanonicalRuntimeState: () => ({ state: "recovery-required", candidate: { version: candidate } }),
+    getLatestVersion: async () => (typeof latest === "function" ? latest() : latest),
     spawnUpdate: (options) => launched.push(options),
     now,
     retryCooldownMs: 1_000,
     restartCooldownMs: 0,
     updateStatePath: statePath,
+    ...(manual ? { useFailureBackoff: false, explicitRepair: true } : {}),
+    ...(checkIntervalMs ? { checkIntervalMs } : {}),
     ...(releasePolicy ? { releasePolicy } : {}),
-    log: () => {},
+    log,
   });
 }
 
@@ -1012,8 +1014,13 @@ test("a candidate that keeps failing recovery is superseded by a newer release o
   assert.equal(superseded.superseded, "0.1.510");
   assert.equal(launched.at(-1).targetVersion, "0.1.512");
   assert.equal(launched.at(-1).supersedeBrokenRecovery, true);
-  assert.equal(readMigrationFailure(statePath, { slot: "recoveryFailure" }).target, "canonical-recovery:0.1.512", "the new target starts its own failure count");
-  assert.equal(readMigrationFailure(statePath, { slot: "recoveryFailure" }).count, 1);
+  // The episode stays keyed by the stuck journal's candidate, so the superseding
+  // attempt continues the same count instead of resetting it (see the alternation
+  // test below); the record names the release it actually launched.
+  const record = readMigrationFailure(statePath, { slot: "recoveryFailure" });
+  assert.equal(record.target, "canonical-recovery:0.1.510");
+  assert.equal(record.count, RECOVERY_SUPERSEDE_AFTER + 1);
+  assert.equal(record.launched, "0.1.512");
 });
 
 test("without a newer release the failing candidate keeps its own backoff", async () => {
@@ -1030,6 +1037,147 @@ test("without a newer release the failing candidate keeps its own backoff", asyn
   assert.equal(readMigrationFailure(statePath, { slot: "recoveryFailure" }).count, RECOVERY_SUPERSEDE_AFTER + 1);
 });
 
+
+// Field incident 2026-10-10: two 0.1.490 Macs retried `canonical-recovery:0.1.510`
+// 640+ times over four weeks. The first supersede keyed its record by the release
+// it launched, so the candidate and its replacement reset each other's count:
+// ~16 attempts an hour, a count that never passed 3, a firstAt that kept moving.
+function recoveryReplay({ latest, minutes, retryCooldownMs = 2 * 60_000 }) {
+  const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-replay-")), "update-state.json");
+  const launched = [];
+  const statuses = [];
+  let clock = Date.parse("2026-09-13T13:44:51Z");
+  const makeUpdater = () => createAutoUpdater({
+    useCanonicalRuntime: true,
+    platform: "darwin",
+    packageRoot: "/Users/x/.relay/runtime/releases/r490/node_modules/relay-companion",
+    getCurrentVersion: () => "0.1.490",
+    getCanonicalRuntime: () => null,
+    getCanonicalRuntimeState: () => ({ state: "recovery-required", candidate: { version: "0.1.510" } }),
+    getLatestVersion: async () => (typeof latest === "function" ? latest(clock) : latest),
+    spawnUpdate: (options) => launched.push({ ...options, at: clock }),
+    now: () => clock,
+    retryCooldownMs,
+    restartCooldownMs: 0,
+    updateStatePath: statePath,
+    log: () => {},
+  });
+  return {
+    statePath, launched, statuses,
+    get clock() { return clock; },
+    async run(total = minutes) {
+      // A failed recovery restarts the daemon, so every attempt is seen by a
+      // fresh updater: only the durable record carries anything across.
+      for (let minute = 0; minute < total; minute++) {
+        statuses.push((await makeUpdater().tick()).status);
+        clock += 60_000;
+      }
+    },
+  };
+}
+
+test("a superseded recovery keeps one escalating record instead of alternating with the stuck candidate", async () => {
+  const replay = recoveryReplay({ latest: "0.1.624", minutes: 12 * 60 });
+  await replay.run();
+  const targets = replay.launched.map((launch) => launch.targetVersion);
+  // The candidate is retried RECOVERY_SUPERSEDE_AFTER times; after that every
+  // attempt targets the channel's current release, never the dead candidate again.
+  assert.deepEqual(targets.slice(0, RECOVERY_SUPERSEDE_AFTER), Array(RECOVERY_SUPERSEDE_AFTER).fill("0.1.510"));
+  assert.ok(targets.slice(RECOVERY_SUPERSEDE_AFTER).every((target) => target === "0.1.624"), targets.join(","));
+  assert.ok(replay.launched.slice(RECOVERY_SUPERSEDE_AFTER).every((launch) => launch.supersedeBrokenRecovery === true));
+  // Exponential backoff reaches the hourly ceiling: 2,4,8,16,32 min then hourly,
+  // so 12 hours is ~17 attempts, not the ~190 the alternating record allowed.
+  assert.ok(replay.launched.length <= 18, `launched ${replay.launched.length} times in 12h`);
+  const record = readMigrationFailure(replay.statePath, { slot: "recoveryFailure" });
+  assert.equal(record.target, "canonical-recovery:0.1.510", "the episode key never moves");
+  assert.equal(record.count, replay.launched.length, "every attempt counts toward the same episode");
+  assert.equal(record.firstAt, Date.parse("2026-09-13T13:44:51Z"), "the episode's age survives the supersede");
+  assert.equal(record.launched, "0.1.624");
+});
+
+test("a superseding recovery follows the channel as stable moves", async () => {
+  let current = "0.1.550";
+  const replay = recoveryReplay({ latest: () => current, minutes: 3 * 60 });
+  await replay.run();
+  assert.equal(replay.launched.at(-1).targetVersion, "0.1.550");
+  current = "0.1.624";
+  await replay.run(2 * 60);
+  assert.equal(replay.launched.at(-1).targetVersion, "0.1.624", "each attempt re-reads the current signed release");
+});
+
+test("a recovery that keeps failing is parked, reported, and reopened by a newer release or a day", async () => {
+  let current = "0.1.624";
+  const replay = recoveryReplay({ latest: () => current, minutes: 0 });
+  await replay.run(36 * 60);
+  const attempts = replay.launched.length;
+  assert.equal(attempts, RECOVERY_EXHAUSTED_AFTER, "no attempt after the episode is exhausted");
+  assert.equal(replay.statuses.at(-1), "recovery-exhausted");
+  const parked = readMigrationFailure(replay.statePath, { slot: "recoveryFailure" });
+  assert.ok(parked.exhaustedAt > 0);
+  assert.equal(parked.count, RECOVERY_EXHAUSTED_AFTER);
+  assert.equal(parked.launched, "0.1.624");
+
+  // A different release on the channel is a genuinely new attempt.
+  current = "0.1.630";
+  await replay.run(5);
+  assert.equal(replay.launched.length, attempts + 1);
+  assert.equal(replay.launched.at(-1).targetVersion, "0.1.630");
+  const reopened = readMigrationFailure(replay.statePath, { slot: "recoveryFailure" });
+  assert.equal(reopened.exhaustedAt, undefined, "a reopened episode is no longer parked");
+  assert.equal(reopened.count, attempts + 1, "but it keeps its history");
+
+  // It fails again with nothing newer: parked after its backoff, then one retry a day.
+  await replay.run(3 * 60);
+  assert.equal(replay.statuses.at(-1), "recovery-exhausted");
+  const before = replay.launched.length;
+  await replay.run(24 * 60 + 5);
+  assert.equal(replay.launched.length, before + 1, "exactly one daily retry while parked");
+});
+
+test("relay update on a stuck recovery moves to the current release at once, through backoff and parking", async () => {
+  const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-manual-")), "update-state.json");
+  const launched = [];
+  // Park the episode first.
+  fs.writeFileSync(statePath, JSON.stringify({ recoveryFailure: { target: "canonical-recovery:0.1.510", count: 640, firstAt: 1, lastAt: 9_000, launched: "0.1.624", exhaustedAt: 9_000 } }));
+  const parked = await supersedingUpdater({ statePath, launched, now: () => 10_000, latest: "0.1.624" }).tick();
+  assert.equal(parked.status, "recovery-exhausted");
+  assert.equal(launched.length, 0);
+  const manual = await supersedingUpdater({ statePath, launched, now: () => 10_000, latest: "0.1.624", manual: true }).tick();
+  assert.equal(manual.status, "recovering-runtime");
+  assert.equal(manual.target, "0.1.624");
+  assert.equal(launched.at(-1).supersedeBrokenRecovery, true);
+});
+
+test("a parked recovery asks the channel for a new release at most hourly", async () => {
+  const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-parked-")), "update-state.json");
+  const launched = [];
+  let clock = 10_000_000;
+  let checks = 0;
+  fs.writeFileSync(statePath, JSON.stringify({ recoveryFailure: { target: "canonical-recovery:0.1.510", count: 30, firstAt: 1, lastAt: clock, launched: "0.1.624", exhaustedAt: clock } }));
+  let current = "0.1.624";
+  // The ordinary release check is made rare here so only the parked check fetches.
+  const updater = supersedingUpdater({ statePath, launched, now: () => clock, checkIntervalMs: 24 * 3_600_000,
+    latest: () => { checks++; return current; } });
+  for (let minute = 0; minute < 180; minute++) {
+    assert.equal((await updater.tick()).status, "recovery-exhausted");
+    clock += 60_000;
+  }
+  assert.equal(launched.length, 0);
+  assert.equal(checks, 3, "one ordinary check, then one parked check an hour");
+  // A newer release on the channel reopens the episode at the next parked check.
+  current = "0.1.630";
+  for (let minute = 0; minute < 61 && !launched.length; minute++) { await updater.tick(); clock += 60_000; }
+  assert.equal(launched.at(-1)?.targetVersion, "0.1.630");
+});
+
+test("a fresh stuck journal still tries its own rollback first", async () => {
+  const statePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "relay-recovery-first-")), "update-state.json");
+  const launched = [];
+  const first = await supersedingUpdater({ statePath, launched, now: () => 10, latest: "0.1.624" }).tick();
+  assert.equal(first.status, "recovering-runtime");
+  assert.equal(launched.at(-1).targetVersion, "0.1.510");
+  assert.equal(launched.at(-1).supersedeBrokenRecovery, false);
+});
 
 test("an offline v2 client can cross a retained bridge before reading the v3 feed", async () => {
   const pair = () => crypto.generateKeyPairSync("ed25519");

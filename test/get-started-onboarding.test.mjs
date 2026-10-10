@@ -7,7 +7,8 @@ import test from "node:test";
 // its first Relay is a share link for someone who is not on Relay. The pill
 // that "npx relay-companion setup" opened signs in on its own, then shows the
 // same first-send chapter as the invite path: a handoff that asks for a link,
-// the ready screen carrying the celebration, Grow your network, Open Relay.
+// then the ready screen carrying the celebration (no Grow your network since
+// 2026-10-10; the chapter ends by opening Relay).
 // The invite path's strings and screens are pinned elsewhere and unchanged.
 
 const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
@@ -124,20 +125,24 @@ test("the handoff asks for a link when the first Relay is one, and the hello cop
 
 test("the ready screen carries the celebration when the link was the first Relay", () => {
   const chapter = slice("  function renderFirstRelayChapter() {", "  // OPEN RELAY (2026-09-13)");
-  assert.match(chapter, /const firstRelayWasLink = link\.relayId === payload\.ui\?\.firstRelayId;/);
-  assert.match(chapter, /class="su-first-relay su-first-link\$\{firstRelayWasLink \? " su-first-relay-sent" : ""\}"/);
-  assert.match(chapter, /\$\{firstRelayWasLink \? '<div class="su-relay-moment" aria-hidden="true"><i><\/i><i><\/i><i><\/i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" \/><\/svg><\/div>' : ""\}/);
-  assert.match(chapter, /\$\{firstRelayWasLink \? "Your first Relay" : "Your first link"\}/);
-  assert.match(chapter, /Send it wherever you talk to them\. They can ask their own AI to reply\. Their reply will appear inside your Relay app, even if they don’t have Relay\./);
-  assert.doesNotMatch(chapter, /Their reply lands here as its own chat\./);
+  // IT'S READY TO SEND (2026-10-10): a link that was the first Relay lands on
+  // the ready screen with the moment; there is no second link lesson.
+  assert.match(chapter, /const firstRelayWasLink = Boolean\(link && link\.relayId === payload\.ui\?\.firstRelayId\);/);
+  assert.match(chapter, /if \(chapter\.stage === "link" && !firstRelayWasLink\) chapter\.stage = stageAfterFirstLink\(\);/);
+  assert.match(chapter, /class="su-first-relay su-first-link su-first-relay-sent"/);
+  assert.match(chapter, /<h1 class="su-title">It’s ready to send\.<\/h1>/);
+  assert.match(chapter, /Send the link to whoever should review it\. They read and reply in their browser, with nothing to install\./);
+  assert.match(chapter, />\$\{chapter\.linkCopied \? "Copied" : "Copy link"\}</);
+  assert.match(chapter, />Open it yourself</);
+  assert.doesNotMatch(chapter, /Now relay someone who isn’t on Relay|Copy message|renderNetworkScreen\(/);
   // The identity of the first Relay is part of what the screen renders from;
   // the state of its controls is not, since a rebuild would replay the marks'
-  // entrance on every Copy message (the controls are patched in place).
-  assert.match(chapter, /JSON\.stringify\(\["link", link\?\.relayId \|\| "", link\?\.shareText \|\| "", payload\.ui\?\.firstRelayId \|\| ""\]\)/);
-  assert.match(chapter, /if \(rendered && \(!link \|\| syncFirstLinkControls\(chapter\)\)\) return;/);
+  // entrance on every Copy link (the controls are patched in place).
+  assert.match(chapter, /JSON\.stringify\(\["link", link\.relayId, link\.url, payload\.ui\?\.firstRelayId \|\| ""\]\)/);
+  assert.match(chapter, /if \(rendered && syncFirstLinkControls\(chapter\)\) return;/);
   const controls = slice("  function syncFirstLinkControls(chapter) {", "  function renderNetworkScreen(step) {");
   assert.match(controls, /copy\.disabled = signupBusy; next\.disabled = signupBusy;/);
-  assert.match(controls, /copy\.textContent = chapter\.linkCopied \? "Copied" : "Copy message";/);
+  assert.match(controls, /copy\.textContent = chapter\.linkCopied \? "Copied" : "Copy link";/);
   assert.match(controls, /errorEl\.textContent = chapter\.linkError;/);
   // The hop keeps obeying the surface lifecycle on the ready screen too.
   assert.match(html, /\.su-first-relay-sent \.su-relay-moment i \{[^}]*animation-play-state:var\(--relay-loop-state\);/);

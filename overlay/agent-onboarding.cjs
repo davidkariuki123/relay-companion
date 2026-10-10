@@ -89,7 +89,7 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
         runError: chosen?.runError || "",
         kind: known?.kind || "",
         destination: known?.org?.name || known?.inviter?.name || "",
-        openable: { "claude-code": ownsScheme("claude://"), codex: ownsScheme("codex://"), claudeApp: ownsScheme("claude://") },
+        openable: { "claude-code": ownsScheme("claude://"), codex: ownsScheme("codex://"), conductor: process.platform === "darwin" && ownsScheme("conductor://"), claudeApp: ownsScheme("claude://") },
         connector: connectorSurface(chosen?.host) ? api.connectorSnapshot(key, connectorSurface(chosen.host)) : null,
         // "connector" once a hosted connector connected this choice (ChatGPT's
         // app); a ChatGPT connected by a setup code started its lesson there.

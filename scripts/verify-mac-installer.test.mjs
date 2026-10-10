@@ -3,7 +3,7 @@ import test from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { validateInputs, assertDisposable, verifyCandidate, clickInstallButton, installerModes, recoveryVersions, pairsDuringSetup, selectStockChannel } from "./verify-mac-installer.mjs";
+import { validateInputs, assertDisposable, verifyCandidate, installingOnItsOwn, installerModes, recoveryVersions, pairsDuringSetup, selectStockChannel } from "./verify-mac-installer.mjs";
 
 test("a Dev candidate's stock baseline is moved to Dev by its own CLI before any damage", t => {
   const relayRoot = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mac-channel-"));
@@ -37,22 +37,19 @@ test("native recovery coverage includes every agreed stock starting version and 
   }
   assert.throws(() => validateInputs({ ...input, mode: "legacy-latest" }));
 });
-test("successful relocation may close the renderer before mouse-up is acknowledged", async () => {
-  const release = Promise.withResolvers(), calls = [];
-  let sent = false;
-  const click = clickInstallButton({ send: async (_method, params) => {
-    calls.push(params.type);
-    if (params.type === "mouseReleased") return release.promise;
-  } }, { x: 20, y: 40 }, () => { sent = true; });
-  await Promise.resolve();
-  assert.deepEqual(calls, ["mousePressed", "mouseReleased"]);
-  assert.equal(sent, true, "native postconditions must still be checked after the renderer exits");
-  release.reject(Error("CDP disconnected during app relaunch"));
-  await assert.rejects(click, /disconnected/);
-  let pressed = false;
-  await assert.rejects(clickInstallButton({ send: async () => { throw Error("not connected"); } },
-    { x: 20, y: 40 }, () => { pressed = true; }));
-  assert.equal(pressed, false);
+// Founder, 0.1.624 (2026-10-10): the proof installs as a person now does, by
+// opening Relay from the disk image, with nothing to click.
+test("the proof sends no input: it only watches the stock app install itself", () => {
+  assert.equal(installingOnItsOwn("relay-setup://app/native-install.html", "Install Relay\nInstalling Relay…\nMoving Relay into your Applications folder."), true);
+  assert.equal(installingOnItsOwn("relay-setup://app/native-bootstrap.html", "Installing Relay…"), false);
+  assert.equal(installingOnItsOwn("relay-setup://app/native-install.html", "Drag Relay to Applications."), false);
+  assert.equal(installingOnItsOwn(undefined, "Installing Relay…"), false);
+  const source = fs.readFileSync(new URL("./verify-mac-installer.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /Input\.dispatch|migration\.relocate/, "no clicks and no privileged bridge");
+  const seen = source.indexOf('record("stock-installer-ui-opened"); record("install-started-without-input")');
+  const screenshot = source.indexOf('client.send("Page.captureScreenshot")');
+  assert.ok(seen > 0 && seen < screenshot, "the start is recorded before the move can close the renderer");
+  assert.match(source, /assertVolumeLayout\(path\.dirname\(target\.app\), \{ volumeName: DMG_VOLUME_NAME,/, "the signed image is the Install Relay window");
 });
 test("installer proof requires exact identity and never prepares a newer baseline", () => {
   validateInputs(input);

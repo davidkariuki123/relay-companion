@@ -3725,9 +3725,55 @@
   @keyframes su-agent-breathe { 0%, 100% { opacity:.35; transform:scale(.8); } 50% { opacity:1; transform:scale(1.15); } }
   @media (prefers-reduced-motion:reduce) { .su-agent-live > span { animation:none; } }
   .su-agent-quiet { display:flex; justify-content:center; align-items:center; gap:8px; margin-top:4px; color:var(--muted-3); font-size:11px; }
-  .su-agent-quiet .su-link { min-height:28px; font-size:12px; }
+  .su-agent-quiet .su-link { display:inline-flex; align-items:center; min-height:28px; font-size:12px; }
   .su-local-prompt .su-form.su-agent-actions { gap:6px; }
   .su-agent-request { overflow-wrap:anywhere; }
+  /* YOUR FIRST RELAY (2026-10-10). The local AI's four ideas, in the chooser's
+     own row shape: an icon for the kind, the title, one line. The list scrolls
+     inside itself, so a long idea wraps instead of being cut. */
+  .su-ideas .su-title { max-width:none; font-size:28px; }
+  .su-idea-list { margin-top:16px; max-height:min(282px, 42vh); overflow-y:auto; overscroll-behavior:contain;
+    border:1px solid var(--hair); border-radius:10px; background:var(--wash); }
+  .su-idea { --host-color:var(--accent); appearance:none; width:100%; min-height:56px; padding:10px 14px; border:0; background:transparent;
+    display:grid; grid-template-columns:28px minmax(0,1fr) auto; align-items:center; gap:11px; cursor:pointer; text-align:left; color:var(--ink);
+    transition:background-color var(--t-fast) var(--settle); }
+  .su-idea + .su-idea { border-top:1px solid var(--hair); }
+  .su-idea:not(.skeleton):hover:not(:disabled) { background-color:var(--wash-2); }
+  .su-idea:focus-visible { outline:2px solid var(--accent); outline-offset:-3px; }
+  .su-idea:disabled { cursor:default; }
+  .su-idea-icon { display:grid; place-items:center; width:28px; height:28px; border-radius:8px; color:var(--accent);
+    background:color-mix(in srgb, var(--accent) 12%, transparent); }
+  .su-idea-icon svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .su-idea-copy { min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .su-idea-title { font:600 13px/1.3 var(--sans); color:var(--ink); overflow-wrap:anywhere; }
+  .su-idea-line { font:12px/1.4 var(--sans); color:var(--muted); overflow-wrap:anywhere; }
+  .su-idea .th-host-arrow { --host-color:var(--muted-2); }
+  .su-idea:hover:not(:disabled) .th-host-arrow { --host-color:var(--accent); }
+  .su-idea-foot { margin:10px 0 0; color:var(--muted-2); font-size:11px; line-height:1.45; text-align:center; }
+  .su-idea.skeleton { cursor:default; min-height:46px; padding-top:8px; padding-bottom:8px; }
+  /* The signup card is a fixed height: never let a tall ideas screen lose its top. */
+  .su-body:has(.su-ideas) { justify-content:safe center; }
+  .su-ideas-finding .su-send-progress { margin-top:14px; }
+  .su-idea.skeleton .su-idea-icon { background:var(--hair); }
+  .su-skel { display:block; height:9px; border-radius:5px; background:var(--hair); animation:su-skel-breathe 1.6s ease-in-out infinite; animation-play-state:var(--relay-loop-state); }
+  .su-skel + .su-skel { margin-top:6px; }
+  .su-skel.w70 { width:70%; } .su-skel.w45 { width:45%; } .su-skel.w60 { width:60%; } .su-skel.w38 { width:38%; }
+  .su-idea.skeleton:nth-child(2) .su-skel { animation-delay:.15s; }
+  .su-idea.skeleton:nth-child(3) .su-skel { animation-delay:.3s; }
+  .su-idea.skeleton:nth-child(4) .su-skel { animation-delay:.45s; }
+  @keyframes su-skel-breathe { 0%, 100% { opacity:.55; } 50% { opacity:1; } }
+  .su-idea.arrived { animation:su-idea-in .45s var(--settle) both; }
+  @keyframes su-idea-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+  .su-idea.arrived:nth-child(2) { animation-delay:.07s; }
+  .su-idea.arrived:nth-child(3) { animation-delay:.14s; }
+  .su-idea.arrived:nth-child(4) { animation-delay:.21s; }
+  @media (prefers-reduced-motion:reduce) { .su-skel, .su-idea.arrived { animation:none; } }
+  .su-idea-quote { margin:16px 0 0; padding:11px 14px; border-left:3px solid var(--accent); border-radius:0 10px 10px 0; background:var(--wash); }
+  .su-idea-quote .su-idea-title { display:block; }
+  .su-idea-quote .su-idea-line { display:block; margin-top:2px; }
+  .su-ideas .su-form .su-secondary { justify-self:start; padding-left:18px; padding-right:18px; }
+  .su-link-field { margin-top:16px; }
+  .su-link-field .su-input { font-family:var(--mono); font-size:12px; user-select:all; }
   .su-agent-request.preparing { color:var(--muted); }
   /* CLAUDE CONNECTS BY CONNECTOR (2026-10-07). Claude opens its add screen
      with Relay filled in; what is left is four clicks, drawn as the buttons
@@ -23258,6 +23304,16 @@
     }, delay);
   }
 
+  // Loopback sign-in handoff: the browser handed the approval to this
+  // computer. Check now instead of on the next poll, so the pill moves on as
+  // it comes to the front.
+  window.relay.onInstallationAuthChanged?.(() => {
+    if (payload.account?.paired !== false || signupConnectionCommitted) return;
+    if (!["google", "finishing", "resume"].includes(signupStage)) return;
+    signupPollFailures = 0;
+    pollInstallationState({ immediate:true });
+  });
+
   async function resumeInstallationSetup() {
     if (signupBusy || !window.relay.installationAuthResume) return;
     signupBusy = true; signupError = ""; renderSignup();
@@ -23450,16 +23506,16 @@
     const link = payload.ui?.firstLink;
     return link && typeof link === "object" && link.url ? link : null;
   }
-  async function copyFirstLinkMessage() {
+  async function copyFirstLink() {
     const chapter = firstRelayChapterForAccount();
-    if (signupBusy || !window.relay.copyFirstLinkMessage) return;
+    if (signupBusy || !window.relay.copyFirstLink) return;
     const account = chapter.account;
     signupBusy = true; chapter.linkError = ""; renderSignup();
     try {
-      const result = await window.relay.copyFirstLinkMessage(payload.account?.userId);
+      const result = await window.relay.copyFirstLink(payload.account?.userId);
       if (!result?.ok) throw new Error();
       if (account === signupAccountKey()) chapter.linkCopied = true;
-    } catch { if (account === signupAccountKey()) chapter.linkError = "The message couldn’t be copied. Select the text above and copy it."; }
+    } catch { if (account === signupAccountKey()) chapter.linkError = "The link couldn’t be copied. Select it above and copy it."; }
     finally { if (account === signupAccountKey()) { signupBusy = false; renderSignup(); } }
   }
   // The ready screen's controls, updated without rebuilding the screen. False
@@ -23470,7 +23526,7 @@
     const next = screen?.querySelector("#suLinkContinue");
     if (!copy || !next) return false;
     copy.disabled = signupBusy; next.disabled = signupBusy;
-    copy.textContent = chapter.linkCopied ? "Copied" : "Copy message";
+    copy.textContent = chapter.linkCopied ? "Copied" : "Copy link";
     let errorEl = screen.querySelector(".su-error");
     if (chapter.linkError && !errorEl) {
       errorEl = document.createElement("p");
@@ -23499,11 +23555,16 @@
   function renderFirstRelayChapter() {
     const chapter = firstRelayChapterForAccount();
     const link = firstLinkForChapter();
-    if (chapter.stage === "celebrate" && link && link.relayId === payload.ui?.firstRelayId) chapter.stage = "link";
+    // A link that was itself the first Relay has no hello to celebrate: its
+    // moment is the ready screen. There is no second link lesson after a hello
+    // (2026-10-10): the chapter goes on to Slack, if offered, and then ends.
+    const firstRelayWasLink = Boolean(link && link.relayId === payload.ui?.firstRelayId);
+    if (chapter.stage === "celebrate" && firstRelayWasLink) chapter.stage = "link";
+    if (chapter.stage === "link" && !firstRelayWasLink) chapter.stage = stageAfterFirstLink();
     if (chapter.stage === "celebrate") {
       if (!chapter.timer) chapter.timer = setTimeout(() => {
         if (chapter !== firstRelayChapter || chapter.stage !== "celebrate") return;
-        chapter.timer = null; chapter.stage = "link"; renderSignup();
+        chapter.timer = null; chapter.stage = stageAfterFirstLink(); renderSignup();
       }, firstRelayCelebrationMs());
       if (signupBodyEl.querySelector("#suCelebrationContinue")) return;
       signupBodyEl.dataset.firstRelaySignature = "celebrate";
@@ -23515,52 +23576,55 @@
         <div class="su-form"><button class="su-primary" id="suCelebrationContinue" type="button">Continue</button></div>
         <div class="su-countdown" aria-hidden="true"><span></span></div>
       </div>`;
-      document.getElementById("suCelebrationContinue")?.addEventListener("click", () => advanceFirstRelayChapter("link"));
+      document.getElementById("suCelebrationContinue")?.addEventListener("click", () => advanceFirstRelayChapter(stageAfterFirstLink()));
       return;
     }
     if (chapter.stage === "link") {
-      // The signature covers what the screen is about, not the state of its
-      // controls: Copy message re-renders twice (busy, then copied or failed),
-      // and rebuilding the screen for that would replay the celebration
-      // marks' entrance when the link was the first Relay. The controls are
-      // patched in place instead (syncFirstLinkControls).
-      const signature = JSON.stringify(["link", link?.relayId || "", link?.shareText || "", payload.ui?.firstRelayId || ""]);
+      // IT'S READY TO SEND (2026-10-10). The signature covers what the screen
+      // is about, not the state of its controls: Copy link re-renders twice
+      // (busy, then copied or failed), and rebuilding the screen for that would
+      // replay the moment's entrance. The controls are patched in place
+      // instead (syncFirstLinkControls).
+      const signature = JSON.stringify(["link", link.relayId, link.url, payload.ui?.firstRelayId || ""]);
       const rendered = signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-first-link");
-      if (rendered && (!link || syncFirstLinkControls(chapter))) return;
+      if (rendered && syncFirstLinkControls(chapter)) return;
       signupBodyEl.dataset.firstRelaySignature = signature;
-      if (!link) {
-        signupBodyEl.innerHTML = `<div class="su-first-relay su-first-link">
-          <p class="su-step">Your first link</p>
-          <h1 class="su-title">Now relay someone who isn’t on Relay.</h1>
-          <p class="su-copy">${esc(onboardingAgentFor()?.name || "Your agent")} is asking who it’s for. <strong>Answer there</strong>, and your link shows up here, ready to send.</p>
-          <p class="su-send-progress" role="status"><span aria-hidden="true"></span>This screen updates when your link is ready.</p>
-          <div class="su-form"><button class="su-link" id="suLinkSkip" type="button">Skip for now</button></div>
-        </div>`;
-        document.getElementById("suLinkSkip")?.addEventListener("click", () => advanceFirstRelayChapter(stageAfterFirstLink()));
-        return;
-      }
-      const shareText = link.shareText || `${link.forHuman || ""}\n\n${link.url}`;
       let linkUrl = "";
-      try { const parsed = new URL(link.url); if (parsed.protocol === "https:" && !parsed.username && !parsed.password) linkUrl = parsed.href; } catch {}
-      const displayShareText = linkUrl && shareText.includes(linkUrl) ? esc(shareText).replace(esc(linkUrl), `<a href="${esc(linkUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Open your Relay" style="color:var(--accent);text-decoration:underline;text-underline-offset:3px">${esc(linkUrl)} ↗</a>`) : esc(shareText);
-      // A link that was itself the first Relay skipped the celebration, so the
-      // moment (the squares and the tick) lands on this screen instead.
-      const firstRelayWasLink = link.relayId === payload.ui?.firstRelayId;
-      signupBodyEl.innerHTML = `<div class="su-first-relay su-first-link${firstRelayWasLink ? " su-first-relay-sent" : ""}">
-        ${firstRelayWasLink ? '<div class="su-relay-moment" aria-hidden="true"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div>' : ""}
-        <p class="su-step">${firstRelayWasLink ? "Your first Relay" : "Your first link"}</p>
-        <h1 class="su-title">Your link is ready.</h1>
-        <div class="su-setup-prompt su-share-text" id="suFirstLinkText">${displayShareText}</div>
-        <p class="su-copy">Send it wherever you talk to them. They can ask their own AI to reply. Their reply will appear inside your Relay app, even if they don’t have Relay.</p>
-        <div class="su-form su-form-row"><button class="su-secondary" id="suLinkCopy" type="button"${signupBusy ? " disabled" : ""}>${chapter.linkCopied ? "Copied" : "Copy message"}</button><button class="su-primary" id="suLinkContinue" type="button"${signupBusy ? " disabled" : ""}>Continue</button></div>
+      try { const parsed = new URL(link.url); if ((parsed.protocol === "https:" || (parsed.protocol === "http:" && ["localhost", "127.0.0.1"].includes(parsed.hostname))) && !parsed.username && !parsed.password) linkUrl = parsed.href; } catch {}
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-first-link su-first-relay-sent">
+        <div class="su-relay-moment" aria-hidden="true"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div>
+        <p class="su-step">Your first Relay</p>
+        <h1 class="su-title">It’s ready to send.</h1>
+        <p class="su-copy">Send the link to whoever should review it. They read and reply in their browser, with nothing to install.</p>
+        <div class="su-link-field"><input class="su-input" id="suFirstLinkUrl" type="text" readonly aria-label="Your Relay’s link" value="${esc(linkUrl || link.url)}" /></div>
+        <div class="su-form"><button class="su-primary" id="suLinkCopy" type="button"${signupBusy ? " disabled" : ""}>${chapter.linkCopied ? "Copied" : "Copy link"}</button></div>
+        <div class="su-agent-quiet">${linkUrl ? `<a class="su-link" id="suLinkOpen" href="${esc(linkUrl)}" target="_blank" rel="noopener noreferrer">Open it yourself</a><span aria-hidden="true">·</span>` : ""}<button class="su-link" id="suLinkContinue" type="button"${signupBusy ? " disabled" : ""}>Continue</button></div>
         ${chapter.linkError ? `<p class="su-error" role="alert">${esc(chapter.linkError)}</p>` : ""}
       </div>`;
-      document.getElementById("suLinkCopy")?.addEventListener("click", copyFirstLinkMessage);
+      document.getElementById("suFirstLinkUrl")?.addEventListener("focus", (event) => event.target.select());
+      document.getElementById("suLinkCopy")?.addEventListener("click", copyFirstLink);
       document.getElementById("suLinkContinue")?.addEventListener("click", () => advanceFirstRelayChapter(stageAfterFirstLink()));
       return;
     }
     if (chapter.stage === "slack") { renderSlackOnboarding(chapter); return; }
-    renderNetworkScreen("Last step");
+    renderFirstRelayFinish(chapter);
+  }
+  // The end of the first-run chapter: no Grow your network screen any more
+  // (2026-10-10). Both chapters complete at once and Relay opens on the room
+  // of the Relay the person wrote; this screen only shows while that saves.
+  function renderFirstRelayFinish(chapter) {
+    const state = networkInviteForAccount();
+    if (!chapter.finishStarted) { chapter.finishStarted = true; setTimeout(() => { void finishNetworkInvitation(); }, 0); }
+    const signature = JSON.stringify(["finish", state.busy, state.error]);
+    if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-first-finish")) return;
+    signupBodyEl.dataset.firstRelaySignature = signature;
+    signupBodyEl.innerHTML = `<div class="su-first-relay su-first-finish"><p class="su-step">Your first Relay</p>
+      <h1 class="su-title">You’re all set.</h1>
+      ${state.error
+        ? `<p class="su-error" role="alert">${esc(state.error)}</p><div class="su-form"><button class="su-primary" id="suFinishRetry" type="button"${state.busy ? " disabled" : ""}>Try again</button></div>`
+        : '<p class="su-send-progress su-agent-live" role="status"><span aria-hidden="true"></span>Opening Relay…</p>'}
+    </div>`;
+    document.getElementById("suFinishRetry")?.addEventListener("click", () => { void finishNetworkInvitation(); });
   }
 
   // BRING YOUR SLACK (2026-10-07). One optional screen after the first link,
@@ -23852,7 +23916,8 @@
       copyLabel = "Copy request";
       if (run?.status === "pending") startOnboardingAgentPoll(); else stopOnboardingAgentPoll();
     } else {
-      request = `Read Relay’s local getting-started guide and help me connect my account and send my first Relay.<div class="desktop-local-file">↳ START-HERE.md · on this ${/Mac/.test(navigator.userAgent) ? "Mac" : "computer"}</div>`;
+      // The app connected the account already: the AI needs one sentence.
+      request = esc(payload.ui?.localOnboardingPrompt || "Set up Relay with me.");
       canOpen = Boolean(agent.openable?.[option.host]);
       copyLabel = "Copy prompt";
     }
@@ -23923,6 +23988,129 @@
     signupBodyEl.querySelector("[data-agent-retry]")?.addEventListener("click", () => { onboardingAgentNote = ""; void prepareOnboardingAgent(); });
     signupBodyEl.querySelector("[data-agent-copy]")?.addEventListener("click", copyOnboardingAgentRequest);
     signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+  }
+  // YOUR FIRST RELAY, PICKED HERE (2026-10-10). For Claude Code, Codex and
+  // Conductor the app connects the account when the AI is chosen and opens it
+  // with "Set up Relay with me." The AI writes four ideas into
+  // payload.ui.firstRelayIdeas; the person taps one; a waiting AI writes it,
+  // or, with none waiting, the AI is opened again with that idea typed in.
+  // The send itself still arrives through account history (firstRelayStatus).
+  const FIRST_RELAY_HINT_MS = 60_000;
+  const IDEA_ICONS = {
+    review: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 8s2.4-4.6 6.4-4.6S14.4 8 14.4 8s-2.4 4.6-6.4 4.6S1.6 8 1.6 8z"/><circle cx="8" cy="8" r="1.9"/></svg>',
+    answer: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.8 6a2.3 2.3 0 1 1 3.1 2.2c-.6.2-.9.7-.9 1.3v.4"/><path d="M8 12.4h.01"/></svg>',
+    handoff: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8h10M9 4.5 12.5 8 9 11.5"/></svg>',
+    update: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 9.6V6.4l7-3v9.2z"/><path d="M10 5.6c1.4.2 2.4 1.2 2.4 2.4s-1 2.2-2.4 2.4M4.6 9.9l.7 2.7"/></svg>',
+  };
+  let firstRelayPickBusy = false;
+  let firstRelayPickNote = "";
+  let firstRelayPickOpened = "";
+  let firstRelayHintTimer = null;
+  let firstRelayIdeasShown = "";
+  function firstRelayFlow() {
+    const flow = payload.ui?.firstRelayIdeas;
+    return flow && typeof flow === "object" && flow.id ? flow : null;
+  }
+  function firstRelayIdeaFor(flow) {
+    return flow?.pick ? (flow.ideas || []).find((idea) => idea.id === flow.pick.ideaId) || null : null;
+  }
+  function firstRelayIdeaQuote(idea) {
+    if (!idea) return "";
+    return `<blockquote class="su-idea-quote"><span class="su-idea-title">${esc(idea.title)}</span><span class="su-idea-line">${esc(idea.line)}</span></blockquote>`;
+  }
+  function renderLocalFirstRelay(agent, option) {
+    const flow = firstRelayFlow();
+    const started = flow && flow.host === option.host && (flow.openedAt || flow.agentSeenAt || (flow.ideas || []).length);
+    if (!started) { renderAgentSetup(agent); return; }
+    stopOnboardingAgentPoll();
+    const name = option.name;
+    const ideas = Array.isArray(flow.ideas) ? flow.ideas : [];
+    const picked = firstRelayIdeaFor(flow);
+    const inviter = flow.kind === "invite" ? flow.inviterFirstName || flow.inviterName : "";
+    const quiet = (open = true) => `<div class="su-agent-quiet">${open ? `<button class="su-link" type="button" data-agent-open>Open ${esc(name)}</button><span aria-hidden="true">·</span>` : ""}<button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>`;
+    if (picked) {
+      const waiter = flow.pick.mode === "waiter";
+      const signature = JSON.stringify(["first-relay-writing", flow.id, picked.id, flow.pick.mode, firstRelayPickOpened, inviter]);
+      if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-ideas")) return;
+      signupBodyEl.dataset.firstRelaySignature = signature;
+      const title = waiter
+        ? (inviter ? `${esc(name)} is writing to ${esc(inviter)}.` : `${esc(name)} is writing it.`)
+        : `Press send in ${esc(name)}.`;
+      const copy = waiter
+        ? (inviter ? `Look in ${esc(name)}. You’ll see the message first, and nothing goes to ${esc(inviter)} until you say send.` : `Look in ${esc(name)}. It shows you the Relay and its link when it’s ready.`)
+        : firstRelayPickOpened === "copied"
+          ? `${esc(name)} had stopped, and we couldn’t open it. This is copied: paste it into ${esc(name)} and press send.`
+          : `${esc(name)} had stopped, so we opened it again with this typed in.`;
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-ideas su-ideas-writing">
+        <p class="su-step">Your first Relay</p>
+        <h1 class="su-title">${title}</h1>
+        ${firstRelayIdeaQuote(picked)}
+        <p class="su-copy">${copy}</p>
+        <div class="su-form"><button class="su-secondary" type="button" data-agent-focus>Open ${esc(name)}</button></div>
+      </div>`;
+      signupBodyEl.querySelector("[data-agent-focus]")?.addEventListener("click", () => { void onboardingAgentCall("onboardingFocusAgent").catch(() => {}); });
+      return;
+    }
+    if (ideas.length === 4) {
+      clearTimeout(firstRelayHintTimer); firstRelayHintTimer = null;
+      const signature = JSON.stringify(["first-relay-pick", flow.id, ideas, flow.kind, flow.inviterName, flow.orgName, firstRelayPickBusy, firstRelayPickNote]);
+      if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-ideas")) return;
+      signupBodyEl.dataset.firstRelaySignature = signature;
+      // The rows rise in once, when the ideas first arrive; a repaint leaves them still.
+      const arriving = firstRelayIdeasShown !== `${flow.id}:${flow.ideasAt || ""}`;
+      firstRelayIdeasShown = `${flow.id}:${flow.ideasAt || ""}`;
+      const who = inviter || (flow.kind === "org" ? flow.orgName : "");
+      const foot = flow.kind === "invite" && flow.inviterName
+        ? `${esc(flow.inviterName)} invited you, so they’re in your contacts`
+        : `Suggested by ${esc(name)} from your recent chats`;
+      signupBodyEl.innerHTML = `<div class="su-first-relay su-ideas su-ideas-pick">
+        <p class="su-step">Your first Relay</p>
+        <h1 class="su-title">What do you need from ${who ? esc(who) : "someone"} this week?</h1>
+        <div class="su-idea-list" role="list">${ideas.map((idea) => `<button class="su-idea${arriving ? " arrived" : ""}" type="button" role="listitem" data-idea-id="${esc(idea.id)}"${firstRelayPickBusy ? " disabled" : ""}>
+          <span class="su-idea-icon" data-kind="${esc(idea.kind)}">${IDEA_ICONS[idea.kind] || IDEA_ICONS.update}</span>
+          <span class="su-idea-copy"><span class="su-idea-title">${esc(idea.title)}</span><span class="su-idea-line">${esc(idea.line)}</span></span>
+          <span class="th-host-arrow" aria-hidden="true">→</span></button>`).join("")}</div>
+        <p class="su-idea-foot">${foot}</p>
+        ${firstRelayPickNote ? `<p class="su-error" role="alert">${esc(firstRelayPickNote)}</p>` : ""}
+      </div>`;
+      signupBodyEl.querySelectorAll("[data-idea-id]").forEach((button) => button.addEventListener("click", () => pickFirstRelayIdea(button.dataset.ideaId)));
+      return;
+    }
+    // Waiting for ideas. No sign of the AI a minute after it was opened: the
+    // setup message is probably still sitting unsent in its composer.
+    const openedAt = Date.parse(flow.openedAt || "") || 0;
+    const quietFor = openedAt ? Date.now() - openedAt : 0;
+    const hint = !flow.agentSeenAt && openedAt > 0 && quietFor >= FIRST_RELAY_HINT_MS;
+    if (!flow.agentSeenAt && openedAt && !hint && !firstRelayHintTimer) {
+      firstRelayHintTimer = setTimeout(() => { firstRelayHintTimer = null; renderSignup(); }, FIRST_RELAY_HINT_MS - quietFor + 50);
+    }
+    const signature = JSON.stringify(["first-relay-finding", flow.id, hint, name]);
+    if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-ideas")) return;
+    signupBodyEl.dataset.firstRelaySignature = signature;
+    const skeleton = ["w70 w45", "w60 w38", "w70 w60", "w45 w38"].map((widths) => {
+      const [a, b] = widths.split(" ");
+      return `<div class="su-idea skeleton" role="listitem" aria-hidden="true"><span class="su-idea-icon"></span><span class="su-idea-copy"><span class="su-skel ${a}"></span><span class="su-skel ${b}"></span></span><span></span></div>`;
+    }).join("");
+    signupBodyEl.innerHTML = `<div class="su-first-relay su-ideas su-ideas-finding">
+      <p class="su-step">Your first Relay</p>
+      <h1 class="su-title">Finding ideas for your first Relay.</h1>
+      <p class="su-copy">${esc(name)} is looking at what you’ve worked on lately, so it can suggest something to send. Nothing goes to anyone yet.</p>
+      <div class="su-idea-list" role="list" aria-busy="true">${skeleton}</div>
+      ${hint ? `<p class="su-send-progress su-agent-live" role="status"><span aria-hidden="true"></span>Press send in ${esc(name)}.</p>${quiet(true)}` : ""}
+    </div>`;
+    signupBodyEl.querySelector("[data-agent-open]")?.addEventListener("click", openOnboardingAgent);
+    signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+  }
+  async function pickFirstRelayIdea(ideaId) {
+    if (firstRelayPickBusy || !ideaId) return;
+    firstRelayPickBusy = true; firstRelayPickNote = ""; renderSignup();
+    try {
+      const result = await onboardingAgentCall("onboardingPickIdea", ideaId);
+      firstRelayPickOpened = result?.opened || "";
+      if (result?.ideas) payload.ui = { ...payload.ui, firstRelayIdeas: result.ideas };
+    } catch (error) {
+      firstRelayPickNote = String(error?.message || "").replace(/^Error invoking remote method '[^']+': (Error: )?/, "") || "Relay couldn’t save that. Try again.";
+    } finally { firstRelayPickBusy = false; renderSignup(); }
   }
   async function chooseOnboardingAgent(host, place) {
     if (onboardingAgentBusy) return;
@@ -24229,7 +24417,7 @@
         signupBodyEl.innerHTML = `<p class="su-step">Setup paused</p><h1 class="su-title">Start when you’re ready.</h1><div class="su-form"><button class="su-primary" id="suDesktopRestart" type="button">Start again</button></div>`;
         document.getElementById("suDesktopRestart")?.addEventListener("click", async () => { await window.relay.installationAuthRestart(); });
       } else if (desktop.stage === "prompt") {
-        signupBodyEl.innerHTML = `<div class="su-local-prompt"><div class="su-step">Your next step</div><h1 class="su-title">Paste this into<br><span class="host-claude">Claude Code</span><br>or <span class="host-codex">Codex.</span></h1><p class="su-copy">Copy the prompt below, then paste it into a conversation in Claude Code or Codex.</p><div class="desktop-prompt-note">Read Relay’s local getting-started guide and help me connect my account and send my first Relay.<div class="desktop-local-file">↳ START-HERE.md · on this ${/Mac/.test(navigator.userAgent) ? "Mac" : "computer"}</div></div><div class="su-form"><button class="su-primary" id="suDesktopCopy" type="button">Copy prompt</button></div><div class="desktop-prompt-wait" id="suDesktopCopied" role="status"></div></div>`;
+        signupBodyEl.innerHTML = `<div class="su-local-prompt"><div class="su-step">Your next step</div><h1 class="su-title">Paste this into<br><span class="host-claude">Claude Code</span><br>or <span class="host-codex">Codex.</span></h1><p class="su-copy">Copy the prompt below, then paste it into a conversation in Claude Code or Codex.</p><div class="desktop-prompt-note">${esc(payload.ui?.localOnboardingPrompt || "Set up Relay with me.")}</div><div class="su-form"><button class="su-primary" id="suDesktopCopy" type="button">Copy prompt</button></div><div class="desktop-prompt-wait" id="suDesktopCopied" role="status"></div></div>`;
         document.getElementById("suDesktopCopy")?.addEventListener("click", async event => { await window.relay.copySetupPrompt(); event.target.textContent = "Copied"; document.getElementById("suDesktopCopied").textContent = "Paste into Claude Code or Codex. Your agent takes the next step."; });
       } else {
         const waitingBrowser = ["browser", "finishing"].includes(desktop.stage);
@@ -24293,6 +24481,10 @@
       // Until the send, the pill has nothing else to show, so this screen stays.
       if (status === "sent") { stopOnboardingAgentPoll(); renderFirstRelayChapter(); return; }
       const agent = payload.ui?.onboardingAgent;
+      // Claude Code, Codex and Conductor: the app connected the account, and
+      // the first Relay is one of the AI's four ideas, picked here.
+      const localAgent = onboardingAgentFor(agent);
+      if (status !== "checking" && localAgent && !localAgent.chat) { renderLocalFirstRelay(agent, localAgent); return; }
       // The connect keys tick off for a moment before the next screen takes over.
       const connectorCelebrating = Boolean(agent?.connector) && connectorJustConnected > Date.now();
       if (status !== "checking" && agent && (!onboardingAgentConnected(agent) || connectorCelebrating)) { renderAgentSetup(agent); return; }

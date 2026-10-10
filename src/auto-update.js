@@ -58,6 +58,17 @@ export const CANONICAL_TRANSACTION_IN_FLIGHT_MS = 20 * 60 * 1000;
 // After this many failed recoveries of one candidate, a newer release on the
 // channel supersedes it rather than the same candidate being retried forever.
 export const RECOVERY_SUPERSEDE_AFTER = 3;
+// A recovery episode that has failed this many times, with the newest release on
+// the channel already tried, is parked rather than retried hourly forever. Two
+// 0.1.490 Macs made 640+ identical attempts over four weeks (2026-09-13 to
+// 2026-10-10) without anything on the machine or the fleet dashboard saying the
+// updater had given up. Parked is a reported state, not silence: telemetry
+// carries `exhaustedAt`, and the machine still retries when the channel
+// publishes a different release, once a day, or when a person runs `relay update`.
+export const RECOVERY_EXHAUSTED_AFTER = 24;
+export const RECOVERY_EXHAUSTED_RETRY_MS = 24 * 60 * 60 * 1000;
+// While parked, ask the channel for a new release at most this often.
+const RECOVERY_EXHAUSTED_CHANNEL_CHECK_MS = 60 * 60 * 1000;
 // ...but do not retry at that rate forever. A machine whose update can never complete
 // (field report: Scheduled Tasks registered by hand under different names) used to
 // re-download and re-install every two minutes indefinitely — ~2,679 attempts for a
@@ -431,10 +442,14 @@ export function readMigrationFailure(file, { slot = MIGRATION_FAILURE_SLOT } = {
     count: Number(failure.count),
     firstAt: Number(failure.firstAt) || 0,
     lastAt: Number(failure.lastAt) || 0,
+    // Recovery only: the release the last attempt actually launched, which is
+    // the channel's newer release once the stuck candidate has been superseded.
+    ...(typeof failure.launched === "string" && failure.launched ? { launched: failure.launched } : {}),
+    ...(Number(failure.exhaustedAt) > 0 ? { exhaustedAt: Number(failure.exhaustedAt) } : {}),
   };
 }
 
-export function recordMigrationFailure(file, target, { now = () => Date.now(), slot = MIGRATION_FAILURE_SLOT } = {}) {
+export function recordMigrationFailure(file, target, { now = () => Date.now(), slot = MIGRATION_FAILURE_SLOT, launched = null } = {}) {
   const stored = readUpdateState(file) || {};
   const prior = readMigrationFailure(file, { slot });
   const continuing = prior && prior.target === String(target || "");
@@ -444,9 +459,22 @@ export function recordMigrationFailure(file, target, { now = () => Date.now(), s
     count: continuing ? prior.count + 1 : 1,
     firstAt: continuing ? prior.firstAt || t : t,
     lastAt: t,
+    ...(launched ? { launched: String(launched) } : {}),
   };
   writeUpdateState(file, { ...stored, [slot]: record });
   return record;
+}
+
+// Park a recovery episode (see RECOVERY_EXHAUSTED_AFTER). Idempotent: the first
+// park time is kept so telemetry says how long the machine has been parked.
+export function markRecoveryExhausted(file, { now = () => Date.now() } = {}) {
+  const stored = readUpdateState(file);
+  const record = stored && typeof stored[RECOVERY_FAILURE_SLOT] === "object" ? stored[RECOVERY_FAILURE_SLOT] : null;
+  if (!record) return null;
+  if (Number(record.exhaustedAt) > 0) return record;
+  const next = { ...record, exhaustedAt: now() };
+  writeUpdateState(file, { ...stored, [RECOVERY_FAILURE_SLOT]: next });
+  return next;
 }
 
 // Doctor needs the recovery slot without owning the slot names.
@@ -1060,32 +1088,82 @@ export function createAutoUpdater({
       // straight back here, which is how a fixed install turned into a hot recovery
       // loop instead of a hot migration loop. Same durable record, same backoff.
       const failedCandidate = canonicalState.candidate?.version || runningVersion;
-      let recoveryTarget = `canonical-recovery:${failedCandidate}`;
+      // ONE durable record per stuck journal, keyed by the journal's candidate and
+      // never by whichever release an attempt launched. Keying it by the launched
+      // release (as the first supersede did) recreated the shared-slot defect above:
+      // after three failures the record moved to `canonical-recovery:<latest>`, the
+      // next tick no longer matched it, retried the candidate at once as a fresh
+      // count of 1, and the two targets reset each other forever — about sixteen
+      // attempts an hour, a count that never passed 3, and a firstAt that kept
+      // moving, so the fleet could not tell a four-week-old loop from a new one.
+      const recoveryTarget = `canonical-recovery:${failedCandidate}`;
+      const priorRecovery = readMigrationFailure(updateStatePath, { slot: RECOVERY_FAILURE_SLOT });
+      const episode = priorRecovery && priorRecovery.target === recoveryTarget ? priorRecovery : null;
+      const failures = episode?.count || 0;
+      // `relay update` (no backoff) is a person asking right now: no waiting, no
+      // parking, and the current release rather than a stale candidate.
+      const manual = !useFailureBackoff;
+      // The ordinary release check above already ran this tick when it was due;
+      // reuse its answer and fetch only when it did not.
+      let latestResolved = Boolean(discovery?.latest);
+      let latest = discovery?.latest || null;
+      const resolveLatest = async () => {
+        if (latestResolved) return latest;
+        latestResolved = true;
+        try { latest = await getLatestVersion({ channel: liveChannel() }); }
+        catch (err) { log(`recovery release check failed: ${err && err.message ? err.message : String(err)}`); }
+        return latest;
+      };
+      // The release this episode would try next if it superseded the candidate:
+      // the channel's current release, when it is newer than what already failed.
+      const newerThanTried = (version) => Boolean(version)
+        && isNewerVersion(version, failedCandidate)
+        && (!episode?.launched || isNewerVersion(version, episode.launched));
+      if (episode && !manual) {
+        if (episode.exhaustedAt) {
+          // Parked. A different release is a genuinely different attempt; so is a
+          // day passing (whatever broke locally may have been fixed). Nothing else.
+          let reopen = t - episode.lastAt >= RECOVERY_EXHAUSTED_RETRY_MS;
+          if (!reopen && latestResolved) {
+            state.exhaustedCheckedAt = t;
+            reopen = newerThanTried(latest);
+          } else if (!reopen && t - (state.exhaustedCheckedAt || 0) >= RECOVERY_EXHAUSTED_CHANNEL_CHECK_MS) {
+            state.exhaustedCheckedAt = t;
+            reopen = newerThanTried(await resolveLatest());
+          }
+          if (!reopen) {
+            return { status: "recovery-exhausted", current: runningVersion, recovery: canonicalState, failures, exhaustedAt: episode.exhaustedAt, target: episode.launched || failedCandidate };
+          }
+        } else {
+          const wait = updateRetryCooldownMs(failures, { baseMs: retryCooldownMs });
+          if (t - episode.lastAt < wait) {
+            return { status: "deferred-recovery-backoff", current: runningVersion, recovery: canonicalState, failures };
+          }
+          // Enough identical failures, the last one long finished, and nothing newer
+          // to try: stop, and say so in telemetry instead of retrying hourly forever.
+          if (failures >= RECOVERY_EXHAUSTED_AFTER && t - episode.lastAt >= CANONICAL_TRANSACTION_IN_FLIGHT_MS
+            && !newerThanTried(await resolveLatest())) {
+            let parked = null;
+            try { parked = markRecoveryExhausted(updateStatePath, { now: () => t }); } catch {}
+            log(`canonical recovery of ${failedCandidate} failed ${failures} times${episode.launched && episode.launched !== failedCandidate ? ` (last via ${episode.launched})` : ""}; parking until a newer release, a day passes, or \`relay update\``);
+            return { status: "recovery-exhausted", current: runningVersion, recovery: canonicalState, failures, exhaustedAt: Number(parked?.exhaustedAt) || t, target: episode.launched || failedCandidate };
+          }
+        }
+      }
+      // A candidate that has refused to activate this many times is not going to
+      // succeed on the next identical attempt, and a stale one is not what the
+      // channel ships any more. Take the channel's CURRENT release instead, re-read
+      // on every attempt so a machine follows stable as it moves. The journal's own
+      // recovery still runs first inside that transaction (supersedeBrokenRecovery
+      // only escalates when it fails), so nothing is lost by superseding.
       let targetVersion = failedCandidate;
       let supersede = false;
-      const priorRecovery = readMigrationFailure(updateStatePath, { slot: RECOVERY_FAILURE_SLOT });
-      if (priorRecovery && priorRecovery.target === recoveryTarget) {
-        const wait = updateRetryCooldownMs(priorRecovery.count, { baseMs: retryCooldownMs });
-        if (t - priorRecovery.lastAt < wait) {
-          return { status: "deferred-recovery-backoff", current: runningVersion, recovery: canonicalState, failures: priorRecovery.count };
-        }
-        // A candidate that has refused to activate this many times is not going
-        // to succeed on the next identical attempt. If the channel has moved on,
-        // take the newer release instead: its repair code may carry the fix, and
-        // the machine otherwise retries the same broken candidate hourly forever
-        // (six 0.1.490 machines did exactly that on 2026-09-13). The journal's
-        // recovery still runs first inside the new transaction; only when that
-        // fails again does the newer release supersede it.
-        if (priorRecovery.count >= RECOVERY_SUPERSEDE_AFTER) {
-          let latest = null;
-          try { latest = await getLatestVersion({ channel: liveChannel() }); }
-          catch (err) { log(`recovery supersede check failed: ${err && err.message ? err.message : String(err)}`); }
-          if (latest && isNewerVersion(latest, failedCandidate) && !releaseDeferral(latest)) {
-            targetVersion = latest;
-            recoveryTarget = `canonical-recovery:${latest}`;
-            supersede = true;
-            log(`canonical recovery of ${failedCandidate} failed ${priorRecovery.count} times; superseding it with ${latest}`);
-          }
+      if (failures >= RECOVERY_SUPERSEDE_AFTER || manual) {
+        const current = await resolveLatest();
+        if (current && isNewerVersion(current, failedCandidate) && !releaseDeferral(current)) {
+          targetVersion = current;
+          supersede = true;
+          log(`canonical recovery of ${failedCandidate} ${manual ? "requested" : `failed ${failures} times`}; superseding it with ${current}`);
         }
       }
       let launch = null;
@@ -1107,7 +1185,9 @@ export function createAutoUpdater({
       if (!admittedLaunch(launch)) {
         return { status: rejectedLaunchStatus(launch, "recovery-launch-failed"), current: runningVersion, recovery: canonicalState };
       }
-      try { recordMigrationFailure(updateStatePath, recoveryTarget, { now: () => t, slot: RECOVERY_FAILURE_SLOT }); } catch {}
+      // A reopened parked episode keeps counting but is no longer parked; the
+      // record is rewritten without exhaustedAt.
+      try { recordMigrationFailure(updateStatePath, recoveryTarget, { now: () => t, slot: RECOVERY_FAILURE_SLOT, launched: targetVersion }); } catch {}
       state.updating = true;
       state.updateStartedAt = t;
       return { status: "recovering-runtime", current: runningVersion, recovery: canonicalState, launch, ...(supersede ? { superseded: failedCandidate, target: targetVersion } : {}) };
@@ -1283,7 +1363,12 @@ export async function runUpdateOnce({
       );
       break;
     case "recovering-runtime":
-      log("recovering an interrupted runtime activation before checking for updates.");
+      log(result.superseded
+        ? `recovering the interrupted ${result.superseded} activation by moving to ${result.target}; services will restart shortly.`
+        : "recovering an interrupted runtime activation before checking for updates.");
+      break;
+    case "recovery-exhausted":
+      log(`automatic recovery stopped after ${result.failures} failed attempt(s); run \`relay update\` to try again now.`);
       break;
     case "activation-in-flight":
     case "migration-in-flight":

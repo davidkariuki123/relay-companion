@@ -736,14 +736,93 @@ async function drainDesktopIntents() {
     requestExternalReopen();
   }catch(error){await dialog.showMessageBox({type:"info",title:"Relay setup",message:error.message});}}
 }
+// THE SHORT PROMPT (2026-10-10). The app connects the account itself when the
+// person chooses Claude Code, Codex or Conductor (prepareLocalFirstRelay), so
+// the AI is opened with one sentence and finds the setup with Relay's own
+// tool: no paths, no run id, no sign-in for it to handle.
+const LOCAL_ONBOARDING_PROMPT = "Set up Relay with me.";
 function localOnboardingPrompt() {
-  const run = desktopOnboardingBridge?.state();
-  if (!run) return "";
-  const guide = path.resolve(__dirname, "..", "onboarding", "START-HERE.md");
-  const helper = path.resolve(__dirname, "..", "bin", "relay.js");
-  let node = "node";
-  try { node = require("../bootstrap/relay-setup.cjs").activeCanonicalCli()?.node || node; } catch {}
-  return `Help me connect the Relay app I installed to my account and learn to use it in this conversation. Read the local guide at ${JSON.stringify(guide)}. Use Node at ${JSON.stringify(node)} with the installed helper at ${JSON.stringify(helper)} for setup run ${run.id}. Explain the managed skill and integration changes before making them. Use my browser for account sign-in; do not reinstall Relay or send any message without my instruction.`;
+  return LOCAL_ONBOARDING_PROMPT;
+}
+// YOUR FIRST RELAY, PICKED IN THE PILL (2026-10-10). The AI writes four ideas
+// for a first Relay into src/first-relay-ideas.cjs's file; the person taps one
+// here, and a waiting AI writes it (or, with none waiting, the AI is opened
+// again with that idea typed in).
+const { createFirstRelayIdeas } = require("../src/first-relay-ideas.cjs");
+const FIRST_RELAY_LOCAL_HOSTS = Object.freeze({ codex: "codex", "claude-code": "claude_code", conductor: "conductor" });
+let firstRelayIdeasStore = null;
+function firstRelayIdeas() {
+  if (!firstRelayIdeasStore) firstRelayIdeasStore = createFirstRelayIdeas({ directory: relayConfigDir() });
+  return firstRelayIdeasStore;
+}
+/** Who the first Relay can go to: the server's answer first, the local setup's when it cannot say. */
+function firstRelayDestination(key) {
+  const answer = agentOnboarding.serverAnswer(key);
+  if (answer?.kind === "org" && answer.org?.name) return { kind: "org", org: answer.org };
+  if (answer?.kind === "hello" && answer.inviter?.name) return { kind: "invite", inviter: answer.inviter };
+  if (answer && typeof answer.kind === "string") return { kind: "none" };
+  const local = desktopOnboardingBridge?.state()?.context || onboardingProtocolState();
+  if (local?.org?.groupId && local.org.name) return { kind: "org", org: local.org };
+  if (local?.inviter?.relayUserId && local.inviter.name) return { kind: "invite", inviter: local.inviter };
+  return { kind: "none" };
+}
+/**
+ * The person chose a local AI: start (or keep) its first-Relay setup and do
+ * the account step the AI's helper used to run, before the AI is opened.
+ * Failures are logged, never shown: the AI's Relay tools work without them.
+ */
+async function prepareLocalFirstRelay(key, host) {
+  const who = account();
+  if (!who.paired || !who.userId || !FIRST_RELAY_LOCAL_HOSTS[host]) return null;
+  if (!agentOnboarding.serverAnswer(key)) await agentOnboarding.refreshServer(key);
+  const state = firstRelayIdeas().begin({ accountId: who.userId, host, ...firstRelayDestination(key), you: { name: who.name || "" } });
+  if (desktopOnboardingBridge) {
+    try {
+      const run = await desktopOnboardingBridge.prepareLocalAgent(FIRST_RELAY_LOCAL_HOSTS[host]);
+      if (["teaching", "sent", "link"].includes(run?.stage)) {
+        const [{ saveDesktopTeachingContext }, { apiUrl }] = await Promise.all([
+          import(pathToFileURL(path.join(__dirname, "..", "src", "desktop-teaching-context.js")).href),
+          import(pathToFileURL(path.join(__dirname, "..", "src", "config.js")).href),
+        ]);
+        saveDesktopTeachingContext({ directory: relayConfigDir(), run, apiUrl: apiUrl() });
+      }
+    } catch (error) { console.warn("Relay could not finish the account step for the first Relay:", error?.message || error); }
+  }
+  return state;
+}
+let firstRelayPreparing = null;
+function prepareLocalFirstRelayOnce(key, host) {
+  const run = prepareLocalFirstRelay(key, host).catch((error) => { console.warn("Relay could not start the first Relay:", error?.message || error); return null; })
+    .finally(() => { if (firstRelayPreparing === run) firstRelayPreparing = null; pushInbox(true); });
+  firstRelayPreparing = run;
+  return run;
+}
+/** What the pill draws for the local AI's first Relay, for the account on screen. */
+function firstRelayIdeasSnapshot(currentAccount = account()) {
+  if (!currentAccount.paired || !currentAccount.userId) return null;
+  try { return firstRelayIdeas().snapshot(currentAccount.userId); } catch { return null; }
+}
+// The AI writes the file from the MCP broker: watch it (a stat a second, only
+// while a first-run chapter is open) and repaint when it changes.
+let firstRelayIdeasWatching = false;
+function syncFirstRelayIdeasWatch(active) {
+  const file = firstRelayIdeas().file;
+  if (active && !firstRelayIdeasWatching) {
+    firstRelayIdeasWatching = true;
+    fs.watchFile(file, { interval: 1000, persistent: false }, (current, previous) => {
+      if (current.mtimeMs !== previous.mtimeMs) pushInbox(true);
+    });
+  } else if (!active && firstRelayIdeasWatching) {
+    firstRelayIdeasWatching = false;
+    fs.unwatchFile(file);
+  }
+}
+/** Bring a local AI forward without starting anything new in it. */
+function focusLocalAgent(host) {
+  if (process.env.RELAY_OVERLAY_TEST_NO_HOST_OPEN === "1") return;
+  if (host === "codex") return activateHost("codex");
+  if (host === "claude-code") return activateHost("claude");
+  if (host === "conductor" && process.platform === "darwin") execFile("/usr/bin/open", ["-b", "com.conductor.app"], () => {});
 }
 function installationAuthorizationController() {
   if (!installationAuthorizationControllerPromise) {
@@ -757,6 +836,14 @@ function installationAuthorizationController() {
         // The sign-in page goes through the same test seam: an end-to-end run
         // of a signed-out install opened it in the person's real browser.
         openExternal: (url) => openExternalOrTestSeam(url),
+        // The browser handed the sign-in back to this computer (loopback
+        // handoff): bring the pill forward so the next step is already in
+        // front, and let it pick up the approval now rather than on its next poll.
+        onLoopbackApproved: async () => {
+          requestExternalReopen();
+          if (process.platform === "darwin") { try { app.focus({ steal: true }); } catch {} }
+          try { if (win && !win.isDestroyed()) win.webContents.send("relay:installationAuthChanged"); } catch {}
+        },
         onConnected: async (registration) => {
           const { notifications } = await loadAccountModules();
           nativeCredentialCache = { version: null, token: "" };
@@ -1615,6 +1702,7 @@ async function completeSetupTutorial() {
   const key = onboardingAccountKey();
   if (!key) return { ok: false, error: "Relay could not identify the account completing onboarding." };
   if (desktopOnboardingBridge && desktopOnboardingBridge.state().stage !== "complete") await desktopOnboardingBridge.complete(account().userId);
+  try { firstRelayIdeas().end(); } catch {}
   onboardingVersions[key] = COMPANION_ONBOARDING_VERSION;
   writeOverlayPrefs();
   await pushInbox(true);
@@ -2808,6 +2896,8 @@ function buildPayload() {
   // stale: remove it so a later sign-out cannot replay the auto sign-in.
   if (currentAccount.paired) consumeSetupIntent();
   const setupIntent = currentAccount.paired ? null : readSetupIntent(relayConfigDir());
+  // The first-run chapter is open: watch the AI's ideas file while it is.
+  syncFirstRelayIdeasWatch(Boolean(currentAccount.paired && (networkOnboardingState.required || completedOnboardingVersion < COMPANION_ONBOARDING_VERSION)));
   return {
     account: currentAccount,
     usage: sentUsage,
@@ -2831,6 +2921,8 @@ function buildPayload() {
       firstRelayKind: firstRelayKindFor(desktopOnboardingBridge?.state()?.context || protocolState, agentOnboarding.serverAnswer(onboardingAccountKey(currentAccount))),
       // Which AI the person chose, where, and whether it has connected.
       onboardingAgent: currentAccount.paired ? agentOnboardingSnapshot(currentAccount) : null,
+      // A local AI's first Relay: its four ideas, the pick, and whether it was opened.
+      firstRelayIdeas: firstRelayIdeasSnapshot(currentAccount),
       // One app on this computer worth a quiet word in the inbox, if any.
       setupNudge: currentAccount.paired ? setupNudgeFor(onboardingAccountKey(currentAccount)) : null,
       // The thin installer opened this signed-out pill moments ago for a person
@@ -3372,7 +3464,8 @@ async function pushInboxNow(force) {
     account: [payload.account.paired, payload.account.email],
     onboarding: [payload.ui.onboardingRequired, payload.ui.networkOnboarding, payload.ui.completedOnboardingVersion, payload.ui.firstRelayStatus, payload.ui.firstRelayId, payload.ui.openingPreference,
       payload.ui.desktopOnboarding, payload.ui.localOnboardingPrompt, payload.ui.firstRelayKind, payload.ui.onboardingAgent, payload.ui.agentInstalled, payload.ui.applicationSetup, payload.ui.applicationOwned,
-      payload.ui.firstLink ? [payload.ui.firstLink.relayId, payload.ui.firstLink.state, payload.ui.firstLink.shareText] : null],
+      payload.ui.firstLink ? [payload.ui.firstLink.relayId, payload.ui.firstLink.state, payload.ui.firstLink.shareText, payload.ui.firstLink.url] : null,
+      payload.ui.firstRelayIdeas],
     // SETUP: the inbox's one quiet word about an app on this computer.
     setupNudge: payload.ui.setupNudge,
     pendingOpen: payload.pendingOpen
@@ -10492,6 +10585,7 @@ ipcMain.handle("relay:completeNetworkOnboarding", async (_event, userId) => {
   // Finishing the invitation page must not send an existing user backwards
   // into the first-send tutorial on an installation with no local history.
   if (desktopOnboardingBridge && desktopOnboardingBridge.state().stage !== "complete") await desktopOnboardingBridge.complete(account().userId);
+  try { firstRelayIdeas().end(); } catch {}
   onboardingVersions[key] = COMPANION_ONBOARDING_VERSION;
   writeOverlayPrefs();
   await pushInbox(true);
@@ -10543,12 +10637,56 @@ function agentOnboardingIpc(operation) {
     try { return await operation(key, ...args); } finally { pushInbox(true); }
   };
 }
-ipcMain.handle("relay:onboardingChooseAgent", agentOnboardingIpc((key, host, place) => agentOnboarding.choose(key, String(host || ""), String(place || ""))));
-ipcMain.handle("relay:onboardingResetAgent", agentOnboardingIpc((key) => agentOnboarding.reset(key)));
+ipcMain.handle("relay:onboardingChooseAgent", agentOnboardingIpc((key, host, place) => {
+  const snapshot = agentOnboarding.choose(key, String(host || ""), String(place || ""));
+  // A local AI: the app connects the account now, while the person reads the next screen.
+  if (FIRST_RELAY_LOCAL_HOSTS[snapshot.host]) void prepareLocalFirstRelayOnce(key, snapshot.host);
+  return snapshot;
+}));
+ipcMain.handle("relay:onboardingResetAgent", agentOnboardingIpc((key) => {
+  // A different AI starts its first Relay afresh.
+  try { firstRelayIdeas().end(); } catch {}
+  return agentOnboarding.reset(key);
+}));
 ipcMain.handle("relay:onboardingPrepareAgent", agentOnboardingIpc((key) => agentOnboarding.prepare(key)));
 ipcMain.handle("relay:onboardingPollAgent", agentOnboardingIpc((key) => agentOnboarding.poll(key)));
 ipcMain.handle("relay:onboardingCopyAgentRequest", agentOnboardingIpc((key) => agentOnboarding.copyPrompt(key)));
-ipcMain.handle("relay:onboardingOpenAgent", agentOnboardingIpc((key) => agentOnboarding.open(key, localOnboardingPrompt())));
+ipcMain.handle("relay:onboardingOpenAgent", agentOnboardingIpc(async (key) => {
+  const host = agentOnboarding.snapshot(key).host;
+  if (!FIRST_RELAY_LOCAL_HOSTS[host]) return agentOnboarding.open(key, localOnboardingPrompt());
+  // The account step finishes before the AI looks for it.
+  await (firstRelayPreparing || prepareLocalFirstRelayOnce(key, host));
+  try { return await openLocalAgent(key, host, localOnboardingPrompt()); }
+  finally { try { firstRelayIdeas().markOpened(); } catch {} }
+}));
+/** Open a local AI with a prompt typed in; Conductor through its link. The prompt is on the clipboard either way. */
+async function openLocalAgent(key, host, prompt) {
+  if (host !== "conductor") return agentOnboarding.open(key, prompt);
+  clipboard.writeText(prompt);
+  if (!conductorCapability().available) throw new Error("Copied. Paste it into Conductor.");
+  await openExternalOrTestSeam(conductorLink({ prompt }));
+  return { ok: true };
+}
+// The person tapped one of the AI's four ideas. An AI waiting for it takes it
+// from the file; with none waiting, the AI is opened again with the idea typed in.
+ipcMain.handle("relay:onboardingPickIdea", agentOnboardingIpc(async (key, ideaId) => {
+  const who = account();
+  const result = firstRelayIdeas().pick(String(ideaId || ""), { accountId: who.userId });
+  let opened = null;
+  if (result.mode === "reopened" && !result.repeated) {
+    const prompt = result.idea?.prompt || "";
+    try { await openLocalAgent(key, result.state.host, prompt); opened = "opened"; }
+    catch { clipboard.writeText(prompt); opened = "copied"; }
+  }
+  return { mode: result.mode, opened, ideas: firstRelayIdeasSnapshot(who) };
+}));
+// "Open Codex" beside the writing screens: bring the AI forward, start nothing.
+ipcMain.handle("relay:onboardingFocusAgent", agentOnboardingIpc(async (key) => {
+  const host = firstRelayIdeasSnapshot()?.host || agentOnboarding.snapshot(key).host;
+  if (!FIRST_RELAY_LOCAL_HOSTS[host]) return { ok: false };
+  focusLocalAgent(host);
+  return { ok: true };
+}));
 ipcMain.handle("relay:onboardingConnectClaude", agentOnboardingIpc((key) => agentOnboarding.connectClaude(key)));
 ipcMain.handle("relay:onboardingConnectChatGptApp", agentOnboardingIpc((key) => agentOnboarding.connectChatGptApp(key)));
 // SETUP (2026-10-07). The Setup page's facts and verbs, each for the account
@@ -10632,13 +10770,12 @@ ipcMain.handle("relay:copySetupPrompt", () => {
   clipboard.writeText(prompt);
   return { ok: true };
 });
-// The Your link is ready screen: the message to send with the first link, as
-// the server composed it, copied only for the account still on screen.
-ipcMain.handle("relay:copyFirstLinkMessage", (_event, expectedUserId) => {
+// It's ready to send: the first link alone, for the account still on screen.
+ipcMain.handle("relay:copyFirstLink", (_event, expectedUserId) => {
   if (!expectedUserId || account().userId !== expectedUserId) throw new Error("Relay account changed. Try again.");
   const link = firstLinkForOnboarding();
-  if (!link?.shareText) throw new Error("Relay has no link to copy yet.");
-  clipboard.writeText(link.shareText);
+  if (!link?.url) throw new Error("Relay has no link to copy yet.");
+  clipboard.writeText(link.url);
   return { ok: true, url: link.url };
 });
 ipcMain.handle("relay:installationAuthSignIn", (_event, input = {}) => installationAuthorizationIpc(async () => {

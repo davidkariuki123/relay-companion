@@ -815,3 +815,36 @@ test("the default native secret store rebuilds activation on the same origin the
   assert.ok(source.includes(`secretStore = createNativeInstallationSecretStore({ webBase: ${resolved} })`));
   assert.ok(source.includes(`const trustedWebOrigin = normalizeWebOrigin(${resolved})`));
 });
+
+test("installed-first email sign-in approves in the app and binds the approval to the PKCE pair", async () => {
+  let challenge = "";
+  const routes = [];
+  const fetchImpl = async (url, init) => {
+    const route = new URL(String(url)).pathname;
+    const body = JSON.parse(init.body);
+    routes.push(route.replace(`/${AUTHORIZATION_ID}`, ""));
+    if (route === "/v1/installation-authorizations") { challenge = body.codeChallenge; return response(createReply()); }
+    if (route.endsWith("/identity/email/start")) return response({ status: "code_sent", codeExpiresAt: EXPIRES });
+    if (route.endsWith("/identity/email/verify")) return response({ status: "pending_approval", account: { email: "alex@example.com", displayName: "Alex" } });
+    if (route.endsWith("/approve")) {
+      assert.equal(body.clientSecret, CLIENT_SECRET);
+      assert.equal(createHash("sha256").update(body.codeVerifier).digest("base64url"), challenge);
+      return response({ status: "approved" });
+    }
+    if (route.endsWith("/consume")) return response({ deviceToken: "dev_token", deviceId: "dev_1", user: { id: "usr_alex", email: "alex@example.com", name: "Alex" } });
+    return response({ error: "unexpected" }, 500);
+  };
+  const persisted = [];
+  const { controller } = harness({ fetchImpl, approvalSurface: "browser-v1", installationKey: async () => null, persistAccount: async (registration) => { persisted.push(registration); } });
+  await controller.emailStart("alex@example.com");
+  assert.equal((await controller.emailVerify("123456")).status, "pending_approval");
+  assert.equal((await controller.approve()).status, "consumed");
+  assert.deepEqual(routes, [
+    "/v1/installation-authorizations",
+    "/v1/installation-authorizations/identity/email/start",
+    "/v1/installation-authorizations/identity/email/verify",
+    "/v1/installation-authorizations/approve",
+    "/v1/installation-authorizations/consume",
+  ], "no browser and no loopback listener on the email path");
+  assert.equal(persisted.length, 1);
+});

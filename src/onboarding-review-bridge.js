@@ -21,10 +21,10 @@
     groups: async () => [],
     completeSetupTutorial: () => call("/practice/complete", {}),
     completeNetworkOnboarding: async (userId) => ({ ...(await call("/practice/complete", {})), userId }),
-    copyFirstLinkMessage: async () => {
-      const text = (await call("/practice/state")).ui?.firstLink?.shareText;
-      if (!text) throw new Error("No practice link yet.");
-      await navigator.clipboard.writeText(text); return { ok: true };
+    copyFirstLink: async () => {
+      const url = (await call("/practice/state")).ui?.firstLink?.url;
+      if (!url) throw new Error("No practice link yet.");
+      await navigator.clipboard.writeText(url); return { ok: true, url };
     },
     onboardingInviteLink: async () => ({ ok: true, invite: await call("/v1/invite-link", {}) }),
     copyOnboardingInviteLink: async () => { const result = await call("/v1/invite-link", {}); await navigator.clipboard.writeText(result.url); return { ok: true, ...result }; },
