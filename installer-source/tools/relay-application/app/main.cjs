@@ -38,6 +38,21 @@ function publishProgress(progress) {
   setupProgress = progress;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("application:progress", progress);
 }
+// What the Mac self-install did, one JSON line per step, in
+// ~/Library/Logs/Relay/application-install.log beside application-setup.log.
+// The window opened from the disk image is on screen for only a moment before
+// the move replaces this process, so the signed-candidate proof
+// (scripts/verify-mac-installer.mjs) reads these lines rather than hoping to
+// catch that frame (0.1.627 and 0.1.629 runs, 2026-10-10). Never fatal.
+function recordInstall(event, details = {}) {
+  try {
+    const directory = app.getPath("logs");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.appendFileSync(path.join(directory, "application-install.log"), `${JSON.stringify({ at: new Date().toISOString(), event,
+      applicationVersion: candidate.applicationVersion || candidate.version, packagingSourceSha: candidate.packagingSourceSha,
+      root: path.resolve(path.dirname(process.execPath), "../.."), ...details })}\n`, { mode: 0o600 });
+  } catch {}
+}
 const pendingLinks = [];
 function queueLink(value) {
   if (application && typeof value === "string" && value.length <= 2048 && parseRelayDeepLink(value)) pendingLinks.push(value);
@@ -171,12 +186,19 @@ app.whenReady().then(() => {
   const ownSender = (event) => event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame;
   const volumes = createVolumeTools({ execFile, readCandidate: file => JSON.parse(fs.readFileSync(file, "utf8")) });
   let relocating = null;
+  // "Installing Relay…" stays on screen at least this long before the move,
+  // which holds this process and then replaces it, can start.
+  const INSTALL_WINDOW_MINIMUM_MS = 1200;
+  let installWindowShownAt = 0;
+  if (animatedInstall) win.once("show", () => { installWindowShownAt = Date.now(); recordInstall("install-window-shown"); });
   ipcMain.handle("application:relocate", async (event) => {
     if (!ownSender(event) || !application || process.platform !== "darwin" || app.isInApplicationsFolder()) throw new Error("Installation is unavailable from this window");
     // One move at a time: the window starts it on its own, and Try again
     // must never overlap a move still under way.
     if (relocating) return relocating;
     relocating = (async () => {
+      const shownFor = installWindowShownAt ? Date.now() - installWindowShownAt : INSTALL_WINDOW_MINIMUM_MS;
+      if (shownFor < INSTALL_WINDOW_MINIMUM_MS) await new Promise(resolve => setTimeout(resolve, INSTALL_WINDOW_MINIMUM_MS - shownFor));
       // An earlier Relay in Applications (often the copy whose first setup
       // failed) goes to the Trash, where it can still be recovered, so the move
       // below has no conflict to refuse (relocation.cjs).
@@ -193,12 +215,16 @@ app.whenReady().then(() => {
       const volume = await volumes.find({ bundlePath: bundle, candidate });
       const handoff = path.join(app.getPath("userData"), "installation-handoff.json");
       fs.writeFileSync(handoff, JSON.stringify({version:candidate.version, runtimeSourceSha:candidate.runtimeSourceSha, startedAt:new Date().toISOString(), volume, appName:path.basename(bundle)}), {mode:0o600});
+      recordInstall("relocation-started", { destination, plan: plan.action, volume });
       let moved = false;
       try { moved = app.moveToApplicationsFolder({ conflictHandler: () => false }); }
       finally { if (!moved) fs.rmSync(handoff, {force:true}); }
       if (!moved) throw new Error("Relay could not move to Applications. Move any Relay app in Applications to the Trash, then try again.");
       return { ok: true };
-    })().finally(() => { relocating = null; });
+    })().catch(error => {
+      recordInstall("relocation-failed", { message: error.message });
+      throw error;
+    }).finally(() => { relocating = null; });
     return relocating;
   });
   ipcMain.handle("migration:inspect", (event) => {
@@ -301,6 +327,9 @@ app.whenReady().then(() => {
       const pending = JSON.parse(fs.readFileSync(handoff, "utf8"));
       if (pending.version === candidate.version && pending.runtimeSourceSha === candidate.runtimeSourceSha) {
         fs.rmSync(handoff);
+        // The moved copy is open from Applications and goes on into
+        // "Preparing Relay", which reports setup's own progress.
+        recordInstall("relaunched-from-applications", { startedAt: pending.startedAt });
         // The "Install Relay" disk image has done its job. Electron's mover
         // ejects it about five seconds after the move; this is the second
         // attempt, for a translocated app or a busy first try. Setup carries

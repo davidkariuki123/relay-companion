@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "dcaf8308d4730493dae315b432d8765b01dfb912",
+  "sourceSha": "0bc53a73a712c0eaa04c7d2f0c4d9dd98d28307e",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
     "packages/companion/bootstrap/application-handoff.cjs": "cc857469bd3e01c1c2bd00816e5f4338083f0aaa",
@@ -71,7 +71,7 @@
     "tools/relay-application/app/dmg-volume.cjs": "bf7daa2670e9de36f96d7e8349ecc8788cd0a2c0",
     "tools/relay-application/app/index.html": "602f0779a4e124c73135c5a356a809bf8ba94cb2",
     "tools/relay-application/app/integration-status.cjs": "bcce9b79a4c13f83163ef1197aab5487a4338949",
-    "tools/relay-application/app/main.cjs": "5f2b3a8f8286b42720758e86fd8e3f90eac9f46d",
+    "tools/relay-application/app/main.cjs": "d0421ca7357b677c53a81080ebcfec664ffcf21e",
     "tools/relay-application/app/native-bootstrap.js": "19dfa200ca3c75cc67a74d463199be93aae3d154",
     "tools/relay-application/app/native-install.css": "de37cecbdcb8474f105256254f1deac5fca84f29",
     "tools/relay-application/app/native-install.js": "0438e633a08ab96ef0bb8bfb79faab90481ac14f",
@@ -105,11 +105,11 @@
     "tools/relay-application/test-linux-install.mjs": "99ec29facb0adbae768d9db12ba8178bcc89bee9",
     "tools/relay-application/test-windows-install.mjs": "c51ba64172655e1693e715cbc6ce0dd1e1ed4f3c",
     "tools/relay-application/test/bootstrap-recovery-ui.test.mjs": "c7e2f6c281d5944b8fa96fa0a0c1bf990d498945",
-    "tools/relay-application/test/fixtures/application-main.mjs": "a7feb3c7335323d101a9275d38387db2b78df5a3",
+    "tools/relay-application/test/fixtures/application-main.mjs": "09d6ffefeadff345fa22fee4ac86cc87eabb0c55",
     "tools/relay-application/test/mac-dmg.test.mjs": "e415afd618574636850fe8740e2478e34099a0f8",
     "tools/relay-application/test/prepare.test.mjs": "163a621ba7bcd2af4e0cf0ecd8ba57f36c7ce52a",
     "tools/relay-application/test/quiet-launch.test.mjs": "f276554fa2c2d69576ebf6dfc1e9cdd2920d9a11",
-    "tools/relay-application/test/relocation-handler.test.mjs": "d6088e0c9b7e3a1ac3ac04c6dd1b6b2c3a8c3622",
+    "tools/relay-application/test/relocation-handler.test.mjs": "69154c5f8a4db769550bb58a8f73b3eff5930940",
     "tools/relay-application/test/relocation.test.mjs": "7d7ce81c981768a708e9ecae09c50d3933f0e954"
   }
 }

@@ -27,7 +27,7 @@ export async function applicationMain({ existing, platform = "darwin", installed
   const destination = "/Applications/Relay.app";
   const execPath = `${bundle}/Contents/MacOS/relay`;
   const resources = `${bundle}/Contents/Resources`;
-  const paths = { appData: "/Users/test/Library/Application Support" };
+  const paths = { appData: "/Users/test/Library/Application Support", logs: "/Users/test/Library/Logs/Relay" };
   const receiptPath = `${destination}/Contents/Resources/candidate.json`;
   const ours = preview ? { ...candidate, activationEnabled: false, distribution: "application-preview" } : candidate;
   const files = new Map([[`${resources}/candidate.json`, JSON.stringify(ours)]]);
@@ -73,7 +73,15 @@ export async function applicationMain({ existing, platform = "darwin", installed
     },
     writeFileSync(file, bytes, options) { calls.push({ action: "write", file, options }); files.set(file, bytes); },
     rmSync(file) { calls.push({ action: "remove", file }); files.delete(file); },
+    // The install log is kept apart from the calls the relocation tests sequence.
+    mkdirSync() {},
+    appendFileSync(file, line, options) {
+      assert.equal(file, `${paths.logs}/application-install.log`);
+      assert.equal(options.mode, 0o600);
+      installLog.push(JSON.parse(line));
+    },
   };
+  const installLog = [];
   let win, ready;
   const app = {
     setName() {}, setPath(name, value) { paths[name] = value; }, getPath: name => paths[name],
@@ -141,7 +149,7 @@ export async function applicationMain({ existing, platform = "darwin", installed
   assert.ok(handlers.has("application:relocate"), "the real application must register relocation");
   const event = { sender: win.webContents, senderFrame: win.webContents.mainFrame };
   return {
-    calls, files, processes, timers, runTimers, destination, event,
+    calls, files, processes, timers, runTimers, destination, event, installLog, window: win,
     handoff: `${paths.userData}/installation-handoff.json`,
     relocate: (sender = event) => handlers.get("application:relocate")(sender),
   };

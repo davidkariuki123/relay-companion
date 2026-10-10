@@ -129,6 +129,27 @@ export function installingOnItsOwn(url, text) {
   return typeof url === "string" && url.endsWith("/native-install.html") && /Installing Relay/.test(text || "");
 }
 
+// The self-install's own record (~/Library/Logs/Relay/application-install.log,
+// app/main.cjs recordInstall). That window is up for barely more than a second
+// before the move replaces the process, and 0.1.627 and 0.1.629 runs missed it
+// ("Installer UI was not seen installing"), so the proof rests on these lines
+// and the installed postconditions, with a CDP sighting as a bonus. Only lines
+// from this candidate since it was opened count.
+export function installEvidence(text, { since, sourceSha, version, destination = "/Applications/Relay.app" }) {
+  const found = { events: [], windowShown: false, relocationStarted: false, relaunched: false, failure: null };
+  for (const line of String(text || "").split("\n")) {
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+    if (!entry || entry.packagingSourceSha !== sourceSha || entry.applicationVersion !== version || !(Date.parse(entry.at) >= since)) continue;
+    found.events.push({ at: entry.at, event: entry.event, root: entry.root, ...(entry.message ? { message: entry.message } : {}) });
+    if (entry.event === "install-window-shown") found.windowShown = true;
+    if (entry.event === "relocation-started" && entry.destination === destination) found.relocationStarted = true;
+    if (entry.event === "relocation-failed") found.failure = entry.message || "Relay could not move to Applications";
+    if (entry.event === "relaunched-from-applications" && entry.root === destination) found.relaunched = true;
+  }
+  return found;
+}
+
 export async function main(inputs) {
   validateInputs(inputs); assertDisposable();
   const platform = `darwin-${process.arch}`;
@@ -308,9 +329,19 @@ export async function main(inputs) {
     phase = "open-installer-ui";
     run("/usr/bin/open", ["-n", "-a", target.app, "--args", `--remote-debugging-port=${port}`], { env: appEnv });
     const openedAt = Date.now(), deadline = openedAt + 8 * 60_000;
-    let started = false, firstHeartbeat;
+    const installLog = path.join(os.homedir(), "Library/Logs/Relay/application-install.log");
+    const marked = new Set();
+    const mark = name => { if (!marked.has(name)) { marked.add(name); record(name); } };
+    let started = false, firstHeartbeat, install = installEvidence("", {});
     while (Date.now() < deadline) {
-      const page = await installerPage(port);
+      try { install = installEvidence(fs.readFileSync(installLog, "utf8"), { since: openedAt - 5000, sourceSha: inputs.sourceSha, version: inputs.version, destination }); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+      proof.installLog = install.events;
+      if (install.failure) throw Error(`Installer UI: ${install.failure}`);
+      if (install.windowShown) mark("stock-installer-ui-opened");
+      if (install.relocationStarted) mark("install-started-without-input");
+      if (marked.has("install-started-without-input") && !started) { started = true; phase = "relocate-and-activate"; }
+      const page = started ? null : await installerPage(port);
       if (page) {
         let client;
         try {
@@ -322,7 +353,7 @@ export async function main(inputs) {
           // called; the window moves Relay into Applications by itself.
           if (!started && installingOnItsOwn(page.url, state?.text)) {
             started = true; phase = "relocate-and-activate";
-            record("stock-installer-ui-opened"); record("install-started-without-input");
+            mark("stock-installer-ui-opened"); mark("install-started-without-input");
           }
           if (state?.text && state.text !== lastText) {
             lastText = state.text;
@@ -333,8 +364,10 @@ export async function main(inputs) {
           }
         } catch (error) {
           if (error.installerFailure) throw error;
-          // Moving the app closes its renderer. Poll the relaunched app and
-          // filesystem next; a timeout is a failure, never a skipped success.
+          // Moving the app holds and then closes its renderer, so a CDP
+          // timeout or disconnect here is expected once the move began. The
+          // install log and the filesystem decide; a timeout is a failure,
+          // never a skipped success.
           proof.lastObserverError = error.message;
         } finally { client?.close(); }
       }
@@ -342,7 +375,8 @@ export async function main(inputs) {
         let current, journal;
         try { current = read(path.join(relayRoot, "runtime/current.json")); journal = read(path.join(relayRoot, "application-migration.json")); }
         catch { await sleep(1500); continue; }
-        if (current.active && journal.state === "complete") {
+        // Setup reached and finished in the copy that reopened from Applications.
+        if (current.active && journal.state === "complete" && install.relaunched) {
           assert.equal(current.version, target.manifest.runtime.version);
           assert.equal(current.releaseId, journal.releaseId);
           assert.equal(read(path.join(current.packageRoot, "package.json")).version, target.manifest.runtime.version);
@@ -363,7 +397,7 @@ export async function main(inputs) {
               assert.equal(proof.bundledNodeSha256, target.candidate.nodeSha256);
               assert.equal(createHash("sha256").update(fs.readFileSync(current.node)).digest("hex"), proof.bundledNodeSha256,
                 "The active runtime must use the installer-owned Node bytes");
-              record("relocated-stock-signed-app"); record("exact-active-runtime-and-complete-journal");
+              record("relocated-stock-signed-app"); record("relaunched-from-applications"); record("exact-active-runtime-and-complete-journal");
               record("native-ownership-and-live-services"); record("advancing-daemon-heartbeat");
               if (isRecovery(inputs.mode)) {
                 assert.equal(read(path.join(relayRoot, "runtime/installer-recovery.json")).state, "complete");
@@ -378,9 +412,7 @@ export async function main(inputs) {
           }
         }
       }
-      if (!started && Date.now() - openedAt > 90_000) throw Error(`Installer UI was not seen installing: ${lastText || proof.lastObserverError || "No renderer available"}`);
-      // The window shows "Installing Relay…" for a moment before the move
-      // holds the app; look often until it has been seen.
+      if (!started && Date.now() - openedAt > 90_000) throw Error(`Installer did not start installing: ${lastText || proof.lastObserverError || "No renderer available"}`);
       await sleep(started ? 1500 : 250);
     }
     throw Error(`Timed out at ${phase}. Last UI: ${lastText || "No installer renderer available"}`);

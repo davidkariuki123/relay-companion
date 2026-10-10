@@ -178,3 +178,48 @@ test("an image already ejected, holding another build, or refusing to eject is l
   await app.runTimers();
   assert.deepEqual(detached(app), [], "a handoff from another build ejects nothing");
 });
+
+// 0.1.627 and 0.1.629 (2026-10-10): the move finished before the proof's
+// observer caught the "Installing Relay…" frame. The window now stays up for a
+// minimum before the move, and each step is written to the install log the
+// proof reads.
+test("the install window is on screen at least 1.2 s before the move starts", async () => {
+  const app = await applicationMain();
+  app.window.emit("show");
+  const result = app.relocate();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(actions(app), [], "nothing moves while the window has only just appeared");
+  const wait = app.timers.find(timer => timer.ms > 0);
+  assert.ok(wait && wait.ms > 1000 && wait.ms <= 1200, `waits out the rest of 1.2 s, not ${wait?.ms}`);
+  await app.runTimers();
+  assert.equal((await result).ok, true);
+  assert.deepEqual(actions(app), ["write", "move"]);
+});
+
+test("each step of the self-install is logged for the proof, from the window to the relaunched copy", async () => {
+  const app = await applicationMain();
+  app.window.emit("show");
+  await app.runTimers();
+  app.timers.length = 0;
+  const result = app.relocate();
+  await app.runTimers();
+  assert.equal((await result).ok, true);
+  assert.deepEqual(app.installLog.map(line => line.event), ["install-window-shown", "relocation-started"]);
+  const started = app.installLog[1];
+  assert.equal(started.applicationVersion, candidate.applicationVersion);
+  assert.equal(started.root, "/Volumes/Install Relay/Relay.app");
+  assert.equal(started.destination, "/Applications/Relay.app");
+  assert.equal(started.volume, "/Volumes/Install Relay");
+  assert.ok(Number.isFinite(Date.parse(started.at)));
+
+  const refused = await applicationMain({ existing: { ...candidate, applicationVersion: "0.1.600" } });
+  await assert.rejects(refused.relocate(), /newer Relay/);
+  assert.deepEqual(refused.installLog.map(line => [line.event, line.message]), [["relocation-failed", "A newer Relay is already in Applications. Open Relay from there."]]);
+
+  const handoff = { version: candidate.version, runtimeSourceSha: candidate.runtimeSourceSha, startedAt: "2026-10-10T18:00:00.000Z" };
+  const moved = await applicationMain({ installed: true, handoff });
+  assert.deepEqual(moved.installLog.map(line => [line.event, line.root, line.startedAt]),
+    [["relaunched-from-applications", "/Applications/Relay.app", handoff.startedAt]]);
+  const stale = await applicationMain({ installed: true, handoff: { ...handoff, version: "0.1.500" } });
+  assert.deepEqual(stale.installLog, [], "a handoff from another build is not this relaunch");
+});
