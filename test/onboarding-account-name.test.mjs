@@ -42,3 +42,10 @@ test("the four ideas have room, and a scrollbar, if any, is quiet", () => {
   assert.match(html, /\.su-idea-list::-webkit-scrollbar-thumb \{ background:var\(--hair\);/);
   assert.match(html, /Send the link to whoever it’s for\./);
 });
+
+// Fresh Mac VM, 2026-10-11: after a verified email code the pill flashed the
+// Google screen ("Look for the new tab in your browser") while it approved.
+test("a verified email code goes straight to Finishing setup, never the browser screen", () => {
+  const code = html.slice(html.indexOf('if (signupStage === "code") {'), html.indexOf('if (signupStage === "google") {'));
+  assert.match(code, /if \(state\?\.status === "pending_approval"\) \{\n[\s\S]*?signupStage = "finishing";\n\s+await approveSignupAccount\(\);\n\s+return;\n\s+\}\n\s+applyInstallationState\(state\);/);
+});

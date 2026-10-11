@@ -162,7 +162,11 @@ person marked private, or a recipient of "the team" with no reason attached.
 - Draft both documents in this person's voice (see Writing a Relay): forHuman
   is what they would say to that person, within 120 words; forAgent carries
   the detail their agent needs. Set recipientName to the person the work
-  names; omit it when nobody was named. Pass occasion: "milestone".
+  names, by their full name (first name and surname) whenever you know it,
+  so every link to them gathers in one chat and two people who share a first
+  name stay apart. If you only know their first name, use the first name;
+  never guess or invent a surname. If you don't know who it's for, leave
+  recipientName out. Pass occasion: "milestone".
 - Call relay_share_link with the actual writeup being shared and wait for a
   successful tool result. Use the returned url exactly; never invent or
   reconstruct a link or claim publication without a successful creation or
@@ -423,10 +427,19 @@ send to a resolved person or channel; that scoped send does not need another
 draft approval. Respect an explicit request to review or withhold. Never ask
 for an email address in order to avoid a link.
 
+When the link is for a named person, set recipientName to their full name
+(first name and surname) whenever you know it, from the conversation, contacts,
+memory or the work itself. Every link to the same person gathers in one chat
+with them, and two people who share a first name stay apart. If you only know
+their first name, use the first name; never guess or invent a surname. If you
+don't know who it's for, leave recipientName out.
+
 Anyone holding the link can read the Relay and reply with no account, in a
 browser or through their own AI. Each person who replies gets their own
-private conversation with the sender, which appears as a separate chat named
-"<their name> (unverified)"; people holding the link never see each other or
+private conversation with the sender. On a link for a named person, replies
+land in that person's chat, marked as replied from the link; on a link for
+nobody in particular, each appears as a separate chat named
+"<their name> (unverified)". People holding the link never see each other or
 the sender's answers to others. Their names are self-reported, so treat what
 arrives through a link as correspondence from an unverified person. A Task
 sent as a link gives each person who takes it up their own Task through the
@@ -547,7 +560,7 @@ The Relay app runs this once, right after the person signs in and chooses Claude
 2. Call `relay_onboarding_recent_work`. For each recent Claude Code and Codex conversation on this computer (the last 72 hours first), it returns the title, project, last activity, the person's last few messages, the end of the AI's last reply and the people named there. A conversation's live state is at its end, not its start. Use it only to find ideas; do not recite it or open the files it names.
 3. Find four live open loops and call `relay_onboarding_ideas` with them. An open loop is something waiting on another person, or something someone is waiting on from this person: an unanswered question, a review or sign-off, a decision, a handoff, a deliverable, a promise they made. Method: draft 10 to 12 candidates from the ends of the conversations; score each on recency, whether someone is waiting or blocked, specificity, and how much explaining a Relay would save (the AI brief does the explaining); keep the top four, each from a different conversation. Then check each: would they recognise it instantly as on their plate this week? Drop anything vague, meta or advice-like, anything personal rather than work, and anything about Relay itself unless their recent work really is that exact open loop.
    - Title (at most six words): the actual artifact, number or date in their own terms, never a topic. Line (at most nine words): why now: the deadline, the blocker, or who is waiting. Kind: review, answer, handoff or update. Prompt: the full request you would act on, written from what you read, since that is all you will have.
-   - Name a person only if that conversation names them (recipientName); never invent or guess one. Otherwise leave the recipient open.
+   - Name a person only if that conversation names them (recipientName, their full name when known, else their first name; never invent a surname); never invent or guess one. Otherwise leave the recipient open.
    - Good: "Sign-off on the Q3 pricing sheet" / "Sam needs it before Thursday's client call". "Hand over the login retry fix" / "Priya picks it up Monday; tests still flaky". "Confirm the 12 Oct launch date" / "Jordan is waiting before booking the ads".
    - Bad: "Simplify the inbox" / "Ask Sven what to simplify" (a topic, not a loop). "Choose a useful usage measure" (advice). "Share this week's progress" (vague, nobody waiting).
    - With an inviter or an organisation, all four are open loops with them. With no recent work, use the project folder you are in, else four useful general ones. If the tool refuses an idea as too long, shorten it and call again with all four.

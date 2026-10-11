@@ -1406,6 +1406,8 @@ function resetAccountViewCaches() {
   sentCache = [];
   sentFingerprint = "";
   sentUsage = null;
+  linkChatsCache = null;
+  linkChatsUnsupportedUntil = 0;
   teachingTelemetry.reset();
   sentLoadedOnce = null;
   contactsCache = [];
@@ -2338,11 +2340,56 @@ function prefetchSentAttachments(items) {
   });
 }
 
+// ---- link-recipient chats ---------------------------------------------------
+// Every link this account minted for one named person, gathered by the server
+// into one chat (GET /v1/link-chats). Refreshed with Sent, because a mint, a
+// claim and an added email all move Sent too. null means "this server cannot
+// say": an older API answers 404, and the renderer then files links exactly as
+// before and shows no banner.
+let linkChatsCache = null;
+let linkChatsUnsupportedUntil = 0;
+function linkChatsFingerprintOf(chats) {
+  return JSON.stringify((chats || []).map((chat) => [
+    chat.key, chat.name, chat.state, chat.updatedAt, chat.newestUrl,
+    chat.contact && chat.contact.email, chat.contact && chat.contact.onRelay,
+    (chat.links || []).map((link) => [link.relayId, link.state]),
+    chat.guestAddresses,
+  ]));
+}
+async function refreshLinkChats() {
+  const fixtures = testFixtures("RELAY_OVERLAY_TEST_LINK_CHATS_FIXTURES");
+  if (fixtures) {
+    linkChatsCache = fixtures;
+    return linkChatsCache;
+  }
+  const credential = deviceToken();
+  if (!credential || Date.now() < linkChatsUnsupportedUntil) return linkChatsCache;
+  try {
+    const res = await (await relayClient()).linkChats();
+    if (deviceToken() !== credential) return linkChatsCache;
+    linkChatsCache = Array.isArray(res && res.chats) ? res.chats : [];
+  } catch (error) {
+    if ([404, 405].includes(Number(error && error.status))) {
+      // An API that predates link chats. Ask again later; it may ship first.
+      linkChatsCache = null;
+      linkChatsUnsupportedUntil = Date.now() + 30 * 60 * 1000;
+    } else {
+      console.error("[overlay] link chats refresh failed:", error && error.message);
+    }
+  }
+  return linkChatsCache;
+}
+
 async function refreshSent() {
+  // Alongside Sent, never ahead of it: the Sent sequence below owns ordering.
+  // (Guarded: tests lift refreshSent out of this file on its own.)
+  const linkChatsRefresh = typeof refreshLinkChats === "function" ? refreshLinkChats().catch(() => null) : Promise.resolve(null);
+  const linkChatsPrint = () => (typeof linkChatsFingerprintOf === "function" ? linkChatsFingerprintOf(linkChatsCache) : "");
   const sentFixtures = testFixtures("RELAY_OVERLAY_TEST_SENT_FIXTURES");
   if (sentFixtures) {
+    await linkChatsRefresh;
     sentCache = sentFixtures;
-    sentFingerprint = sentFingerprintOf(sentCache);
+    sentFingerprint = sentFingerprintOf(sentCache) + linkChatsPrint();
     updateFirstRelayOnboarding(onboardingAccountKey(), { items: sentFixtures });
     return sentCache;
   }
@@ -2352,14 +2399,14 @@ async function refreshSent() {
   const refreshId = ++sentRefreshStarted;
   try {
     const client = await relayClient();
-    const res = await client.sent({ limit: SENT_FETCH_LIMIT });
+    const [res] = await Promise.all([client.sent({ limit: SENT_FETCH_LIMIT }), linkChatsRefresh]);
     // A request from the previous account, or one that lost a race to a newer
     // completed request, has no authority to move this account's room back in
     // time.
     if (deviceToken() !== credential || refreshId < sentRefreshCommitted) return sentCache;
     sentRefreshCommitted = refreshId;
     sentCache = Array.isArray(res && res.items) ? res.items : [];
-    sentFingerprint = sentFingerprintOf(sentCache);
+    sentFingerprint = sentFingerprintOf(sentCache) + linkChatsPrint();
     if (res && res.usage && typeof res.usage === "object") sentUsage = res.usage;
     updateFirstRelayOnboarding(accountKey, res);
     // A queued message retires against the SERVER's own view, never against our
@@ -2971,6 +3018,8 @@ function buildPayload() {
     pendingOpen: pendingSetupOpenPreviewCache,
     relays: hydrateReactions(relaysNow),
     sent: hydrateReactions(sentWithMaterializationState(sentCache)),
+    // null when the API cannot say (older server): no link chats, no banner.
+    linkChats: linkChatsCache,
     // Messages this device has accepted but the server has not confirmed. They
     // are the renderer's source of truth for unsent bubbles, which is why they
     // survive a repaint and a restart where an in-renderer optimistic map did
@@ -3475,6 +3524,7 @@ async function pushInboxNow(force) {
       chat.lastMessage && chat.lastMessage.relayId,
     ]),
     slackTeammateReplies: (payload.slackTeammateReplies || []).map((reply) => [reply.id, reply.unread]),
+    linkChats: linkChatsFingerprintOf(payload.linkChats),
     // Without these the queue's own progress — waiting, attempted again, sent,
     // refused — would never reach the renderer: nothing else in the payload
     // moves while a message sits offline.
@@ -10081,6 +10131,27 @@ ipcMain.handle("relay:bindShareLink", async (event, input = {}) => {
     const message = error?.body?.message || error?.message || String(error);
     console.error("[overlay] share link bind failed:", message);
     return { ok: false, error: message };
+  }
+});
+// Add the person's email to a link-recipient chat. Sent and the link chats
+// are refreshed before the answer returns, so the room the renderer paints
+// next is already the chat with that contact.
+ipcMain.handle("relay:linkChatEmail", async (event, input = {}) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
+  const key = String(input.key || "").trim();
+  const email = String(input.email || "").trim();
+  const idempotencyKey = String(input.idempotencyKey || "").trim();
+  if (!key || !email || idempotencyKey.length < 8) return { ok: false, error: "Enter their email address." };
+  try {
+    const result = await (await relayClient()).attachLinkChatEmail({ key, email, idempotencyKey });
+    await Promise.allSettled([refreshSent(), refreshContacts()]);
+    await pushInbox(true);
+    return { ok: true, result };
+  } catch (error) {
+    const status = Number(error && error.status);
+    const message = error?.body?.message || error?.message || String(error);
+    console.error("[overlay] link chat email failed:", message);
+    return { ok: false, status, code: error?.body?.error || "", error: message };
   }
 });
 function safeShareLinkUrl(value) {

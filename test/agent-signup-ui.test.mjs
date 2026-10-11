@@ -178,7 +178,8 @@ test("a wrong identity stays human-confirmed and returns to the method chooser b
   const callers = [...overlay.matchAll(/approveSignupAccount\b/g)].map((m) => overlay.slice(m.index - 120, m.index));
   assert.equal(callers.length, 3, "definition, the Use this account button, the typed email code");
   assert.ok(callers.some((c) => /getElementById\("suApprove"\)\?\.addEventListener\("click", $/.test(c)));
-  assert.ok(callers.some((c) => /state\?\.status === "pending_approval"\) \{ await $/.test(c)));
+  // The typed email code: Finishing setup shows while it approves.
+  assert.ok(callers.some((c) => /signupStage = "finishing";\n\s+await $/.test(c)));
   assert.match(overlay, /Sign in to Relay/);
   assert.match(overlay, /Claude Code · Cowork · Codex/);
   assert.match(overlay, /Account verified/);

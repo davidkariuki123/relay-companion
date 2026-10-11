@@ -92,7 +92,7 @@ test("the browser wait offers email in one click", () => {
 // browser that approves.
 test("a verified email code finishes sign-in in the app", () => {
   const code = html.slice(html.indexOf('if (signupStage === "code") {'), html.indexOf('if (signupStage === "google") {'));
-  assert.match(code, /installationAuthEmailVerify\(code\);\s*signupBusy = false; applyInstallationState\(state\);[\s\S]*?if \(state\?\.status === "pending_approval"\) \{ await approveSignupAccount\(\); return; \}/);
+  assert.match(code, /installationAuthEmailVerify\(code\);\s*signupBusy = false;[\s\S]*?if \(state\?\.status === "pending_approval"\) \{[\s\S]*?signupStage = "finishing";\n\s+await approveSignupAccount\(\);\n\s+return;\n\s+\}\n\s+applyInstallationState\(state\);/);
   const approve = html.slice(html.indexOf("async function approveSignupAccount()"), html.indexOf("function applyInstallationState("));
   assert.match(approve, /window\.relay\.installationAuthApprove\(\)/);
   assert.match(approve, /signupStage = "finishing"/);

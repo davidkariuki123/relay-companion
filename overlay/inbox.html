@@ -4392,6 +4392,7 @@
 <link rel="stylesheet" href="./relay-anyone-tip.css" />
 <link rel="stylesheet" href="./inbox-pages.css" />
 <link rel="stylesheet" href="./first-relay-tutorial.css" />
+<link rel="stylesheet" href="./link-chats.css" />
 </head>
 <body>
   <svg width="0" height="0" viewBox="0 0 0 0" aria-hidden="true" focusable="false">
@@ -4555,6 +4556,8 @@
             <button type="button" class="sb-act pri" id="thSelectDownload"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Download</button>
           </div>
           <div id="thSlackPeople" class="th-slack-people gone" aria-live="polite"></div>
+          <!-- A link chat's card (link-chats.js): sticky under the header. -->
+          <div id="thLinkCard" hidden></div>
           <div id="thHistory"></div>
         </div>
       </section>
@@ -4706,6 +4709,7 @@
 <script src="./link-tooltip.js"></script>
 <script src="./page-physics.js"></script>
 <script src="./inbox-pages.js"></script>
+<script src="./link-chats.js"></script>
 <script>
   // Theme, two layers (Sven, round 5): the pill FOLLOWS the OS appearance by
   // default; the moon/sun button is the override — an explicit pick persists
@@ -9750,7 +9754,7 @@
       ? `<span class="avatar sq channel-hash" style="--av-h:${avatarHue(name)}" aria-hidden="true">#</span>`
       : identity.isGroup
         ? `<span class="av-stack">${groupPeople.map((person, index) => `<span class="avatar sm${index === 0 ? " sq" : ""}" style="--av-h:${avatarHue(person)}" aria-hidden="true">${esc(avatarInitials(person))}</span>`).join("")}</span>`
-        : `<span class="avatar" style="--av-h:${avatarHue(name)}" aria-hidden="true">${esc(avatarInitials(name))}</span>`;
+        : `<span class="avatar" style="--av-h:${avatarHue(name)}" aria-hidden="true">${esc(avatarInitials(name))}${identity.linkChat ? globalThis.RelayLinkChats?.badgeHtml(identity.linkChat) || "" : ""}</span>`;
     // A chat that is also in Slack carries the Slack mark on its avatar.
     const avatar = slackRoom
       ? `<span class="av-slack">${baseAvatar}<img class="av-slack-mark" src="slackMark.png" alt="Slack" /></span>`
@@ -18178,6 +18182,12 @@
       }
       msgs.push(optimistic);
     }
+    // A link made for a named person is a message to that person: its rows,
+    // and replies typed on its page, are filed into that person's one chat
+    // (link-chats.js). Done before the link-note step below, which then only
+    // ever sees links made for nobody in particular.
+    // Guarded: tests lift this function out of the page without its neighbours.
+    if (typeof linkChatIndex === "function") globalThis.RelayLinkChats?.rekey(msgs, linkChatIndex());
     // A reply through your link opens its own person's room, while the note
     // you sent stays in the link's hidden room, so the conversation began at
     // "6 is perfect" with nothing it answers (live run, Jo, 2026-10-08). The
@@ -18266,6 +18276,16 @@
         : `${firsts[0]}, ${firsts[1]} +${t.people.length - 2}`;
       t.name = t.isGroup ? (t.groupName || setLabel) : t.people[0];
       t.setLabel = setLabel;
+      // A link chat is named for the person the links were made for, never by
+      // whatever name a replier typed on the link page.
+      const linkChat = (typeof linkChatIndex === "function" && linkChatIndex()?.byRoom.get(String(t.partyKey || ""))) || null;
+      if (linkChat) {
+        t.linkChat = linkChat;
+        t.isGroup = false;
+        t.name = linkChat.name;
+        t.people = [linkChat.name];
+        t.setLabel = linkChat.name;
+      }
     }
     return threads;
   }
@@ -18298,6 +18318,273 @@
     if (!room || room.isGroup) return false;
     if (!String(room.partyKey || "").startsWith("share:")) return false;
     return (room.msgs || []).every((message) => message.direction === "out");
+  }
+  // ---- LINK-RECIPIENT CHATS (link-chats.js) -------------------------------
+  // The server's grouping of this account's links by the person they name,
+  // indexed once per payload. null when the API predates it: then nothing is
+  // re-filed and no card is drawn.
+  // var, not let: chat projections can run before this line has executed.
+  var linkChatIndexMemo = null;
+  function linkChatIndex() {
+    const chats = RelayLinkChats.chatsOf(payload);
+    if (!linkChatIndexMemo || linkChatIndexMemo.source !== chats) linkChatIndexMemo = { source:chats, index:chats ? RelayLinkChats.buildIndex(chats) : null };
+    return linkChatIndexMemo.index;
+  }
+  function linkChatForRoom(room) {
+    if (!room || room.isGroup) return null;
+    return linkChatIndex()?.byRoom.get(String(room.partyKey || "")) || null;
+  }
+  // The card at the top of a link chat, and the composer under it. State is
+  // per chat key and lives here; link-chats.js owns the rules and the markup.
+  var linkChatUi = new Map();
+  // Resolved on first paint: nothing here touches the DOM at load.
+  var linkCardEl = null;
+  function linkChatFoldKey(key) {
+    return `relay.linkChatFolded:${signupAccountKey() || "anon"}:${key}`;
+  }
+  function linkChatUiFor(key) {
+    if (!linkChatUi.has(key)) {
+      let folded = false;
+      try { folded = localStorage.getItem(linkChatFoldKey(key)) === "1"; } catch {}
+      linkChatUi.set(key, { mode:"", folded, expanded:false, autoFold:false, joinedUntil:0, delivered:0, email:"", error:"", note:"", noteTimer:0, idem:"", idemEmail:"" });
+    }
+    return linkChatUi.get(key);
+  }
+  function setLinkChatFolded(key, folded) {
+    const ui = linkChatUiFor(key);
+    ui.folded = folded;
+    ui.autoFold = false;
+    try { folded ? localStorage.setItem(linkChatFoldKey(key), "1") : localStorage.removeItem(linkChatFoldKey(key)); } catch {}
+  }
+  var linkCardChat = null;
+  var linkCardRoom = "";
+  // The room's own rows, as the last full render saw them: a repaint from the
+  // card's buttons reuses them, so the composer's mode cannot flip under them.
+  var linkCardMessages = [];
+  function paintLinkChatCard(chatRoom, roomMessages) {
+    if (roomMessages) linkCardMessages = roomMessages;
+    else if (!chatRoom) linkCardMessages = [];
+    roomMessages = linkCardMessages;
+    linkCardEl = linkCardEl || document.getElementById("thLinkCard");
+    if (!linkCardEl) return;
+    wireLinkCard();
+    const chat = chatRoom && !chatRoom.isGroup ? (chatRoom.linkChat || linkChatForRoom(chatRoom)) : null;
+    const ui = chat ? linkChatUiFor(chat.key) : null;
+    // Each visit decides afresh whether the open card fits beside the newest message.
+    if (ui && linkCardRoom !== String(threadDetailId)) { ui.autoFold = false; ui.pinnedOpen = false; }
+    linkCardRoom = chat ? String(threadDetailId) : "";
+    linkCardChat = chat;
+    // Folded by the person, or because the open card would cover the newest
+    // message: either way it is one line.
+    const view = ui ? { ...ui, folded:ui.folded || ui.autoFold, expanded:ui.expanded && !ui.autoFold } : null;
+    const html = chat ? RelayLinkChats.cardHtml(chat, view) : "";
+    const sig = html ? [chat.key, chat.state, RelayLinkChats.cardKind(chat, view), ui.error, ui.note, chat.newestUrl, ui.delivered].join("|") : "";
+    if (linkCardEl.dataset.sig !== sig) {
+      linkCardEl.dataset.sig = sig;
+      if (!html) {
+        linkCardEl.hidden = true;
+        linkCardEl.className = "";
+        linkCardEl.innerHTML = "";
+      } else {
+        const tpl = document.createElement("template");
+        tpl.innerHTML = html.trim();
+        const card = tpl.content.firstElementChild;
+        linkCardEl.className = card.className;
+        linkCardEl.dataset.lkKind = card.dataset.lkKind || "";
+        linkCardEl.innerHTML = card.innerHTML;
+        linkCardEl.hidden = false;
+        const input = linkCardEl.querySelector(".lk-input");
+        if (input && ui.mode === "email") requestAnimationFrame(() => input.focus());
+      }
+    }
+    // Send waits for an address, and says so where the words would go.
+    const input = document.getElementById("thQrInput");
+    const send = document.getElementById("thQrSend");
+    const composerMode = RelayLinkChats.composerMode(chat, roomMessages);
+    const blocked = composerMode === "blocked";
+    if (input) {
+      if (blocked) {
+        if (input.dataset.lkPlaceholder === undefined) input.dataset.lkPlaceholder = input.getAttribute("data-placeholder") || "";
+        input.setAttribute("data-placeholder", RelayLinkChats.composerPlaceholder(chat));
+        input.setAttribute("contenteditable", "false");
+        input.setAttribute("aria-disabled", "true");
+      } else if (input.dataset.lkPlaceholder !== undefined) {
+        input.setAttribute("data-placeholder", input.dataset.lkPlaceholder);
+        delete input.dataset.lkPlaceholder;
+        input.setAttribute("contenteditable", "true");
+        input.removeAttribute("aria-disabled");
+      }
+      input.closest(".qr")?.classList.toggle("lk-qr-off", blocked);
+    }
+    if (send) {
+      send.classList.toggle("lk-off", blocked);
+      if (blocked) send.disabled = true;
+    }
+    // Answering a reply typed on the link page goes back through the link;
+    // say so above the composer, with the way to reach them on Relay.
+    const qr = input?.closest(".qr");
+    const dock = qr?.parentElement;
+    let hint = dock?.querySelector(".lk-reply-hint") || null;
+    if (composerMode === "link-reply" && qr && dock) {
+      const html = RelayLinkChats.linkReplyHintHtml(chat);
+      if (!hint) {
+        hint = document.createElement("div");
+        hint.className = "lk-reply-hint";
+        hint.setAttribute("role", "note");
+        dock.insertBefore(hint, qr);
+      }
+      if (hint.innerHTML !== html) hint.innerHTML = html;
+    } else if (hint) {
+      hint.remove();
+    }
+    if (chat && ui && !ui.autoFold && !ui.pinnedOpen && !ui.folded && ui.mode === "" && !linkCardEl.hidden && !linkCardEl.classList.contains("is-fold")) {
+      requestAnimationFrame(() => foldLinkCardIfCovering(chat));
+    }
+  }
+  // The card must never cover the newest message. Landing at the newest
+  // message, what is left between the open card and the composer has to show
+  // it: all of a short one, and a real part (the size of a short one) of a
+  // long one. When it cannot, the card folds to its one line for this visit.
+  function foldLinkCardIfCovering(chat) {
+    if (linkCardChat !== chat || linkCardEl.hidden || activeView !== "threads") return;
+    const scroller = roomScrollElement();
+    const messages = document.querySelectorAll("#thRows .th-msg");
+    const newest = messages[messages.length - 1];
+    if (!scroller || !newest) return;
+    const head = thDetailEl.querySelector(".th-detail-head")?.offsetHeight || 0;
+    const dock = thHistoryEl.querySelector(".th-composer-dock")?.offsetHeight || 0;
+    const room = scroller.clientHeight - head - dock - linkCardEl.offsetHeight;
+    if (!RelayLinkChats.coversNewest(room, newest.offsetHeight)) return;
+    linkChatUiFor(chat.key).autoFold = true;
+    paintLinkChatCard(chatRoomForThread(threadDetailId));
+  }
+  function linkChatNote(key, text) {
+    const ui = linkChatUiFor(key);
+    clearTimeout(ui.noteTimer);
+    ui.note = text;
+    ui.noteTimer = setTimeout(() => { ui.note = ""; paintLinkChatCard(chatRoomForThread(threadDetailId)); }, 1800);
+    paintLinkChatCard(chatRoomForThread(threadDetailId));
+  }
+  async function linkChatCopyLink(chat) {
+    const url = String(chat.newestUrl || "");
+    if (!url) return;
+    let ok = false;
+    try {
+      const result = await window.relay.copyShareLink?.(url);
+      ok = Boolean(result && result.ok !== false);
+      if (!ok && navigator.clipboard) { await navigator.clipboard.writeText(url); ok = true; }
+    } catch {}
+    linkChatNote(chat.key, ok ? "Link copied" : "Couldn’t copy the link");
+  }
+  async function linkChatCopyInvite(chat) {
+    let ok = false;
+    try {
+      const result = await window.relay.copyOnboardingInviteLink?.(payload.account?.userId || "");
+      ok = Boolean(result && result.ok !== false);
+    } catch {}
+    linkChatNote(chat.key, ok ? "Invite link copied" : "Couldn’t copy the invite link");
+  }
+  function linkChatErrorText(result) {
+    const code = String(result?.code || "");
+    if (Number(result?.status) === 404 && !code) return "This version of Relay can’t add an email here yet.";
+    if (code === "invalid_request") return "Enter their email address.";
+    return String(result?.error || "Couldn’t add the email. Try again.");
+  }
+  async function linkChatSubmitEmail(chat) {
+    const ui = linkChatUiFor(chat.key);
+    const input = linkCardEl.querySelector(".lk-input");
+    const email = String((input && input.value) || ui.email || "").trim();
+    ui.email = email;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      ui.error = "Enter their email address.";
+      paintLinkChatCard(chatRoomForThread(threadDetailId));
+      return;
+    }
+    if (ui.idemEmail !== email.toLowerCase()) {
+      ui.idemEmail = email.toLowerCase();
+      ui.idem = `lc-${(crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`)}`;
+    }
+    ui.mode = "checking";
+    ui.error = "";
+    paintLinkChatCard(chatRoomForThread(threadDetailId));
+    let result = null;
+    try {
+      result = await window.relay.linkChatEmail({ key:chat.key, email, idempotencyKey:ui.idem });
+    } catch (error) {
+      result = { ok:false, error:error?.message };
+    }
+    if (!result || result.ok === false) {
+      ui.mode = "email";
+      ui.error = linkChatErrorText(result);
+      paintLinkChatCard(chatRoomForThread(threadDetailId));
+      return;
+    }
+    const answer = result.result || {};
+    const nextKey = String(answer.chat?.key || chat.key);
+    ui.mode = ""; ui.email = ""; ui.idem = ""; ui.idemEmail = "";
+    const next = linkChatUiFor(nextKey);
+    if (answer.result === "on_relay") {
+      next.joinedUntil = Date.now() + RelayLinkChats.JOINED_MS;
+      next.delivered = Number(answer.delivered || 0) || (chat.links || []).length;
+      setTimeout(() => { if (activeView === "threads") renderThreadDetail(); }, RelayLinkChats.JOINED_MS + 60);
+    } else {
+      next.expanded = true;
+      next.pinnedOpen = true;
+      next.mode = "";
+    }
+    if (activeView === "threads") {
+      renderThreadDetail();
+      // The answer lands where the conversation does: at its newest message.
+      requestAnimationFrame(() => scrollRoomToNewest(chatOrder() === "chat"));
+    }
+  }
+  function wireLinkCard() {
+    if (linkCardEl.dataset.lkWired) return;
+    linkCardEl.dataset.lkWired = "1";
+    linkCardEl.addEventListener("click", (event) => {
+      const chat = linkCardChat;
+      if (!chat) return;
+      const target = event.target.closest("[data-lk-act]");
+      if (!target || !linkCardEl.contains(target)) return;
+      const act = target.getAttribute("data-lk-act");
+      const ui = linkChatUiFor(chat.key);
+      if (act === "submit") return; // the form's submit handles it
+      event.preventDefault();
+      event.stopPropagation();
+      if (act === "copy-link") void linkChatCopyLink(chat);
+      else if (act === "copy-invite") void linkChatCopyInvite(chat);
+      else if (act === "add-email") { ui.mode = "email"; ui.error = ""; ui.autoFold = false; ui.pinnedOpen = true; }
+      else if (act === "change-email") { ui.mode = "email"; ui.error = ""; ui.email = String(chat.contact?.email || ""); }
+      else if (act === "cancel") { ui.mode = ""; ui.error = ""; }
+      else if (act === "fold") { if (chat.state === "no_email") setLinkChatFolded(chat.key, true); else { ui.expanded = false; ui.autoFold = false; } }
+      // Opened on purpose: it stays open for this visit even where it covers.
+      else if (act === "expand") { if (chat.state === "no_email") setLinkChatFolded(chat.key, false); else { ui.expanded = true; ui.autoFold = false; } ui.pinnedOpen = true; }
+      paintLinkChatCard(chatRoomForThread(threadDetailId));
+    });
+    linkCardEl.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (linkCardChat && linkChatUiFor(linkCardChat.key).mode === "email") void linkChatSubmitEmail(linkCardChat);
+    });
+    linkCardEl.addEventListener("input", (event) => {
+      if (!linkCardChat || !event.target.matches(".lk-input")) return;
+      const ui = linkChatUiFor(linkCardChat.key);
+      ui.email = event.target.value;
+      if (ui.error) { ui.error = ""; linkCardEl.querySelector(".lk-a-err")?.remove(); }
+      const add = linkCardEl.querySelector('[data-lk-act="submit"]');
+      if (add) add.toggleAttribute("data-soft", !ui.email.includes("@"));
+    });
+    linkCardEl.addEventListener("keydown", (event) => {
+      if (!linkCardChat) return;
+      if (event.key === "Escape" && linkChatUiFor(linkCardChat.key).mode === "email") {
+        event.preventDefault();
+        event.stopPropagation();
+        linkChatUiFor(linkCardChat.key).mode = "";
+        paintLinkChatCard(chatRoomForThread(threadDetailId));
+      } else if ((event.key === "Enter" || event.key === " ") && event.target.matches('.lk-a-card[role="button"]')) {
+        event.preventDefault();
+        event.target.click();
+      }
+    });
   }
   function sortConversationRooms(rooms) {
     return [...rooms].sort((a, b) => {
@@ -18666,6 +18953,10 @@
       byParty.set(key, mergeDirectContactAnchor(existing, anchor));
     }
     people = sortConversationRooms([...byParty.values()].filter((room) => !isUnansweredLinkAudience(room)));
+    for (const room of typeof linkChatForRoom === "function" ? people : []) {
+      const linkChat = linkChatForRoom(room);
+      if (linkChat) { room.linkChat = linkChat; room.name = linkChat.name; room.people = [linkChat.name]; }
+    }
     // Message history is not the registry of rooms. Every saved group belongs
     // in the conversation rail even before its first message; otherwise a new
     // group opens in a detached legacy window and then vanishes from the rail.
@@ -19723,6 +20014,7 @@
       // idle). Ask for it now and show a loading line rather than a blank pane;
       // the next payload re-renders this view with the messages.
       setThreadHeader(threadDetailPartyHint, "");
+      if (typeof paintLinkChatCard === "function") paintLinkChatCard(null);
       thHistoryEl.innerHTML = '<div class="cv-empty">Loading conversation…</div>';
       if (window.relay.refreshSent) window.relay.refreshSent().catch(() => {});
       return;
@@ -19972,6 +20264,8 @@
       [...thread.msgs].reverse().find((message) => !message.textLike && !message.request) || {}
     ).id || "");
     let previousChunkMessage = null;
+    // The one outbound row that carries the room's receipt (a link's "Shared by link").
+    const latestOutboundId = String(([...thread.msgs].reverse().find((message) => message.direction === "out") || {}).id || "");
     // Every attachment in this room, oldest first, collected as the rows are
     // built. The viewer's filmstrip and Select all both need the whole room,
     // and the row loop is the one place that already knows each sender/time.
@@ -20076,7 +20370,7 @@
         ? `<div class="th-chunk-date${firstChunk ? " first" : ""}" data-chat-key="${esc(renderKey)}:date" role="separator"><span>${esc(chunkDateLabel)}</span></div>`
         : "";
       const runHeader = cont ? "" : `
-      <div class="th-run${mine ? " mine" : ""}" data-chat-key="${esc(renderKey)}:run"><span class="th-party ${partyColorClass(who, mine)}">${esc(who)}</span>${m.origin === "slack" && !slackMessagesVisible() ? '<span class="th-run-via"><img src="slackMark.png" alt="" />in Slack</span>' : ""}</div>`;
+      <div class="th-run${mine ? " mine" : ""}" data-chat-key="${esc(renderKey)}:run"><span class="th-party ${partyColorClass(who, mine)}">${esc(who)}</span>${m.linkReply && !mine ? globalThis.RelayLinkChats?.viaHtml() || "" : ""}${m.origin === "slack" && !slackMessagesVisible() ? '<span class="th-run-via"><img src="slackMark.png" alt="" />in Slack</span>' : ""}</div>`;
       const open = expandedMsgIds.has(m.id);
       const inlineBody = !textLike && !m.request && !open
         && !!m.body && String(m.body).length <= INLINE_BODY_MAX;
@@ -20194,7 +20488,12 @@
         } else {
           if (!sideActions) bits.push(...messageActionBits);
           if (mine && m.pending) bits.push(...outboxStatusBits(m));
-          if (receipt) bits.push(receipt.expandable
+          // A link not yet delivered says how it travelled: by link, and
+          // whether it has been opened. Nothing reads Delivered until Relay
+          // really delivered it.
+          const linkReceipt = mine && m.linkChatKey && !m.pending && !m.deletedAt && m.id === latestOutboundId ? globalThis.RelayLinkChats?.receiptLabel(m) || "" : "";
+          if (linkReceipt) bits.push(`<span class="th-seen lk-link-receipt">${RelayLinkChats.receiptHtml(linkReceipt)}</span>`);
+          else if (receipt) bits.push(receipt.expandable
             ? `<button type="button" class="th-seen" data-receipt-toggle="${esc(m.id)}" data-stop="1" aria-expanded="${expandedReceiptIds.has(m.id) ? "true" : "false"}">${esc(receipt.label)}</button>`
             : `<span class="th-seen">${esc(receipt.label)}</span>`);
         }
@@ -20297,6 +20596,7 @@
     }
     const composerSendEl = document.getElementById("thQrSend");
     if (composerSendEl) composerSendEl.disabled = chatReplySending.has(threadStateKey);
+    if (typeof paintLinkChatCard === "function") paintLinkChatCard(chatRoom, roomMsgsBeforeFold);
     // The queue payload can paint the optimistic bubble before the IPC reply
     // sets followOwnSend. The next render then has identical markup; returning
     // early in that case left the new bubble below the viewport until another
@@ -20532,6 +20832,8 @@
       const doThReply = async () => {
         if (threadEditTargets.has(threadStateKey)) return doThEditSave();
         if (thReplySending || chatReplySending.has(threadStateKey)) return;
+        // A link chat with no email yet has nobody to send to.
+        if (chatRoom?.linkChat && globalThis.RelayLinkChats?.composerBlocked(chatRoom.linkChat, roomMsgsBeforeFold)) return;
         const text = (thQrInput.value || "").trim();
         const staged = peekStagedFiles(thQrInput);
         if (!text && !staged.length) return;
@@ -24868,12 +25170,21 @@
         signupBusy = true; signupError = ""; renderSignup();
         try {
           const state = await window.relay.installationAuthEmailVerify(code);
-          signupBusy = false; applyInstallationState(state);
+          signupBusy = false;
           // The code was typed into this app on this computer: that is the
           // approval. The desktop flow otherwise waits for the browser to
           // approve, which never happens on the email path, so a new user sat
           // on "Continue in your browser" forever (fresh Mac VM, 2026-10-08).
-          if (state?.status === "pending_approval") { await approveSignupAccount(); return; }
+          // Go straight to Finishing setup while it approves: the browser
+          // screen flashed "Look for the new tab in your browser" here for a
+          // few seconds (fresh Mac VM, 2026-10-11).
+          if (state?.status === "pending_approval") {
+            if (state.account && typeof state.account === "object") signupAccount = state.account;
+            signupStage = "finishing";
+            await approveSignupAccount();
+            return;
+          }
+          applyInstallationState(state);
           renderSignup();
         } catch (reason) { signupFailure(reason, "That code did not work."); }
       });
@@ -25628,6 +25939,8 @@
       nativeExecutionMode: next.nativeExecutionMode === "default" ? "default" : "auto",
       relays: projectedRelays,
       sent: Array.isArray(next.sent) ? next.sent : [],
+      // Link-recipient chats (link-chats.js); null when the API cannot say.
+      linkChats: Array.isArray(next.linkChats) ? next.linkChats : ("linkChats" in next ? null : (payload.linkChats || null)),
       outbox: Array.isArray(next.outbox) ? next.outbox : [],
       outboxRevision,
       requests: Array.isArray(next.requests) ? next.requests : [],
@@ -25742,7 +26055,7 @@
       }
     }
     return [payload.relays, payload.sent, payload.outbox, activeMentionVisit?.rows, payload.account,
-      includeSlack, hash, chatDataEpoch];
+      includeSlack, hash, chatDataEpoch, payload.linkChats];
   }
   const computeThreadMessages = threadMessages;
   threadMessages = function rememberedThreadMessages() {

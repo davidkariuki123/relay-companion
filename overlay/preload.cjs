@@ -174,6 +174,7 @@ contextBridge.exposeInMainWorld("relay", {
   // The url lands on the clipboard from main, like the invite link: the
   // renderer's clipboard needs a focused document and the pill often is not.
   copyShareLink: (url) => ipcRenderer.invoke("relay:copyShareLink", { url }),
+  linkChatEmail: (input) => ipcRenderer.invoke("relay:linkChatEmail", input),
 
   // tasks view
   refreshTasks: () => ipcRenderer.invoke("relay:refreshTasks"),

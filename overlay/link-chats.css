@@ -1,0 +1,80 @@
+/* LINK-RECIPIENT CHATS: the banner card at the top of a link chat, the link
+   badge on its avatar, and the link receipts. Built only from the pill's own
+   tokens (see link-chats.js). */
+.lk-ic { display:inline-block; width:12px; height:12px; flex:none; vertical-align:-2px; }
+.lk-ic svg { display:block; width:100%; height:100%; }
+
+.lk-field { display:flex; align-items:center; gap:8px; height:34px; padding:0 4px 0 12px; border:1px solid var(--edge); border-radius:var(--r-2); background:var(--bg); text-align:left;
+  transition:border-color var(--t-base) var(--settle), box-shadow var(--t-base) var(--settle), opacity var(--t-base) var(--settle); }
+.lk-field:focus-within { border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+.lk-field.is-busy { opacity:.62; }
+.lk-input { flex:1 1 auto; min-width:0; appearance:none; border:0; outline:0; padding:0; background:transparent; font:400 13px/1 var(--sans); color:var(--ink); }
+.lk-input::placeholder { color:var(--muted-3); }
+.lk-field .lk-input:focus, .lk-field .lk-input:focus-visible { outline:none; box-shadow:none; }
+.lk-btn { appearance:none; border:0; flex:0 0 auto; display:inline-flex; align-items:center; gap:6px; cursor:pointer; white-space:nowrap;
+  background:var(--accent); color:var(--on-accent); font:600 11.5px/1 var(--sans); border-radius:999px; padding:7px 13px; }
+.lk-btn.soft, .lk-btn[data-soft] { background:var(--accent-soft); color:var(--accent); }
+.lk-btn.ghost { background:transparent; color:var(--accent); padding:5px 6px; }
+.lk-btn.sm { padding:5px 10px; font-size:11px; }
+.lk-btn[disabled] { opacity:.5; cursor:default; }
+.lk-btn .lk-ic { width:12px; height:12px; }
+.lk-spin { flex:none; width:14px; height:14px; margin-right:8px; border-radius:50%; border:1.6px solid color-mix(in srgb, var(--accent) 22%, transparent); border-top-color:var(--accent); animation:lk-rot .8s linear infinite; }
+@keyframes lk-rot { to { transform:rotate(360deg); } }
+.lk-via { margin-left:6px; font:500 10px/1 var(--sans); color:var(--muted-2); letter-spacing:.01em; white-space:nowrap; }
+.lk-via .lk-ic { width:10px; height:10px; vertical-align:-1px; margin-right:3px; }
+.th-under .th-seen.lk-link-receipt { display:inline-flex; align-items:center; gap:4px; }
+.th-under .th-seen.lk-link-receipt .lk-ic { width:10px; height:10px; }
+.lk-in { animation:lk-in .42s var(--soft) both; }
+@keyframes lk-in { from { opacity:0; transform:translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .lk-in, .lk-spin { animation:none; } }
+
+/* The Chats row: a link badge on the avatar's shoulder. */
+.lk-badge { position:absolute; right:-4px; bottom:-3px; width:15px; height:15px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  background:var(--bg); color:var(--accent); box-shadow:0 0 0 1px var(--edge); }
+.lk-badge svg { width:9px; height:9px; }
+
+/* The card, pinned under the room's header in the inbox banner's grammar. */
+.lk-a { position:sticky; top:56px; z-index:3; padding:8px 12px 6px; background:var(--bg); }
+.card.wide .lk-a { top:50px; }
+.lk-a-card { display:block; margin:0; border:1px solid var(--hair); border-radius:var(--r-2); background:var(--wash); padding:9px 10px; transition:background var(--t-base) var(--settle), border-color var(--t-base) var(--settle); }
+.lk-a-row { display:flex; align-items:center; gap:10px; min-width:0; }
+.lk-a-mk { flex:none; width:20px; height:20px; border-radius:6px; display:flex; align-items:center; justify-content:center; background:var(--accent-soft); color:var(--accent); }
+.lk-a-mk svg { width:12px; height:12px; }
+.lk-a-mk.ok { background:var(--ok-soft); color:var(--ok); }
+.lk-a-mk.wait { background:color-mix(in srgb, var(--brand-anthropic) 14%, transparent); color:var(--brand-anthropic); }
+.lk-a-t { min-width:0; font:600 12px/1.35 var(--sans); color:var(--ink); }
+.lk-a-t.one { flex:1 1 auto; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lk-a-s { font:400 11px/1.45 var(--sans); color:var(--muted); margin:3px 0 0 30px; }
+.lk-a-s.lk-a-err { color:var(--danger); }
+.lk-a .lk-field { margin:9px 0 1px 30px; }
+.lk-a .lk-field + .lk-a-s { margin-top:6px; }
+.lk-a-acts { display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin:9px 0 0 30px; }
+.lk-a-note { font:500 11px/1 var(--sans); color:var(--ok); }
+.lk-a-min { flex:none; margin-left:auto; appearance:none; border:0; background:transparent; color:var(--muted-2); font:400 17px/18px var(--sans); width:20px; height:20px; border-radius:var(--r-1); padding:0; margin-right:-3px; align-self:flex-start; cursor:pointer; }
+.lk-a-min:hover { color:var(--ink); }
+.lk-a.is-ok .lk-a-card { border-color:color-mix(in srgb, var(--ok) 26%, transparent); background:color-mix(in srgb, var(--ok) 7%, transparent); }
+.lk-a-row.top { align-items:flex-start; }
+.lk-a-sentence { font-weight:400; color:var(--ink-2); line-height:1.45; }
+.lk-a-sentence b { font-weight:600; color:var(--ink); }
+.lk-a-timer { height:2px; margin:8px 0 -3px 30px; border-radius:2px; background:var(--wash-2); overflow:hidden; }
+.lk-a-timer i { display:block; height:100%; width:100%; background:color-mix(in srgb, var(--ok) 60%, transparent); transform-origin:left center; animation:lk-timer linear both; }
+@keyframes lk-timer { from { transform:scaleX(1); } to { transform:scaleX(0); } }
+
+/* Folded: one line, tappable to expand. */
+.lk-a.is-fold { padding:6px 12px 4px; }
+.lk-a.is-fold .lk-a-card { padding:7px 10px; cursor:pointer; }
+.lk-a-card[role="button"]:hover { background:var(--wash-2); }
+.lk-a-links { margin-left:auto; display:inline-flex; align-items:center; gap:12px; flex:none; }
+.lk-a-link { appearance:none; border:0; padding:0; background:transparent; cursor:pointer; font:500 11px/1 var(--sans); color:var(--accent); display:inline-flex; align-items:center; gap:5px; }
+.lk-a .rat-see { margin-left:auto; }
+.lk-a-links .rat-see { margin-left:0; }
+.lk-a .rat-see svg { width:11px; height:11px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+.lk-a .rat-see .lk-ic { width:11px; height:11px; }
+
+/* No email yet, but they replied on the link page: Send answers through the link. */
+.lk-reply-hint { display:flex; align-items:center; gap:6px; margin:0 6px 7px; font:400 11px/1.4 var(--sans); color:var(--muted); }
+.lk-reply-hint .lk-ic { width:11px; height:11px; color:var(--accent); }
+
+/* No address yet: Send waits, and says why in the field. */
+#thQrSend.lk-off { opacity:.38; cursor:default; }
+.qr.lk-qr-off .cmp-plus { opacity:.4; }

@@ -627,6 +627,16 @@ export class RelayClient {
     return this.#req("POST", `/v1/share-links/${encodeURIComponent(relayId)}`, { access });
   }
 
+  /** Links this account minted for named people, one chat per person. */
+  linkChats() {
+    return this.#req("GET", "/v1/link-chats");
+  }
+
+  /** Add a link-recipient's email: delivers to them on Relay, or holds for their signup. */
+  attachLinkChatEmail({ key, email, idempotencyKey }) {
+    return this.#req("POST", "/v1/link-chats/email", { key, email, idempotencyKey });
+  }
+
   shareStats(relayId, range = {}) {
     const query = new URLSearchParams(Object.entries(range).filter(([, value]) => value !== undefined));
     return this.#req("GET", `/v1/share-links/${encodeURIComponent(relayId)}/stats?${query}`);
