@@ -75,7 +75,7 @@ test("the pill draws the ideas flow for local AIs and keeps the chooser and chat
     "Finding ideas for your first Relay.",
     "is looking at what you’ve worked on lately, so it can suggest something to send. Nothing goes to anyone yet.",
     "What do you need from ${who ? esc(who) : \"someone\"} this week?",
-    "Suggested by ${esc(name)} from your recent chats",
+    "Suggested by ${esc(name)}`",
     "invited you, so they’re in your contacts",
     "is writing it.",
     "is writing to ${esc(inviter)}.",

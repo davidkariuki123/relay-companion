@@ -24032,7 +24032,45 @@
     if (!window.relay?.[method] || !userId) throw new Error("Relay couldn’t do that here.");
     return window.relay[method](userId, ...args);
   }
+  // An email sign-up arrives with no name. The person's first Relay is a link
+  // that shows their name to whoever opens it, so ask once, here, before
+  // anything else (live run 2026-10-11: the link step dead-ended without it).
+  let accountNameBusy = false;
+  let accountNameError = "";
+  function accountNameMissing() {
+    return Boolean(payload.account?.paired && !String(payload.account?.name || "").trim() && window.relay?.setAccountName);
+  }
+  function renderAccountNameStep() {
+    stopOnboardingAgentPoll();
+    const signature = JSON.stringify(["name", accountNameBusy, accountNameError]);
+    if (signupBodyEl.dataset.firstRelaySignature === signature) return;
+    signupBodyEl.dataset.firstRelaySignature = signature;
+    signupBodyEl.innerHTML = `<div class="su-first-relay su-agent-screen"><p class="su-step">Your next step</p><h1 class="su-title">What’s your name?</h1>
+      <p class="su-copy">People see it on the Relays you send them.</p>
+      <form class="su-form" id="suNameForm"><label class="su-label">Your name<input class="su-input" id="suNameInput" type="text" autocomplete="name" maxlength="80" required /></label>
+      <button class="su-primary" type="submit"${accountNameBusy ? " disabled" : ""}>Continue</button></form>
+      ${accountNameError ? `<p class="su-error" role="alert">${esc(accountNameError)}</p>` : ""}</div>`;
+    const input = document.getElementById("suNameInput");
+    input?.focus();
+    document.getElementById("suNameForm")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const name = String(input?.value || "").trim();
+      if (!name) { input?.reportValidity(); return; }
+      accountNameBusy = true; accountNameError = ""; renderAccountNameStep();
+      try {
+        const result = await window.relay.setAccountName(name);
+        if (!result?.ok) throw new Error(result?.error || "Relay couldn’t save your name. Try again.");
+        payload.account = { ...payload.account, name: result.name || name };
+        accountNameBusy = false;
+        delete signupBodyEl.dataset.firstRelaySignature;
+        renderSignup();
+      } catch (reason) {
+        accountNameBusy = false; accountNameError = String(reason?.message || reason); renderAccountNameStep();
+      }
+    });
+  }
   function renderAgentSetup(agent) {
+    if (accountNameMissing()) { renderAccountNameStep(); return; }
     const option = onboardingAgentFor(agent);
     const signature = JSON.stringify(["agent", agent?.host, agent?.place, agent?.run?.id, agent?.run?.status, agent?.runError, onboardingAgentBusy, onboardingAgentNote, payload.ui?.localOnboardingPrompt ? 1 : 0, agent?.openable, localPromptCopiedFor, firstRelayPressSendHint]);
     if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-agent-screen")) return;
@@ -24240,7 +24278,9 @@
       const who = inviter || (flow.kind === "org" ? flow.orgName : "");
       const foot = flow.kind === "invite" && flow.inviterName
         ? `${esc(flow.inviterName)} invited you, so they’re in your contacts`
-        : `Suggested by ${esc(name)} from your recent chats`;
+        // No claim about recent chats: a new computer has none, and the AI
+        // suggests general ones there (live run 2026-10-11).
+        : `Suggested by ${esc(name)}`;
       signupBodyEl.innerHTML = `<div class="su-first-relay su-ideas su-ideas-pick">
         <p class="su-step">Your first Relay</p>
         <h1 class="su-title">What do you need from ${who ? esc(who) : "someone"} this week?</h1>

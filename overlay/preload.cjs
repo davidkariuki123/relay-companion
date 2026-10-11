@@ -226,6 +226,7 @@ contextBridge.exposeInMainWorld("relay", {
   slackConnect: (input = {}) => ipcRenderer.invoke("relay:slackConnect", input || {}),
   slackDisconnect: () => ipcRenderer.invoke("relay:slackDisconnect"),
   slackConnectCancel: () => ipcRenderer.invoke("relay:slackConnectCancel"),
+  setAccountName: (name) => ipcRenderer.invoke("relay:setAccountName", { name: String(name || "") }),
   slackContactInvite: (contactId) => ipcRenderer.invoke("relay:slackContactInvite", { contactId: contactId ? String(contactId) : "" }),
   slackInvite: (chatId, slackUserId) => ipcRenderer.invoke("relay:slackInvite", { chatId: String(chatId || ""), slackUserId: slackUserId ? String(slackUserId) : "" }),
   onSlackConnection: (callback) => {

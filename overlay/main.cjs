@@ -10517,6 +10517,24 @@ ipcMain.handle("relay:slackConnect", async (_event, input = {}) => {
   }
 });
 ipcMain.handle("relay:slackConnectCancel", () => { stopSlackConnectWatch(); return { ok: true }; });
+// An email sign-up has no name, and the first Relay link needs one: the pill
+// asks once, the account takes it, and this computer's copy of the account
+// follows so every screen greets them by it.
+ipcMain.handle("relay:setAccountName", async (event, input = {}) => {
+  if (win && !win.isDestroyed() && event && event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
+  const name = String(input?.name || "").trim().slice(0, 80);
+  if (!name) return { ok: false, error: "Add your name." };
+  try {
+    const result = await (await relayClient()).setAccountName(name);
+    const { config } = await loadRelayModules();
+    const current = config.readConfig();
+    if (current.user) config.writeConfig({ user: { ...current.user, name: String(result?.user?.name || name) } });
+    await pushInbox(true);
+    return { ok: true, name: String(result?.user?.name || name) };
+  } catch (error) {
+    return { ok: false, error: String(error?.body?.message || "Relay couldn’t save your name. Try again.") };
+  }
+});
 ipcMain.handle("relay:slackContactInvite", async (event, input = {}) => {
   if (win && !win.isDestroyed() && event && event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
   if (currentProductFeatures().slack !== true) return { ok: false, error: "Slack isn’t available here." };

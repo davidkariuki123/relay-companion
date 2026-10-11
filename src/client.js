@@ -1056,6 +1056,11 @@ export class RelayClient {
   }
 
   /** Invite one Slack teammate (their DM) or, with no id, the whole channel. */
+  /** Set this account's own name (an email sign-up starts without one). */
+  setAccountName(name) {
+    return this.#req("POST", "/v1/me/name", { name });
+  }
+
   /** What Slack teammates not on Relay yet answered, in Slack, under Relays you sent them. */
   slackTeammateReplies() {
     return this.#req("GET", "/v1/slack/teammate-replies");

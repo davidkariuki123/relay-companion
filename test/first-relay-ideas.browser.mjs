@@ -133,7 +133,7 @@ try {
   assert.equal(await page.locator('.su-idea .su-idea-title').first().textContent(), 'Review the pricing page copy');
   assert.equal(await page.locator('.su-idea .su-idea-line').first().textContent(), 'Ask for a read before Friday’s launch');
   assert.deepEqual(await page.locator('.su-idea .su-idea-icon').evaluateAll((els) => els.map((el) => el.dataset.kind)), ['review', 'answer', 'handoff', 'update']);
-  assert.equal(await view.getByText('Suggested by Codex from your recent chats').isVisible(), true);
+  assert.equal(await view.getByText('Suggested by Codex', { exact: true }).isVisible(), true);
   assert.equal(await view.getByText(/Skip/).count(), 0, 'no skip link');
   assert.equal(await page.locator('.su-idea-list').evaluate((el) => getComputedStyle(el).overflowY), 'auto', 'the list scrolls inside itself');
   assert.equal(await page.locator('.su-idea-title').first().evaluate((el) => getComputedStyle(el).textOverflow), 'clip', 'titles wrap, never cut');
