@@ -66,7 +66,7 @@ test("the room with one person is asked for by address, in a body rather than a 
 });
 
 test("clicking a contact opens the conversation; only Edit opens the card", () => {
-  const rows = between(html, 'for (const el of cvListEl.querySelectorAll(".cv-item"))', "  /**");
+  const rows = between(html, 'for (const el of [...cvListEl.querySelectorAll(".cv-item"), ...cvSlackListEl.querySelectorAll(".cv-item")])', "  /**");
   // The row is the person: it opens the room, never the form about them.
   assert.match(rows, /openContactRoom\(el\.getAttribute\("data-contact"\)\)/);
   assert.doesNotMatch(rows, /openContactForm\(el\.getAttribute/);

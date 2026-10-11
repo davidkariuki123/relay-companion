@@ -220,7 +220,7 @@ test("a Slack-linked room shows every message and says so once, with the Slack m
   // A channel nothing was sent to yet says what sending does.
   assert.match(html, /`Nothing sent from Relay yet\. What you send here posts to \$\{slackChannelLabel\(chatRoom\)\} in Slack\.`/);
   // And once there are messages, the top of the room says it once, quietly.
-  assert.match(html, /What you send here also posts to <b>\$\{esc\(slackChannelLabel\(chatRoom\)\)\}<\/b> in Slack\. Replies stay in Slack\./);
+  assert.match(html, /Relays you send here also post to <b>\$\{esc\(slackChannelLabel\(chatRoom\)\)\}<\/b> in Slack, with their replies\. Texts stay here\./);
 });
 
 test("Inbox counts Relay's own unread only; Slack's messages never count", () => {
@@ -497,4 +497,49 @@ test("half-duplex: opening a DM that also posts to Slack never makes it a second
   assert.match(store, /chat\.channel && !halfDuplexDmLink\(chat\.channel\.slack\)/);
   // Nor project the DM's stored detail as a second message stream (the stray "You" row).
   assert.match(html, /integration\?\.provider !== "slack" \|\| halfDuplexDmLink\(integration\)\) continue;/);
+});
+
+test("only Relays sync: a Slack reply under a Relay joins its thread, other Slack chatter stays out", () => {
+  const runtime = new Function(`
+    function slackMessagesVisible() { return false; }
+    ${between(html, "  function slackReplyInRelayThread(", "  function canonicalChatHydrationKey(")}
+    return { slackReplyInRelayThread, canonicalItemVisible };
+  `)();
+  const items = [
+    { relayId:"card", origin:"relay", title:"Review the deck", forAgent:"", threadId:"card" },
+    { relayId:"text", origin:"relay", title:"", forAgent:"", forHuman:"lunch?", threadId:"text" },
+    { relayId:"maya", origin:"slack", provider:{ name:"slack" }, threadId:"card", inReplyToRelayId:"card" },
+    { relayId:"underText", origin:"slack", threadId:"text" },
+    { relayId:"chatter", origin:"slack", threadId:"chatter" },
+  ];
+  const byId = (id) => items.find((item) => item.relayId === id);
+  assert.equal(runtime.slackReplyInRelayThread(byId("maya"), items), true);
+  assert.equal(runtime.slackReplyInRelayThread(byId("underText"), items), false, "a reply under a typed text stays in Slack");
+  assert.equal(runtime.slackReplyInRelayThread(byId("chatter"), items), false);
+  assert.equal(runtime.canonicalItemVisible(byId("card"), items, false), true);
+  assert.equal(runtime.canonicalItemVisible(byId("chatter"), items, false), false);
+  // The projection and the read cursor use the same rule.
+  assert.match(html, /if \(!includeSlack && itemIsSlack && !slackReplyInRelayThread\(item, chat\.items\)\) continue;/);
+  assert.match(html, /canonicalItemVisible\(item, chat\?\.items, includeSlack\)/);
+  // Its author's name says where it was written.
+  assert.match(html, /m\.origin === "slack" && !slackMessagesVisible\(\) \? '<span class="th-run-via">/);
+});
+
+test("a Slack teammate's reply (not on Relay yet) sits in the Relay's thread, in their chat, and reads through its chat", () => {
+  // Main fetches them with the canonical chats and carries them in the payload.
+  assert.match(main, /client\.slackTeammateReplies\(\)/);
+  assert.match(main, /slackTeammateReplies: slackTeammateRepliesCache,/);
+  assert.match(client, /slackTeammateReplies\(\) \{\n\s+return this\.#req\("GET", "\/v1\/slack\/teammate-replies"\);/);
+  // The renderer keeps the field (its payload is a whitelist) and projects each
+  // reply into the teammate's email-keyed chat, under the Relay it answers.
+  assert.match(html, /slackTeammateReplies: \(Array\.isArray\(next\.slackTeammateReplies\)/);
+  const loop = between(html, "for (const reply of payload.features?.slack === true ? (payload.slackTeammateReplies || []) : [])", "    for (const chat of canonicalChatDetails.values()) {");
+  assert.match(loop, /threadId:String\(reply\.threadId \|\| reply\.inReplyToRelayId\)/);
+  assert.match(loop, /partyKey: email \? `email:\$\{email\}`/);
+  assert.match(loop, /origin:"slack", provider:\{ name:"slack" \}, slackTeammateReply:true/);
+  // Seen on screen: read through the chat's cursor, and it stays read.
+  assert.match(html, /persistCanonicalChatRead\(chatId, \{ surface:"relay", includeSlack:false \}\)/);
+  assert.match(html, /reply\?\.unread && teammateRepliesRead\.has\(String\(reply\.id\)\)/);
+  // Answering it answers the Relay it is under.
+  assert.match(html, /selectedReplyTarget\?\.slackTeammateReply \? String\(selectedReplyTarget\.inReplyToRelayId \|\| ""\)/);
 });

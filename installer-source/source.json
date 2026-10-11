@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repository": "davidkariuki123/relay",
-  "sourceSha": "0bc53a73a712c0eaa04c7d2f0c4d9dd98d28307e",
+  "sourceSha": "a6f0f795740b643877c14131c1d7dddecd1cf4f1",
   "files": {
     "packages/companion/bootstrap/application-bridge.cjs": "19fd2c791512a065dd2de165a34f92bb53fe1b3d",
     "packages/companion/bootstrap/application-handoff.cjs": "cc857469bd3e01c1c2bd00816e5f4338083f0aaa",
@@ -62,7 +62,7 @@
     "packages/companion/overlay/fonts/newsreader-var.woff2": "8cd8effc477a72510cf1e0f8099a425dc87213cd",
     "packages/companion/overlay/fonts/plexmono-400.woff2": "52b6c7595dd5e2106676e7c52fcff18539607879",
     "packages/companion/overlay/fonts/plexmono-500.woff2": "3308bce2432c298817ed344eeac33007c83cecd0",
-    "packages/companion/overlay/inbox.html": "e0321dccaf408717b64f63f9341c2250affe3797",
+    "packages/companion/overlay/inbox.html": "6560eb792e775d73af3ad32502d7ffc058834f29",
     "packages/companion/overlay/relay-anyone-tip.cjs": "4cec8b4a5eb232635b811aef04975c85461580f3",
     "packages/companion/package.json": "248b66f7c57767a86ad524a8db090b0dc3284878",
     "packages/companion/scripts/prepare-linux-electron-sandbox.mjs": "3034031ebe105a8e5e101fbf30b83a123c97630c",

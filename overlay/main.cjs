@@ -1413,6 +1413,7 @@ function resetAccountViewCaches() {
   contactsLoadedOnce = null;
   canonicalChatsCache = [];
   slackChatsCache = [];
+  slackTeammateRepliesCache = [];
   canonicalChatsFingerprint = "";
   canonicalChatsLoadedOnce = null;
   tasksCache = [];
@@ -2610,6 +2611,8 @@ async function refreshTasks() {
 // local packet-store path.
 let canonicalChatsCache = [];
 let slackChatsCache = [];
+// Replies Slack teammates (not on Relay yet) typed in Slack under your Relays.
+let slackTeammateRepliesCache = [];
 let canonicalChatsLoadedOnce = null;
 let canonicalChatsFingerprint = "";
 function canonicalChatsFingerprintOf(relayList, slackList) {
@@ -2631,6 +2634,7 @@ async function refreshCanonicalChats() {
   if (currentProductFeatures().slack !== true) {
     canonicalChatsCache = [];
     slackChatsCache = [];
+    slackTeammateRepliesCache = [];
     canonicalChatsFingerprint = canonicalChatsFingerprintOf([], []);
     return { relay: canonicalChatsCache, slack: slackChatsCache };
   }
@@ -2638,9 +2642,10 @@ async function refreshCanonicalChats() {
   if (!credential) return { relay: canonicalChatsCache, slack: slackChatsCache };
   try {
     const client = await relayClient();
-    const [relayResult, slackResult] = await Promise.allSettled([
+    const [relayResult, slackResult, repliesResult] = await Promise.allSettled([
       client.chats({ surface: "relay" }),
       client.chats({ surface: "slack" }),
+      client.slackTeammateReplies(),
     ]);
     if (deviceToken() !== credential) return { relay: canonicalChatsCache, slack: slackChatsCache };
     if (relayResult.status === "fulfilled") {
@@ -2651,10 +2656,14 @@ async function refreshCanonicalChats() {
       slackChatsCache = (Array.isArray(slackResult.value?.chats) ? slackResult.value.chats : [])
         .filter(isSlackLinkedChat);
     }
+    if (repliesResult.status === "fulfilled") {
+      slackTeammateRepliesCache = Array.isArray(repliesResult.value?.replies) ? repliesResult.value.replies : [];
+    }
     if (relayResult.status === "rejected" && slackResult.status === "rejected") {
       throw relayResult.reason;
     }
-    canonicalChatsFingerprint = canonicalChatsFingerprintOf(canonicalChatsCache, slackChatsCache);
+    canonicalChatsFingerprint = canonicalChatsFingerprintOf(canonicalChatsCache, slackChatsCache)
+      + JSON.stringify(slackTeammateRepliesCache.map((reply) => [reply.id, reply.unread]));
   } catch (error) {
     console.error("[overlay] canonical chats refresh failed:", error && error.message);
   }
@@ -2675,7 +2684,7 @@ let contactsLoadedOnce = null;
 let contactsFingerprint = "";
 function contactsFingerprintOf(list) {
   // Include identity/link status: a formerly offline contact can become blockable.
-  return JSON.stringify((list || []).map((c) => [c.id, c.name, c.email, c.relayUserId, c.onRelay, c.source]));
+  return JSON.stringify((list || []).map((c) => [c.id, c.name, c.email, c.relayUserId, c.onRelay, c.source, c.slack?.invitedAt || null]));
 }
 async function refreshContacts() {
   const contactFixtures = testFixtures("RELAY_OVERLAY_TEST_CONTACTS_FIXTURES");
@@ -2719,6 +2728,12 @@ function contactBookRow(c) {
     onRelay: Boolean(c.onRelay),
     source: c.source || "",
     updatedAt: c.updatedAt || null,
+    // Someone you share Slack with: a Relay reaches them there until they join.
+    ...(c.slack && c.slack.slackUserId ? { slack: {
+      teamId: String(c.slack.teamId || ""),
+      slackUserId: String(c.slack.slackUserId),
+      invitedAt: c.slack.invitedAt || null,
+    } } : {}),
   };
 }
 function ensureContactsLoaded() {
@@ -2966,6 +2981,7 @@ function buildPayload() {
     contacts: contactsCache,
     chats: canonicalChatsCache,
     slackChats: slackChatsCache,
+    slackTeammateReplies: slackTeammateRepliesCache,
   };
 }
 
@@ -3458,6 +3474,7 @@ async function pushInboxNow(force) {
       chat.chatId, chat.updatedAt, chat.messageCount, chat.unreadCount,
       chat.lastMessage && chat.lastMessage.relayId,
     ]),
+    slackTeammateReplies: (payload.slackTeammateReplies || []).map((reply) => [reply.id, reply.unread]),
     // Without these the queue's own progress — waiting, attempted again, sent,
     // refused — would never reach the renderer: nothing else in the payload
     // moves while a message sits offline.
@@ -10500,6 +10517,24 @@ ipcMain.handle("relay:slackConnect", async (_event, input = {}) => {
   }
 });
 ipcMain.handle("relay:slackConnectCancel", () => { stopSlackConnectWatch(); return { ok: true }; });
+ipcMain.handle("relay:slackContactInvite", async (event, input = {}) => {
+  if (win && !win.isDestroyed() && event && event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
+  if (currentProductFeatures().slack !== true) return { ok: false, error: "Slack isn’t available here." };
+  try {
+    const result = await (await relayClient()).inviteSlackContacts(input?.contactId ? String(input.contactId) : "");
+    const contacts = await refreshContacts();
+    return { ok: true, invited: Number(result?.invited || 0), contacts };
+  } catch (error) {
+    const code = String(error?.body?.error || error?.code || "");
+    return {
+      ok: false,
+      code,
+      error: code === "slack_authorization_required"
+        ? "Connect your Slack to invite teammates."
+        : String(error?.body?.message || "Couldn’t send the invitation. Try again."),
+    };
+  }
+});
 ipcMain.handle("relay:slackInvite", async (event, input = {}) => {
   if (win && !win.isDestroyed() && event && event.sender !== win.webContents) return { ok: false, error: "Not the pill." };
   if (currentProductFeatures().slack !== true) return { ok: false, error: "Slack isn’t available here." };

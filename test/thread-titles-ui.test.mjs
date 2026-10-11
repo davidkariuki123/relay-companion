@@ -509,7 +509,7 @@ test("a dated chunk reintroduces the sender even inside the same wire thread", (
 
 test("a room send addresses the room and quotes only a chosen Relay", () => {
   assert.match(html, /const selectedReplyTargetId = String\(threadReplyTargets\.get\(threadStateKey\) \|\| ""\)/);
-  assert.match(html, /const inReplyToRelayId = selectedReplyTargetId \|\| String\(focusedSlackParent\?\.id \|\| ""\)/);
+  assert.match(html, /const inReplyToRelayId = \(selectedReplyTarget\?\.slackTeammateReply \? String\(selectedReplyTarget\.inReplyToRelayId \|\| ""\) : selectedReplyTargetId\)\n\s+\|\| String\(focusedSlackParent\?\.id \|\| ""\)/);
   // A group room speaks to the group; only a reply to a message outside the
   // group follows its parent. Other rooms inherit their newest address.
   assert.match(html, /const recipient = \(groupSend && roomGroup\)\n\s+\|\| \(parentOutsideGroup && replyParent\.addressRecipient\)\n\s+\|\| \(addressAnchor && addressAnchor\.addressRecipient\)/);

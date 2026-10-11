@@ -269,7 +269,9 @@ test("Slack channel replies live in a real thread subview, including earlier-roo
   assert.match(html, /Earlier Slack thread/);
   assert.match(html, /Started before Relay was connected\./);
   assert.match(html, /Still linking this reply to its Slack thread…/);
-  assert.match(html, /selectedReplyTargetId \|\| String\(focusedSlackParent\?\.id \|\| ""\)/,
+  // A Slack teammate's reply quotes its own root (4ec19813); any other chosen
+  // target, else the focused Slack thread, is the parent.
+  assert.match(html, /selectedReplyTargetId\)\s*\|\| String\(focusedSlackParent\?\.id \|\| ""\)/,
     "the focused composer posts back into the Slack thread instead of creating a channel root");
   assert.match(html, /String\(row\.inReplyToRelayId \|\| ""\) === rootId/,
     "only an explicit child counts as a Slack reply; a shared compatibility thread key cannot create a false 1 reply");

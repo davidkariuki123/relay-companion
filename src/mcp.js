@@ -572,7 +572,7 @@ export const TOOLS = [
             groupId: {
               type: "string",
               description:
-                "A channel id (grp_...) from relay_groups_list — any channel this human is in, owned or not. The groupId field name is retained for compatibility.",
+                "A channel id (grp_...) from relay_groups_list — any channel this human is in, owned or not — or a Slack channel's group (chat_..., listed under slackChannels), which also posts the Relay in that Slack channel. The groupId field name is retained for compatibility.",
             },
             chatId: { type: "string", description: "An existing chat id. Addresses the conversation without replying to any specific message." },
           },
@@ -727,7 +727,7 @@ export const TOOLS = [
     name: "relay_groups_list",
     _meta: ALWAYS_LOAD_META,
     description:
-      "List every saved Relay channel this human is in, with each channel's members. A channel is one stable shared conversation: its id and history stay the same as membership changes, and two channels with the same people remain distinct. Every listed channel can be messaged by passing its legacy groupId to relay_send as recipient.groupId. The `owned` flag says who administers it. An owned channel may be renamed, edited, or archived; a channel owned by somebody else may be read and posted to, but its roster is not this human's to change. An archived channel keeps its history but accepts no new posts. Use this whenever the human addresses several people, names a channel, or asks which channels they are in. To change a channel they own, use the legacy relay_group_create / relay_group_update / relay_group_delete tools after listing current state.",
+      "List every saved Relay channel this human is in, with each channel's members. A channel is one stable shared conversation: its id and history stay the same as membership changes, and two channels with the same people remain distinct. Every listed channel can be messaged by passing its legacy groupId to relay_send as recipient.groupId. Slack channels the human is in are listed under slackChannels (groupId chat_...): a Relay sent to one posts in its Relay group and in the Slack channel. The `owned` flag says who administers it. An owned channel may be renamed, edited, or archived; a channel owned by somebody else may be read and posted to, but its roster is not this human's to change. An archived channel keeps its history but accepts no new posts. Use this whenever the human addresses several people, names a channel, or asks which channels they are in. To change a channel they own, use the legacy relay_group_create / relay_group_update / relay_group_delete tools after listing current state.",
     inputSchema: { type: "object", properties: {} },
   },
   {

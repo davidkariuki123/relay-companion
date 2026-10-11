@@ -38,7 +38,11 @@ test("People rows are names A–Z with colored identity, no email, no recency, n
   assert.doesNotMatch(render, /timeAgo\(c\.updatedAt\)|const recent/);
   // Someone not on Relay yet says so, with a dashed avatar.
   assert.match(render, /cv-avatar\$\{c\.onRelay === false \? " pending" : ""\}/);
-  assert.match(render, /c\.onRelay === false \? `<span class="cv-meta">Not on Relay yet<\/span>` : ""/);
+  assert.match(render, /c\.onRelay === false && !slack \? `<span class="cv-meta">Not on Relay yet<\/span>` : ""/);
+  // A Slack teammate instead says how a Relay reaches them, under the name,
+  // in their own section below everyone on Relay (option B, 2026-10-11).
+  assert.match(render, /<span class="cv-reach">\$\{invitedToday \? "Invited · " : ""\}Relays reach them in Slack<\/span>/);
+  assert.match(html, /<span class="cv-section-label">From Slack · not on Relay yet<\/span><button class="cv-section-verb" type="button" id="cvSlackInviteAll">Invite all<\/button>/);
   assert.match(html, /\.cv-avatar\.pending \{[^}]*inset 0 0 0 1\.5px/);
   // No "· by email": there is no email door any more (Sven, 2026-09-08).
   assert.doesNotMatch(render, /cv-via|by email/);

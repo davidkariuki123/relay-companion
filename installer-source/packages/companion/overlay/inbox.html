@@ -1159,6 +1159,13 @@
   .cv-section-label { font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted-2); }
   .cv-section-verb { margin-left:auto; appearance:none; border:0; background:transparent; color:var(--accent); font:600 12px var(--sans); padding:2px 6px; margin-right:-6px; border-radius:var(--r-1); cursor:pointer; }
   .cv-section-verb:hover { background:var(--accent-soft); }
+  .cv-section-verb:disabled { color:var(--muted-2); background:transparent; cursor:default; }
+  /* A Slack teammate: the Slack mark on the avatar, how a Relay reaches them under the name. */
+  .cv-avatar.cv-from-slack { position:relative; }
+  .cv-slack-badge { position:absolute; right:-3px; bottom:-3px; width:13px; height:13px; border-radius:4px;
+    background:var(--bg) url("slackMark.png") center/9px no-repeat; box-shadow:0 0 0 1.5px var(--bg); }
+  .cv-reach { display:block; font-size:11.5px; line-height:1.3; color:var(--muted-2); margin-top:1px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .cvg { padding-bottom:0; }
   .cv-show-more { appearance:none; border:0; background:transparent; width:100%; text-align:left; color:var(--muted); font:12px var(--sans); padding:7px 16px 7px 58px; cursor:pointer; }
   .cv-show-more:hover { color:var(--ink-2); }
@@ -1653,6 +1660,9 @@
   .rx-line .th-party { font-weight:500; }
   .rx-line .emoji { font-style:normal; font-size:13.5px; display:inline-block; vertical-align:-1px; animation:rxLand .55s var(--spring); }
   .th-run .th-party { font-size:12px; font-weight:600; }
+  /* A reply typed in Slack under a Relay: say where it was written, quietly. */
+  .th-run-via { display:inline-flex; align-items:center; gap:4px; font:400 11px/1 var(--sans); color:var(--muted); }
+  .th-run-via img { width:11px; height:11px; }
   .th-msg .th-msg-title { flex:1 1 auto; min-width:0; }
   /* The clock sits TOP-RIGHT of every bubble, always — absolutely anchored,
      out of the flex flow entirely. In-flow it landed wherever the wrapped
@@ -4639,6 +4649,11 @@
         <div class="cv-section-head" id="cvPeopleHead"><span class="cv-section-label">People</span></div>
         <div class="cvg-error" id="cvPeopleError"></div>
         <div class="cv-list" id="cvList"></div>
+        <!-- Slack teammates not on Relay yet (David, 2026-10-11, option B):
+             below the people on Relay, one quiet verb to invite them all. -->
+        <div class="cv-section-head gone" id="cvSlackHead"><span class="cv-section-label">From Slack · not on Relay yet</span><button class="cv-section-verb" type="button" id="cvSlackInviteAll">Invite all</button></div>
+        <div class="cvg-error" id="cvSlackError"></div>
+        <div class="cv-list" id="cvSlackList"></div>
         <!-- Requests: a first message from someone not in your Contacts waits
              here, out of the feed and the count, until you accept it, reply,
              or ignore it. -->
@@ -4743,6 +4758,10 @@
   const sentEmptyEl = document.getElementById("sentEmpty");
   const contactsViewEl = document.getElementById("contactsView");
   const cvListEl = document.getElementById("cvList");
+  const cvSlackListEl = document.getElementById("cvSlackList");
+  const cvSlackHeadEl = document.getElementById("cvSlackHead");
+  const cvSlackInviteAllEl = document.getElementById("cvSlackInviteAll");
+  const cvSlackErrorEl = document.getElementById("cvSlackError");
   const contactsEmptyEl = document.getElementById("contactsEmpty");
   const cvFormEl = document.getElementById("cvForm");
   const cvNameEl = document.getElementById("cvName");
@@ -7472,6 +7491,21 @@
   // to what you send live in Slack, where people already are.
   function slackMessagesVisible() {
     return false;
+  }
+  // The one exception (David, 2026-10-11): what crosses is a Relay and the
+  // replies in its thread, both ways. A reply typed in Slack under a Relay's
+  // card belongs in that Relay's thread here; other Slack chatter stays out.
+  function slackReplyInRelayThread(item, items) {
+    if (!(item?.origin === "slack" || item?.provider?.name === "slack")) return false;
+    const rootId = String(item.threadId || "");
+    if (!rootId || rootId === String(item.relayId || "")) return false;
+    const root = (items || []).find((candidate) => String(candidate.relayId || "") === rootId);
+    return Boolean(root && root.origin !== "slack" && root.provider?.name !== "slack"
+      && (String(root.title || "").trim() || String(root.forAgent || "").trim()));
+  }
+  function canonicalItemVisible(item, items, includeSlack) {
+    return includeSlack || !(item.origin === "slack" || item.provider?.name === "slack")
+      || slackReplyInRelayThread(item, items);
   }
   function canonicalChatHydrationKey(room, source = threadsSource, includeSlack = slackMessagesVisible(room, source)) {
     if (!room?.chatId) return "";
@@ -15209,32 +15243,45 @@
       .filter((c) => cvMatches(cvQuery, c.name, ...contactEmails(c)))
       .sort((a, b) => String(a.name || contactEmails(a)[0] || "").localeCompare(String(b.name || contactEmails(b)[0] || ""), undefined, { sensitivity:"base" }));
     contactsEmptyEl.classList.toggle("gone", contactsList.length > 0 || Boolean(cvQuery));
-    document.getElementById("cvPeopleHead").classList.toggle("gone", !people.length);
     cvListEl.classList.toggle("searching", Boolean(cvQuery));
-    cvListEl.innerHTML = people.map((c, index) => {
+    cvSlackListEl.classList.toggle("searching", Boolean(cvQuery));
+    // Slack teammates not on Relay yet get their own section under everyone
+    // else (option B, David 2026-10-11): a Relay still reaches them, in Slack.
+    const fromSlack = people.filter(slackPendingContact);
+    const onRelay = people.filter((c) => !slackPendingContact(c));
+    const rowHtml = (c, index) => {
       const emails = contactEmails(c);
       const primary = emails[0] || "";
+      const slack = slackPendingContact(c);
+      const invitedToday = slack && slackInvitedToday(c);
       // A row is a name. The address, the clock and the actions are one
       // tap or one hover away; the list is for finding someone.
       return `
       <div class="cv-person">
       <button class="cv-item" type="button" data-contact="${esc(contactKey(c))}">
-        <span class="cv-avatar${c.onRelay === false ? " pending" : ""}" style="--cv-h:${cvHue(c.name || primary)}">${esc(cvInitials(c.name, primary))}</span>
+        <span class="cv-avatar${c.onRelay === false ? " pending" : ""}${slack ? " cv-from-slack" : ""}" style="--cv-h:${cvHue(c.name || primary)}">${esc(cvInitials(c.name, primary))}${slack ? '<span class="cv-slack-badge" aria-hidden="true"></span>' : ""}</span>
         <span class="cv-body">
           <span class="cv-name">${cvMarkHtml(c.name || primary, cvQuery)}</span>
           ${cvQuery && !cvMatches(cvQuery, c.name) ? `<span class="cv-sub">${esc(primary)}</span>` : ""}
+          ${slack ? `<span class="cv-reach">${invitedToday ? "Invited · " : ""}Relays reach them in Slack</span>` : ""}
         </span>
-        ${c.onRelay === false ? `<span class="cv-meta">Not on Relay yet</span>` : ""}
+        ${c.onRelay === false && !slack ? `<span class="cv-meta">Not on Relay yet</span>` : ""}
       </button>
       <button class="cv-person-more" type="button" aria-label="More actions for ${esc(c.name || primary)}" aria-haspopup="menu" aria-expanded="false" aria-controls="person-menu-${index}" data-message-more>⋯</button>
       <div class="th-message-menu" id="person-menu-${index}" popover="auto" role="menu" aria-label="Actions for ${esc(c.name || primary)}">
+        ${slack && !invitedToday ? `<button type="button" role="menuitem" data-contact-slack-invite="${esc(c.id || "")}">Invite to Relay</button>` : ""}
         <button type="button" role="menuitem" data-contact-edit="${esc(contactKey(c))}">Edit contact</button>
         ${canBlockPerson(c) ? `<button type="button" role="menuitem" class="danger" data-contact-block="${esc(contactKey(c))}">Block contact…</button>` : ""}
       </div>
       </div>`;
-    }).join("");
+    };
+    document.getElementById("cvPeopleHead").classList.toggle("gone", !onRelay.length);
+    cvListEl.innerHTML = onRelay.map((c, index) => rowHtml(c, index)).join("");
+    cvSlackListEl.innerHTML = fromSlack.map((c, index) => rowHtml(c, onRelay.length + index)).join("");
+    cvSlackHeadEl.classList.toggle("gone", !fromSlack.length);
+    renderSlackInviteAll(fromSlack);
     renderContactFind();
-    for (const el of cvListEl.querySelectorAll(".cv-item")) {
+    for (const el of [...cvListEl.querySelectorAll(".cv-item"), ...cvSlackListEl.querySelectorAll(".cv-item")]) {
       el.addEventListener("click", () => {
         // A row is the PERSON, so tapping it does what you came to a person
         // for: it opens the conversation with them. Correcting their name and
@@ -15242,7 +15289,14 @@
         openContactRoom(el.getAttribute("data-contact"));
       });
     }
-    for (const edit of cvListEl.querySelectorAll("[data-contact-edit]")) {
+    for (const button of cvSlackListEl.querySelectorAll("[data-contact-slack-invite]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        button.closest("[popover]")?.hidePopover();
+        inviteSlackContacts(button.dataset.contactSlackInvite);
+      });
+    }
+    for (const edit of [...cvListEl.querySelectorAll("[data-contact-edit]"), ...cvSlackListEl.querySelectorAll("[data-contact-edit]")]) {
       const open = (event) => {
         event.stopPropagation(); // the card, not the room
         edit.closest("[popover]")?.hidePopover();
@@ -15251,12 +15305,58 @@
       edit.addEventListener("click", open);
     }
     wireMessageSideMenus(cvListEl);
+    wireMessageSideMenus(cvSlackListEl);
     for (const button of cvListEl.querySelectorAll("[data-contact-block]")) {
       button.addEventListener("click", () => {
         const trigger = button.closest(".cv-person").querySelector("[data-message-more]");
         button.closest("[popover]").hidePopover();
         openPersonBlock(button.dataset.contactBlock, trigger);
       });
+    }
+  }
+  function slackPendingContact(c) {
+    return Boolean(c?.slack?.slackUserId && c.onRelay === false && payload.features?.slack === true);
+  }
+  function slackInvitedToday(c) {
+    const at = Date.parse(c?.slack?.invitedAt || "");
+    return Number.isFinite(at) && Date.now() - at < 24 * 60 * 60_000;
+  }
+  // "Invite all" DMs every one of them from your own Slack, so it asks once,
+  // in place: the verb becomes "DM 4 people?" and a second tap sends.
+  let cvSlackInviteAllArmed = null;
+  let cvSlackInviteBusy = false;
+  function renderSlackInviteAll(fromSlack) {
+    const due = fromSlack.filter((c) => !slackInvitedToday(c));
+    cvSlackInviteAllEl.disabled = cvSlackInviteBusy || !due.length;
+    cvSlackInviteAllEl.textContent = cvSlackInviteBusy ? "Inviting…"
+      : !due.length ? "Invited"
+      : cvSlackInviteAllArmed ? `DM ${due.length} ${due.length === 1 ? "person" : "people"}?`
+      : "Invite all";
+  }
+  cvSlackInviteAllEl.addEventListener("click", () => {
+    if (!cvSlackInviteAllArmed) {
+      cvSlackInviteAllArmed = setTimeout(() => { cvSlackInviteAllArmed = null; renderContacts(); }, 4000);
+      renderContacts();
+      return;
+    }
+    clearTimeout(cvSlackInviteAllArmed);
+    cvSlackInviteAllArmed = null;
+    inviteSlackContacts("");
+  });
+  async function inviteSlackContacts(contactId) {
+    if (cvSlackInviteBusy || !window.relay.slackContactInvite) return;
+    cvSlackInviteBusy = true;
+    cvSlackErrorEl.textContent = "";
+    renderContacts();
+    try {
+      const res = await window.relay.slackContactInvite(contactId || "");
+      if (res?.ok && Array.isArray(res.contacts)) contactsList = res.contacts;
+      if (!res?.ok) cvSlackErrorEl.textContent = res?.error || "Couldn’t send the invitation. Try again.";
+    } catch {
+      cvSlackErrorEl.textContent = "Couldn’t send the invitation. Try again.";
+    } finally {
+      cvSlackInviteBusy = false;
+      renderContacts();
     }
   }
   function canBlockPerson(person) {
@@ -17882,7 +17982,7 @@
       const roomName = chat.channel?.name || chat.title || (isGroup ? "Channel" : "Slack conversation");
       for (const item of chat.items || []) {
         const itemIsSlack = item.origin === "slack" || item.provider?.name === "slack";
-        if (!includeSlack && itemIsSlack) continue;
+        if (!includeSlack && itemIsSlack && !slackReplyInRelayThread(item, chat.items)) continue;
         const id = String(item.relayId || "");
         if (!id || msgs.some((message) => String(message.id || "") === id)) continue;
         const mine = item.direction === "outbound";
@@ -17942,6 +18042,28 @@
     // shaped exactly like a staged inbound relay above, keyed to the same
     // room, so the local store's copy replaces it seamlessly once the service
     // is back.
+    // A Slack teammate who isn't on Relay yet answered a Relay you sent them,
+    // in Slack, in its thread (David, 2026-10-11): their reply sits in that
+    // Relay's thread, in their chat, like any reply from them would.
+    for (const reply of payload.features?.slack === true ? (payload.slackTeammateReplies || []) : []) {
+      const id = String(reply?.id || "");
+      if (!id || !reply.inReplyToRelayId || msgs.some((message) => String(message.id || "") === id)) continue;
+      const email = String(reply.partyEmail || "").trim().toLowerCase();
+      const body = String(reply.forHuman || "");
+      msgs.push({
+        id, relayId:id, threadId:String(reply.threadId || reply.inReplyToRelayId), direction:"in",
+        seen:false, seenAt:null, delivered:false, agentOpened:false, readReceipts:[],
+        inReplyToRelayId:String(reply.inReplyToRelayId), inReplyToTopicPost:null,
+        addressRecipient: email ? { email } : null,
+        title: body || "Message", party:String(reply.senderName || "Slack member"), at:reply.createdAt,
+        partyKey: email ? `email:${email}` : `name:${String(reply.senderName || "").trim().toLowerCase()}`,
+        isGroup:false, groupId:"", groupName:"", chatId:reply.chatId || "",
+        unread: reply.unread === true, recipientMentioned:false, source:null, ownedAgent:false,
+        updatedAt:reply.createdAt, editedAt:null, deletedAt:null, textLike:true, request:false,
+        groupSendId:"", siblingIds:[], origin:"slack", provider:{ name:"slack" }, slackTeammateReply:true,
+        body, agent:"", reactions:{ aggregates:[], events:[] }, attachments:[], preview:"",
+      });
+    }
     for (const chat of canonicalChatDetails.values()) {
       if (!chat?.chatId || !serviceFallbackChatIds.has(String(chat.chatId))) continue;
       const integration = chat.integration || (chat.channel?.slack ? { provider:"slack" } : null);
@@ -18679,6 +18801,7 @@
     if (afterPaint) requestAnimationFrame(() => requestAnimationFrame(persist));
     else persist();
   }
+  const teammateRepliesRead = new Set();
   function persistCanonicalChatRead(chatId, options) {
     // Keep the older preload shape usable during rolling desktop updates while
     // current callers always qualify the surface.
@@ -18699,7 +18822,7 @@
       const includeSlack = slackMessagesVisible(visibleRoom);
       const readOptions = { surface, includeSlack:slackMessagesVisible(visibleRoom) };
       const unreadCanonical = (chat?.items || []).filter((item) =>
-        (includeSlack || !(item.origin === "slack" || item.provider?.name === "slack"))
+        canonicalItemVisible(item, chat?.items, includeSlack)
         && item.direction === "inbound" && (item.state === "pending" || item.state === "delivered"));
       if (unreadCanonical.length) {
         const generation = String(unreadCanonical.at(-1)?.relayId || "");
@@ -18716,7 +18839,7 @@
           const opened = {
             ...chat,
             unreadCount: 0,
-            items: (chat.items || []).map((item) => (includeSlack || !(item.origin === "slack" || item.provider?.name === "slack"))
+            items: (chat.items || []).map((item) => canonicalItemVisible(item, chat.items, includeSlack)
               && item.direction === "inbound"
               && (item.state === "pending" || item.state === "delivered")
               ? { ...item, state:"read" }
@@ -18759,6 +18882,15 @@
             });
         }
       }
+    }
+    // A Slack teammate's reply is read through its chat's own cursor, which
+    // the server keeps for the DM that carried the Relay to Slack.
+    const teammateUnread = visibleChatRoomMessages().filter((m) => m.slackTeammateReply && m.unread && m.chatId);
+    for (const m of teammateUnread) teammateRepliesRead.add(String(m.id));
+    for (const chatId of new Set(teammateUnread.map((m) => String(m.chatId)))) {
+      payload.slackTeammateReplies = (payload.slackTeammateReplies || [])
+        .map((reply) => String(reply.chatId) === chatId ? { ...reply, unread:false } : reply);
+      Promise.resolve(persistCanonicalChatRead(chatId, { surface:"relay", includeSlack:false })).catch(() => {});
     }
     const unreadRaw = new Map(
       (payload.relays || []).filter((r) => r.unread).map((r) => [String(r.id), r]),
@@ -19940,7 +20072,7 @@
         ? `<div class="th-chunk-date${firstChunk ? " first" : ""}" data-chat-key="${esc(renderKey)}:date" role="separator"><span>${esc(chunkDateLabel)}</span></div>`
         : "";
       const runHeader = cont ? "" : `
-      <div class="th-run${mine ? " mine" : ""}" data-chat-key="${esc(renderKey)}:run"><span class="th-party ${partyColorClass(who, mine)}">${esc(who)}</span></div>`;
+      <div class="th-run${mine ? " mine" : ""}" data-chat-key="${esc(renderKey)}:run"><span class="th-party ${partyColorClass(who, mine)}">${esc(who)}</span>${m.origin === "slack" && !slackMessagesVisible() ? '<span class="th-run-via"><img src="slackMark.png" alt="" />in Slack</span>' : ""}</div>`;
       const open = expandedMsgIds.has(m.id);
       const inlineBody = !textLike && !m.request && !open
         && !!m.body && String(m.body).length <= INLINE_BODY_MAX;
@@ -20069,10 +20201,10 @@
     }).join("");
     // A Slack thread needs no banner of its own: the header already says
     // Thread beside the channel's name and mark.
-    // The top of a Slack channel says what it is, once, quietly: what you
-    // send here posts to Slack, and the replies stay there.
+    // The top of a Slack channel says what it is, once, quietly: a Relay sent
+    // here posts to Slack and its replies sync both ways; texts stay put.
     const slackPostsNote = payload.features?.slack === true && rowsHtml && !slackFocusedThreadId && slackChannelRoom(chatRoom)
-      ? `<div class="th-slack-posts" data-stop="1"><img src="slackMark.png" alt="" /><span>What you send here also posts to <b>${esc(slackChannelLabel(chatRoom))}</b> in Slack. Replies stay in Slack.</span></div>`
+      ? `<div class="th-slack-posts" data-stop="1"><img src="slackMark.png" alt="" /><span>Relays you send here also post to <b>${esc(slackChannelLabel(chatRoom))}</b> in Slack, with their replies. Texts stay here.</span></div>`
       : "";
     const finalRowsHtml = `${slackPostsNote}${missingSlackThreadStubsHtml}${rowsHtml}`;
     // Chat order: history above, composer at the bottom, land at the newest.
@@ -20444,7 +20576,10 @@
             }
           : null;
         const emptyRoomAnchor = emptyGroupAnchor || emptySlackDirectAnchor || emptyRelayDirectAnchor;
-        const inReplyToRelayId = selectedReplyTargetId || String(focusedSlackParent?.id || "") || String(focusedReplyRoot?.id || "");
+        // A Slack teammate's reply lives only in Slack; answering it answers
+        // the Relay it is under, which carries the reply to their Slack thread.
+        const inReplyToRelayId = (selectedReplyTarget?.slackTeammateReply ? String(selectedReplyTarget.inReplyToRelayId || "") : selectedReplyTargetId)
+          || String(focusedSlackParent?.id || "") || String(focusedReplyRoot?.id || "");
         // A group room is its own address and its own anchor. The one
         // exception is answering a message that is not the group's (a Task
         // completion is a direct message): that reply follows its parent,
@@ -23671,7 +23806,7 @@
       : state === "waiting" ? "Slack opened in your browser."
       : state === "error" ? "Nothing changed. Give it another go."
       : teamHere ? "Your team uses Relay with Slack. Connect yours to post to your channels as you."
-      : "Send a Relay to a Slack channel and it posts there too. Replies stay in Slack.";
+      : "Send a Relay to a Slack channel and it posts there too, with its replies.";
     const buttons = state === "connected"
       ? `<button class="su-primary" id="suSlackContinue" type="button">Continue</button>`
       : state === "waiting"
@@ -25444,6 +25579,9 @@
       contacts: Array.isArray(next.contacts) ? next.contacts : (payload.contacts || []),
       chats: Array.isArray(next.chats) ? next.chats : (payload.chats || []),
       slackChats: Array.isArray(next.slackChats) ? next.slackChats : (payload.slackChats || []),
+      // Seen here already: stays read while the server's cursor catches up.
+      slackTeammateReplies: (Array.isArray(next.slackTeammateReplies) ? next.slackTeammateReplies : (payload.slackTeammateReplies || []))
+        .map((reply) => reply?.unread && teammateRepliesRead.has(String(reply.id)) ? { ...reply, unread:false } : reply),
       settings: next.settings && typeof next.settings === "object" ? next.settings : (payload.settings || {}),
       // First-use signals for the ways-to-use-Relay card; null until the
       // account's Sent poll has reported them.

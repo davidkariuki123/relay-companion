@@ -1056,6 +1056,16 @@ export class RelayClient {
   }
 
   /** Invite one Slack teammate (their DM) or, with no id, the whole channel. */
+  /** What Slack teammates not on Relay yet answered, in Slack, under Relays you sent them. */
+  slackTeammateReplies() {
+    return this.#req("GET", "/v1/slack/teammate-replies");
+  }
+
+  /** Invite Slack teammates from Contacts: one contact, or everyone not invited today. */
+  inviteSlackContacts(contactId) {
+    return this.#req("POST", "/v1/contacts/slack-invite", contactId ? { contactId } : {});
+  }
+
   inviteSlackTeammates(chatId, slackUserId) {
     return this.#req("POST", `/v1/chats/${encodeURIComponent(chatId)}/slack-invite`, slackUserId ? { slackUserId } : {});
   }
