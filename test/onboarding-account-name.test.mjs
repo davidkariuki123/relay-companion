@@ -26,3 +26,19 @@ test("the ideas say who suggested them, never claiming recent chats a new comput
   assert.doesNotMatch(html, /from your recent chats/);
   assert.match(html, /: `Suggested by \$\{esc\(name\)\}`;/);
 });
+
+// Fresh Mac VM, 2026-10-11: a sign-in state check still in flight when sign-in
+// finished answered "consumed" late and put the person back on "Finishing
+// setup…", where nothing moved them on.
+test("a late sign-in answer never strands a signed-in person on Finishing setup", () => {
+  const poll = html.slice(html.indexOf("  function pollInstallationState("), html.indexOf("  function pollInstallationState(") + 1600);
+  assert.match(poll, /let state = await window\.relay\.installationAuthState\(\);\n[\s\S]*?if \(payload\.account\?\.paired !== false\) return;\n\s+applyInstallationState\(state\);/);
+  const finishing = html.slice(html.indexOf("Never leave the person on this screen."), html.indexOf("Finishing setup…</h1>"));
+  assert.match(finishing, /if \(payload\.account\?\.paired === true && payload\.ui\?\.onboardingRequired === true\) \{\n\s+signupStage = "first-relay";\n\s+renderSignup\(\);\n\s+return;/);
+});
+
+test("the four ideas have room, and a scrollbar, if any, is quiet", () => {
+  assert.match(html, /\.su-idea-list \{ margin-top:16px; max-height:min\(340px, 52vh\);/);
+  assert.match(html, /\.su-idea-list::-webkit-scrollbar-thumb \{ background:var\(--hair\);/);
+  assert.match(html, /Send the link to whoever it’s for\./);
+});

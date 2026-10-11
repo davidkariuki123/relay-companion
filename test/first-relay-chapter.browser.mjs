@@ -83,7 +83,7 @@ try {
   assert.equal(await page.locator('#suCelebrationContinue').count(), 0, 'no separate celebration screen');
   assert.equal(await page.locator('.su-first-link.su-first-relay-sent .su-relay-moment i').count(), 3, 'the moment lands on the ready screen');
   assert.equal(await page.locator('#signupView').getByText('It’s ready to send.').isVisible(), true);
-  assert.equal(await page.locator('#signupView').getByText('Send the link to whoever should review it. They read and reply in their browser, with nothing to install.').isVisible(), true);
+  assert.equal(await page.locator('#signupView').getByText('Send the link to whoever it’s for. They read and reply in their browser, with nothing to install.').isVisible(), true);
   assert.equal(await page.locator('#suFirstLinkUrl').inputValue(), linkUrl);
   assert.equal(await page.locator('#suLinkCopy').textContent(), 'Copy link');
   assert.equal(await page.locator('#suLinkOpen').getAttribute('href'), linkUrl);

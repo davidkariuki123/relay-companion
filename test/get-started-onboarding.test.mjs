@@ -131,7 +131,7 @@ test("the ready screen carries the celebration when the link was the first Relay
   assert.match(chapter, /if \(chapter\.stage === "link" && !firstRelayWasLink\) chapter\.stage = stageAfterFirstLink\(\);/);
   assert.match(chapter, /class="su-first-relay su-first-link su-first-relay-sent"/);
   assert.match(chapter, /<h1 class="su-title">It’s ready to send\.<\/h1>/);
-  assert.match(chapter, /Send the link to whoever should review it\. They read and reply in their browser, with nothing to install\./);
+  assert.match(chapter, /Send the link to whoever it’s for\. They read and reply in their browser, with nothing to install\./);
   assert.match(chapter, />\$\{chapter\.linkCopied \? "Copied" : "Copy link"\}</);
   assert.match(chapter, />Open it yourself</);
   assert.doesNotMatch(chapter, /Now relay someone who isn’t on Relay|Copy message|renderNetworkScreen\(/);

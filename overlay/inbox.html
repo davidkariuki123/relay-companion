@@ -3742,8 +3742,12 @@
      own row shape: an icon for the kind, the title, one line. The list scrolls
      inside itself, so a long idea wraps instead of being cut. */
   .su-ideas .su-title { max-width:none; font-size:28px; }
-  .su-idea-list { margin-top:16px; max-height:min(282px, 42vh); overflow-y:auto; overscroll-behavior:contain;
-    border:1px solid var(--hair); border-radius:10px; background:var(--wash); }
+  .su-idea-list { margin-top:16px; max-height:min(340px, 52vh); overflow-y:auto; overscroll-behavior:contain;
+    border:1px solid var(--hair); border-radius:10px; background:var(--wash); scrollbar-width:thin; scrollbar-color:var(--hair) transparent; }
+  /* A Mac with "always show scrollbars" drew a bright white bar here (fresh VM, 2026-10-11). */
+  .su-idea-list::-webkit-scrollbar { width:6px; }
+  .su-idea-list::-webkit-scrollbar-track { background:transparent; }
+  .su-idea-list::-webkit-scrollbar-thumb { background:var(--hair); border-radius:3px; }
   .su-idea { --host-color:var(--accent); appearance:none; width:100%; min-height:56px; padding:10px 14px; border:0; background:transparent;
     display:grid; grid-template-columns:28px minmax(0,1fr) auto; align-items:center; gap:11px; cursor:pointer; text-align:left; color:var(--ink);
     transition:background-color var(--t-fast) var(--settle); }
@@ -23384,6 +23388,10 @@
           onPayload(await window.relay.refresh());
         } else {
           let state = await window.relay.installationAuthState();
+          // Answered after sign-in already finished: stale. Applying it put a
+          // signed-in person back on "Finishing setup…" with nothing left to
+          // move it on (fresh Mac VM, 2026-10-11).
+          if (payload.account?.paired !== false) return;
           applyInstallationState(state);
           if (signupStage === "finishing" && window.relay.installationAuthResume) {
             state = await window.relay.installationAuthResume();
@@ -23711,7 +23719,7 @@
         <div class="su-relay-moment" aria-hidden="true"><i></i><i></i><i></i><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div>
         <p class="su-step">Your first Relay</p>
         <h1 class="su-title">It’s ready to send.</h1>
-        <p class="su-copy">Send the link to whoever should review it. They read and reply in their browser, with nothing to install.</p>
+        <p class="su-copy">Send the link to whoever it’s for. They read and reply in their browser, with nothing to install.</p>
         <div class="su-link-field"><input class="su-input" id="suFirstLinkUrl" type="text" readonly aria-label="Your Relay’s link" value="${esc(linkUrl || link.url)}" /></div>
         <div class="su-form"><button class="su-primary" id="suLinkCopy" type="button"${signupBusy ? " disabled" : ""}>${chapter.linkCopied ? "Copied" : "Copy link"}</button></div>
         <div class="su-agent-quiet">${linkUrl ? `<a class="su-link" id="suLinkOpen" href="${esc(linkUrl)}" target="_blank" rel="noopener noreferrer">Open it yourself</a><span aria-hidden="true">·</span>` : ""}<button class="su-link" id="suLinkContinue" type="button"${signupBusy ? " disabled" : ""}>Continue</button></div>
@@ -24895,6 +24903,13 @@
     if (signupStage === "expired") {
       signupBodyEl.innerHTML = `<p class="su-step">Your account</p><h1 class="su-title">That sign-in timed out.</h1><p class="su-copy">Nothing was connected. Sign in again to finish setting up Relay.</p><div class="su-form"><button class="su-primary" id="suRestart" type="button"${busy}>Sign in again</button></div>`;
       document.getElementById("suRestart")?.addEventListener("click", () => restartInstallationSetup());
+      return;
+    }
+    // Signed in and still owed the first Relay: setup is finished, whatever a
+    // late sign-in answer said. Never leave the person on this screen.
+    if (payload.account?.paired === true && payload.ui?.onboardingRequired === true) {
+      signupStage = "first-relay";
+      renderSignup();
       return;
     }
     const resume = signupError ? `<div class="su-form"><button class="su-primary" id="suResume" type="button"${busy}>Resume setup</button></div>` : "";
