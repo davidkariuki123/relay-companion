@@ -323,7 +323,8 @@ function linkedFixture(t) {
   return { ...f, release, register, link };
 }
 
-test("a rolled-back activation points the pill's stable link back at the restored release", async t => {
+// Windows resolves the directory link differently, and this path only runs under launchd.
+test("a rolled-back activation points the pill's stable link back at the restored release", { skip: process.platform === "win32" }, async t => {
   const f = linkedFixture(t);
   const previous = f.release("0.1.622"), failed = f.release("0.1.624");
   f.register(previous);

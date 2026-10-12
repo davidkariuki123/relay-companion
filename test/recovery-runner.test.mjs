@@ -418,7 +418,8 @@ for (const [name, change] of [
   const previous = { ok: true, runtimeHealthy: true, runtimeProven: true, status: "current", version: "0.1.600",
     readyIdentity: `${packageRoot}:4242:pill:d1:p1`, heartbeatAt: at - 60_000, progressSequence: 41, checkedAt: at - 60_000, ...change };
   if (previous.readyIdentity.startsWith("PACKAGE_ROOT")) previous.readyIdentity = previous.readyIdentity.replace("PACKAGE_ROOT", packageRoot);
-  if (previous.checkedAt === "OLD") previous.checkedAt = at - 10 * 60_000;
+  // Past three check intervals on every platform (Mac checks every five minutes).
+  if (previous.checkedAt === "OLD") previous.checkedAt = at - 60 * 60_000;
   write(path.join(homeDir, ".relay", "recovery", "status.json"), previous);
   const seen = [];
   await recover({ homeDir, env: {}, now: () => at, discoverImpl: async () => "0.1.600", memory: () => ({ pressured: false }),
