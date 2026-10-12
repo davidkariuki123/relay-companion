@@ -323,8 +323,10 @@ function linkedFixture(t) {
   return { ...f, release, register, link };
 }
 
-// Windows resolves the directory link differently, and this path only runs under launchd.
-test("a rolled-back activation points the pill's stable link back at the restored release", { skip: process.platform === "win32" }, async t => {
+// Windows resolves the directory link differently, and these paths only run under launchd.
+const launchdOnly = { skip: process.platform === "win32" };
+
+test("a rolled-back activation points the pill's stable link back at the restored release", launchdOnly, async t => {
   const f = linkedFixture(t);
   const previous = f.release("0.1.622"), failed = f.release("0.1.624");
   f.register(previous);
@@ -347,7 +349,7 @@ test("a rolled-back activation points the pill's stable link back at the restore
   assert.equal(fs.readFileSync(path.join(f.link, "Contents", "MacOS", "Relay"), "utf8"), "0.1.622");
 });
 
-test("a dangling stable link no longer blocks activation, and service repair re-points it", async t => {
+test("a dangling stable link no longer blocks activation, and service repair re-points it", launchdOnly, async t => {
   const f = linkedFixture(t);
   const previous = f.release("0.1.622"), gone = f.release("0.1.624"), next = f.release("0.1.634");
   f.register(previous);
@@ -377,7 +379,7 @@ test("a plist whose own release lost its Electron is still refused", async t => 
   assert.throws(() => prepareSnapshot({ packageRoot: "candidate" }, f.opts), /ENOENT|missing-service-target/);
 });
 
-test("release cleanup never deletes the release the stable link points into", t => {
+test("release cleanup never deletes the release the stable link points into", launchdOnly, t => {
   const f = linkedFixture(t);
   const linked = f.release("0.1.624"), stale = f.release("0.1.600");
   f.register(linked);
@@ -390,7 +392,7 @@ test("release cleanup never deletes the release the stable link points into", t 
 
 // Stuck Macs run an old updater whose only call into the new release is its
 // CLI startup check (`relay --help`); that start repairs the dangling link.
-test("a CLI start repairs a dangling link only for the committed runtime's own pill", async t => {
+test("a CLI start repairs a dangling link only for the committed runtime's own pill", launchdOnly, async t => {
   const f = linkedFixture(t);
   const active = f.release("0.1.622"), gone = f.release("0.1.624");
   f.register(active);
@@ -413,7 +415,7 @@ test("a CLI start repairs a dangling link only for the committed runtime's own p
   assert.ok(main > 0 && cli.indexOf("healDanglingPillLink()", main) < cli.indexOf("resolveCliTrampoline(", main));
 });
 
-test("the watchdog's pill restore fixes a dangling link, and an unusable registration escalates", async t => {
+test("the watchdog's pill restore fixes a dangling link, and an unusable registration escalates", launchdOnly, async t => {
   const f = linkedFixture(t);
   const active = f.release("0.1.622"), gone = f.release("0.1.624");
   f.register(active);
@@ -434,7 +436,7 @@ test("the watchdog's pill restore fixes a dangling link, and an unusable registr
   assert.match(broken.reason, /^pill-registration-invalid/);
 });
 
-test("a live pill is restarted when its link moves, and a real directory at the link is checked as is", async t => {
+test("a live pill is restarted when its link moves, and a real directory at the link is checked as is", launchdOnly, async t => {
   const f = linkedFixture(t);
   const active = f.release("0.1.622"), other = f.release("0.1.624");
   f.register(active);
