@@ -33,26 +33,41 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
   heartbeatFreshMs = HEARTBEAT_FRESH_MS, probeTimeoutMs = PROBE_TIMEOUT_MS,
   probe = require("./recovery-probe.cjs").probeRuntime,
   requireProgress = false,
+  // What the caller's previous check proved: the identity it returned, the
+  // heartbeat it saw, and the loop sequence it saw. A runtime that is still
+  // that identity and has beaten and progressed since then has been watched
+  // for a minute already; one full sample showing that is the proof, and the
+  // stability window below is for runtimes nothing has vouched for yet.
+  continuity = null,
   readCurrent = () => read(path.join(homeDir, ".relay", "runtime", "current.json")),
   readHeartbeat = () => read(path.join(homeDir, ".relay", "recovery", "daemon.json")),
 } = {}) {
   const started = now();
   let since = null, identity = null, firstBeat = null, lastSampleEnd = started;
   let probeSeen = false, probeIdentity = null, legacy = false;
-  let firstProgress = null, firstProgressAt = null, progressAdvanced = false;
+  let firstProgress = null, firstProgressAt = null, progressAdvanced = false, lastProgressSequence = null;
+  // The daemon and pill pids a full enumeration and a matching probe both
+  // confirmed; while the window is open, samples check these for liveness.
+  let watched = null, lastAlive = false;
   // Why the last sample did not count, for the log line a failed proof leaves.
   let block = null, samples = 0, slowestSampleMs = 0;
   let observationInvalid = false;
-  const reset = (key) => { since = null; firstBeat = null; identity = key; probeSeen = false; probeIdentity = null; legacy = false; firstProgress = null; firstProgressAt = null; progressAdvanced = false; };
+  const reset = (key) => { since = null; firstBeat = null; identity = key; probeSeen = false; probeIdentity = null; legacy = false; firstProgress = null; firstProgressAt = null; progressAdvanced = false; watched = null; };
   const healthSummary = (value) => value ? JSON.stringify({ daemon: value.daemon, pill: value.pill, daemonCount: value.daemonCount, pillCount: value.pillCount, oldDaemon: value.oldDaemon, oldPill: value.oldPill, oldBroker: value.oldBroker }) : "null";
   const probeSummary = (value) => value?.reason || value?.daemon?.reason || value?.pill?.reason || "answer-did-not-match-the-live-processes";
   // The attempt bound also terminates a faulty/frozen clock in injected hosts.
   for (let attempt = 0; attempt <= Math.ceil(timeoutMs / 1000); attempt++) {
     const at = now(), current = readCurrent(), beat = readHeartbeat();
     const gap = at - lastSampleEnd;
-    const live = current?.active === true && current.packageRoot && (!target ||
-      (current.version === target.version && (!target.packageRoot || target.packageRoot === current.packageRoot)))
-      ? await health(current, { platform }) : null;
+    const targeted = current?.active === true && current.packageRoot && (!target ||
+      (current.version === target.version && (!target.packageRoot || target.packageRoot === current.packageRoot)));
+    // The window opens and closes on a full process enumeration. In between,
+    // the pids that enumeration and the probe confirmed are checked for
+    // liveness instead: the final full sample still sees a stray old daemon,
+    // pill or broker, and a watched process that dies resets the window.
+    const completing = since !== null && at - since >= stableMs;
+    const full = watched === null || completing || !lastAlive || beat?.pid !== watched.daemon;
+    const live = targeted ? await health(current, { platform, full, watched: full ? null : watched }) : null;
     const jobs = platform === "darwin" ? LABELS.map(label => inspect(label)) : [];
     const responsive = live?.ok ? await probe(current, { homeDir, timeoutMs: probeTimeoutMs }) : { ok: false };
     const sampled = now(), sampleMs = sampled - at;
@@ -88,9 +103,14 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
         probeSeen = true;
         legacy = responsive.legacy === true;
         if (probeIdentityNow) probeIdentity = probeIdentityNow;
+        // Only a full enumeration plus a probe that named both pids may arm
+        // the cheap samples; a legacy probe names none, so legacy runtimes
+        // are enumerated every time.
+        if (full && !legacy && Number.isSafeInteger(responsive.pill?.pid)) watched = { daemon: beat.pid, pill: responsive.pill.pid };
         const progress = responsive.daemon?.progress;
         if (Number.isSafeInteger(progress?.sequence) && progress.sequence > 0 && ["running", "offline", "signed-out"].includes(progress.phase) && Number.isFinite(progress.at)
           && progress.at >= after && progress.at <= sampled && sampled - progress.at < heartbeatFreshMs) {
+          lastProgressSequence = progress.sequence;
           if (firstProgress === null) { firstProgress = progress.sequence; firstProgressAt = progress.at; }
           else if (progress.sequence > firstProgress && progress.at - firstProgressAt >= stableMs) progressAdvanced = true;
         }
@@ -99,13 +119,24 @@ async function waitForRecoveryReady({ homeDir = os.homedir(), platform = process
       // but cannot satisfy activation of a release requiring this capability.
       const progressRequired = requireProgress || firstProgress !== null
         || (current?.packageRoot && fs.existsSync(path.join(current.packageRoot, "bootstrap", "daemon-progress.cjs")));
+      // One sample, the first: if it does not show the proven runtime beating
+      // and progressing since the previous check, the full window runs.
+      if (continuity && samples === 1 && full && !legacy && probeMatches && probeIdentityNow && !suspended
+        && `${key}:${probeIdentityNow}` === continuity.identity
+        && Number.isFinite(continuity.heartbeatAt) && beat.at > continuity.heartbeatAt
+        && (!progressRequired || (Number.isSafeInteger(continuity.progressSequence) && Number.isSafeInteger(lastProgressSequence)
+          && lastProgressSequence > continuity.progressSequence))) {
+        return { ok: true, current, heartbeatAt: beat.at, identity: `${key}:${probeIdentityNow}`, legacy: false,
+          progressSequence: lastProgressSequence, continued: true };
+      }
       if (probeMatches && progressRequired && !progressAdvanced) block = "daemon-loop-not-advancing";
       if (at - since >= stableMs && beat.at > firstBeat && probeSeen && (!progressRequired || progressAdvanced)) {
         return { ok: true, current, heartbeatAt: beat.at,
-          identity: legacy ? null : `${key}:${probeIdentity || "legacy"}`, legacy };
+          identity: legacy ? null : `${key}:${probeIdentity || "legacy"}`, legacy, progressSequence: lastProgressSequence };
       }
       if (!block && at - since >= stableMs && !(beat.at > firstBeat)) block = "heartbeat-not-advancing";
     }
+    lastAlive = alive;
     lastSampleEnd = sampled;
     if (at - started >= timeoutMs) break;
     await sleep(1000);

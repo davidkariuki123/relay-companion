@@ -216,7 +216,8 @@ export function pruneCanonicalReleases({
     // child of Relay's own releases directory. Never follow a symlink or accept a
     // path-shaped name from an injected/corrupt directory listing.
     if (api.dirname(api.resolve(entry.releaseRoot)) !== api.resolve(releasesDir)) continue;
-    const result = removeReleaseTree(entry.releaseRoot, { platform, rmSync: fsImpl.rmSync.bind(fsImpl), renameSync });
+    const result = removeReleaseTree(entry.releaseRoot, { platform, rmSync: fsImpl.rmSync.bind(fsImpl), renameSync,
+      ...(typeof fsImpl.readlinkSync === "function" ? { readlinkSync: fsImpl.readlinkSync.bind(fsImpl) } : {}) });
     if (result.ok) removed.push(entry.name);
     else if (result.reason === "release-in-use") inUse.push(entry.name);
   }
@@ -234,9 +235,17 @@ const TRASH_PREFIX = ".trash-";
 // file inside it, so rename first: a refused rename means "in use" and the tree
 // stays intact; a renamed tree is unreferenced junk that can safely be deleted
 // (a leftover from a failed delete is swept by the next prune).
-function removeReleaseTree(releaseRoot, { platform, rmSync, renameSync }) {
+//
+// On macOS launchd starts the pill through ~/.relay/runtime/Relay.app, a link
+// into one release's Electron bundle. 2026-10-10: a rollback left that link on
+// the failed release, this deleted it, and the pill exited with EX_CONFIG on
+// every launch after. A release the link points into is in use.
+function removeReleaseTree(releaseRoot, { platform, rmSync, renameSync, readlinkSync = fs.readlinkSync }) {
   const api = pathsFor(platform);
   const name = api.basename(releaseRoot);
+  if (platform === "darwin" && stablePillLinkReleaseRoot(api.dirname(api.dirname(releaseRoot)), { readlinkSync }) === api.resolve(releaseRoot)) {
+    return { ok: false, reason: "release-in-use", detail: "stable-pill-link" };
+  }
   let doomed = releaseRoot;
   if (typeof renameSync === "function" && !name.startsWith(TRASH_PREFIX)) {
     doomed = api.join(api.dirname(releaseRoot), `${TRASH_PREFIX}${name}`);
@@ -252,6 +261,17 @@ function removeReleaseTree(releaseRoot, { platform, rmSync, renameSync }) {
     return { ok: false, reason: "release-remove-failed", detail: error?.message || String(error) };
   }
   return { ok: true };
+}
+
+// The release directory ~/.relay/runtime/Relay.app points into, or null.
+function stablePillLinkReleaseRoot(runtimeRoot, { readlinkSync = fs.readlinkSync } = {}) {
+  const api = path.posix;
+  const releasesDir = api.join(runtimeRoot, "releases");
+  let target;
+  try { target = api.resolve(runtimeRoot, readlinkSync(api.join(runtimeRoot, "Relay.app"))); } catch { return null; }
+  const relative = api.relative(releasesDir, target);
+  if (!relative || relative.startsWith("..") || api.isAbsolute(relative)) return null;
+  return api.join(releasesDir, relative.split("/")[0]);
 }
 
 // One direct child of Relay's own releases directory, gone. The guard mirrors

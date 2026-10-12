@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { LABELS, repairMacServiceRegistrations, restartMacRegisteredServices } from "../bootstrap/mac-service-recovery.cjs";
+import { LABELS, healDanglingPillLink, repairMacServiceRegistrations, restartMacRegisteredServices } from "../bootstrap/mac-service-recovery.cjs";
 import { recover, write } from "../bootstrap/recovery-runner.cjs";
 import { acquireCanonicalLock } from "../bootstrap/relay-setup.cjs";
 import { prepareSnapshot, readSnapshot, restoreSnapshot } from "../bootstrap/mac-registration-transaction.cjs";
@@ -13,6 +13,8 @@ import { spawnSync } from "node:child_process";
 import { restoreMissingPill } from "../bootstrap/runtime-health.cjs";
 import { repairServiceRegistrations } from "../bootstrap/service-recovery.cjs";
 import { activateCanonicalRuntime } from "../src/canonical-updater.js";
+import { pruneCanonicalReleases } from "../src/canonical-runtime.js";
+import { inspectStablePillLink, stablePillExecutable } from "../bootstrap/mac-background-identity.cjs";
 
 function fixture(t) {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-mac-recovery-"));
@@ -286,4 +288,165 @@ test("power assertion acquisition verifies the OS assertion and always releases 
   assert.equal(kills, 0); release(); release(); assert.equal(kills, 1);
   await assert.rejects(acquireMacPowerAssertion({ spawnImpl, processId: 12, run: () => ({ status: 0, stdout: "" }), sleep: async () => {} }), /assertion-unavailable/);
   assert.equal(kills, 2);
+});
+
+// Sven, 2026-10-10..12: the pill plist launches through ~/.relay/runtime/Relay.app.
+// A failed 0.1.624 activation re-pointed that link, the rollback restored the
+// plists but not the link, cleanup deleted 0.1.624, and every later update
+// refused at its snapshot with ENOENT on the link.
+function linkedFixture(t) {
+  const f = fixture(t);
+  const releases = path.join(f.homeDir, ".relay", "runtime", "releases");
+  const release = (name) => {
+    const releaseRoot = path.join(releases, name);
+    const packageRoot = path.join(releaseRoot, "node_modules", "relay-companion");
+    const macos = path.join(releaseRoot, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS");
+    fs.mkdirSync(macos, { recursive: true }); fs.writeFileSync(path.join(macos, "Relay"), name);
+    for (const script of [["bin", "relay.js"], ["overlay", "main.cjs"]]) {
+      fs.mkdirSync(path.join(packageRoot, script[0]), { recursive: true }); fs.writeFileSync(path.join(packageRoot, ...script), "");
+    }
+    fs.writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({ name: "relay-companion", version: name }));
+    return { releaseRoot, packageRoot, bundle: path.resolve(macos, "..", ".."), electron: path.join(macos, "Relay") };
+  };
+  const link = path.join(f.homeDir, ".relay", "runtime", "Relay.app");
+  const register = (target) => {
+    const executable = stablePillExecutable(target.electron, { homeDir: f.homeDir });
+    assert.equal(executable, path.join(link, "Contents", "MacOS", "Relay"));
+    for (const [index, label] of LABELS.entries()) {
+      const file = path.join(f.homeDir, "Library", "LaunchAgents", `${label}.plist`);
+      const data = { Label: label, ProgramArguments: index
+        ? [executable, path.join(target.packageRoot, "overlay", "main.cjs")]
+        : [f.node, path.join(target.packageRoot, "bin", "relay.js"), "daemon"] };
+      fs.writeFileSync(file, JSON.stringify(data)); f.plists.set(file, data);
+    }
+  };
+  return { ...f, release, register, link };
+}
+
+test("a rolled-back activation points the pill's stable link back at the restored release", async t => {
+  const f = linkedFixture(t);
+  const previous = f.release("0.1.622"), failed = f.release("0.1.624");
+  f.register(previous);
+  write(path.join(f.homeDir, ".relay", "runtime", "current.json"), { active: true, packageRoot: previous.packageRoot });
+  for (const label of LABELS) f.registered.set(label, 123);
+  prepareSnapshot({ packageRoot: failed.packageRoot }, f.opts);
+  f.register(failed); // what repair-runtime does for the candidate before it times out
+  assert.equal(fs.readlinkSync(f.link), failed.bundle);
+  // launchd still runs the candidate's plists, so the restore unloads them first.
+  const run = (cmd, args, options) => {
+    if (args[0] !== "bootout") return f.opts.run(cmd, args, options);
+    f.registered.delete(args[1].split("/").at(-1)); return { status: 0 };
+  };
+  const restored = await restoreSnapshot({ ...f.opts, run, sleep: async () => {}, expectedRoot: previous.packageRoot });
+  assert.equal(restored.ok, true, restored.lastError);
+  assert.equal(fs.readlinkSync(f.link), previous.bundle, "the link follows the plist back");
+  // The transaction now deletes the failed release; the pill must still launch.
+  const pruned = pruneCanonicalReleases({ homeDir: f.homeDir, platform: "darwin", active: { releaseId: "0.1.622" }, retainRecent: 0 });
+  assert.deepEqual(pruned.removed, ["0.1.624"]);
+  assert.equal(fs.readFileSync(path.join(f.link, "Contents", "MacOS", "Relay"), "utf8"), "0.1.622");
+});
+
+test("a dangling stable link no longer blocks activation, and service repair re-points it", async t => {
+  const f = linkedFixture(t);
+  const previous = f.release("0.1.622"), gone = f.release("0.1.624"), next = f.release("0.1.634");
+  f.register(previous);
+  fs.unlinkSync(f.link); fs.symlinkSync(gone.bundle, f.link, "dir");
+  fs.rmSync(gone.releaseRoot, { recursive: true, force: true });
+  write(path.join(f.homeDir, ".relay", "runtime", "current.json"), { active: true, packageRoot: previous.packageRoot });
+  f.registered.set(LABELS[0], 123); f.registered.set(LABELS[1], null); // launchd: spawn scheduled, last exit 78
+  assert.equal(inspectStablePillLink({ homeDir: f.homeDir }).resolves, false);
+  // The pre-activation snapshot used to throw ENOENT here, forever.
+  const snapshot = prepareSnapshot({ packageRoot: next.packageRoot }, f.opts);
+  assert.equal(snapshot.previousRoot, previous.packageRoot);
+  fs.unlinkSync(path.join(f.homeDir, ".relay", "runtime", "mac-registrations.json"));
+  // Independently, the watchdog's registration repair fixes the link and starts the pill.
+  const repaired = await repairMacServiceRegistrations(f.opts);
+  assert.equal(repaired.ok, true, repaired.lastError);
+  assert.deepEqual(repaired.repaired, ["stable-pill-link", LABELS[1]]);
+  assert.equal(fs.readlinkSync(f.link), previous.bundle);
+  assert.equal(inspectStablePillLink({ homeDir: f.homeDir }).resolves, true);
+  assert.equal((await repairMacServiceRegistrations(f.opts)).changed, false);
+});
+
+test("a plist whose own release lost its Electron is still refused", async t => {
+  const f = linkedFixture(t);
+  const previous = f.release("0.1.622");
+  f.register(previous);
+  fs.rmSync(path.join(previous.releaseRoot, "node_modules", "electron"), { recursive: true, force: true });
+  assert.throws(() => prepareSnapshot({ packageRoot: "candidate" }, f.opts), /ENOENT|missing-service-target/);
+});
+
+test("release cleanup never deletes the release the stable link points into", t => {
+  const f = linkedFixture(t);
+  const linked = f.release("0.1.624"), stale = f.release("0.1.600");
+  f.register(linked);
+  const pruned = pruneCanonicalReleases({ homeDir: f.homeDir, platform: "darwin", retainRecent: 0 });
+  assert.deepEqual(pruned.removed, ["0.1.600"]);
+  assert.deepEqual(pruned.inUse, ["0.1.624"]);
+  assert.equal(fs.existsSync(linked.releaseRoot), true);
+  assert.equal(fs.existsSync(stale.releaseRoot), false);
+});
+
+// Stuck Macs run an old updater whose only call into the new release is its
+// CLI startup check (`relay --help`); that start repairs the dangling link.
+test("a CLI start repairs a dangling link only for the committed runtime's own pill", async t => {
+  const f = linkedFixture(t);
+  const active = f.release("0.1.622"), gone = f.release("0.1.624");
+  f.register(active);
+  fs.unlinkSync(f.link); fs.symlinkSync(gone.bundle, f.link, "dir");
+  fs.rmSync(gone.releaseRoot, { recursive: true, force: true });
+  const pointer = path.join(f.homeDir, ".relay", "runtime", "current.json");
+  const heal = () => healDanglingPillLink({ homeDir: f.homeDir, platform: "darwin", run: f.opts.run });
+  assert.equal(healDanglingPillLink({ homeDir: f.homeDir, platform: "linux", run: f.opts.run }).changed, false);
+  write(pointer, { state: "activating", active: false, candidate: { packageRoot: active.packageRoot } });
+  assert.equal(heal().skipped, "runtime-not-active", "never during an activation");
+  write(pointer, { active: true, packageRoot: path.join(f.homeDir, "elsewhere") });
+  assert.equal(heal().skipped, "registration-not-active-runtime");
+  write(pointer, { active: true, packageRoot: active.packageRoot });
+  assert.equal(heal().changed, true);
+  assert.equal(fs.readlinkSync(f.link), active.bundle);
+  assert.equal(heal().changed, false, "a resolving link is left alone");
+  // The CLI runs it before anything else, including the trampoline hand-off.
+  const cli = fs.readFileSync(new URL("../bin/relay.js", import.meta.url), "utf8");
+  const main = cli.indexOf("async function main()");
+  assert.ok(main > 0 && cli.indexOf("healDanglingPillLink()", main) < cli.indexOf("resolveCliTrampoline(", main));
+});
+
+test("the watchdog's pill restore fixes a dangling link, and an unusable registration escalates", async t => {
+  const f = linkedFixture(t);
+  const active = f.release("0.1.622"), gone = f.release("0.1.624");
+  f.register(active);
+  fs.unlinkSync(f.link); fs.symlinkSync(gone.bundle, f.link, "dir");
+  fs.rmSync(gone.releaseRoot, { recursive: true, force: true });
+  const target = { active: true, packageRoot: active.packageRoot };
+  write(path.join(f.homeDir, ".relay", "runtime", "current.json"), target);
+  f.registered.set(LABELS[0], process.pid); f.registered.set(LABELS[1], null);
+  const options = { ...f.opts, healthCheck: () => ({ known: true, ok: false, daemonCount: 1, pillCount: 0 }) };
+  const restored = await restoreMissingPill(target, options);
+  assert.equal(restored.ok, true, restored.reason);
+  assert.equal(fs.readlinkSync(f.link), active.bundle);
+  // Its own Electron gone: not deferred (which refunds the runner's budget and
+  // retries forever), but failed, so the runner moves on to its next rung.
+  fs.rmSync(path.join(active.releaseRoot, "node_modules", "electron"), { recursive: true, force: true });
+  const broken = await restoreMissingPill(target, options);
+  assert.equal(broken.ok, false); assert.equal(broken.deferred, undefined);
+  assert.match(broken.reason, /^pill-registration-invalid/);
+});
+
+test("a live pill is restarted when its link moves, and a real directory at the link is checked as is", async t => {
+  const f = linkedFixture(t);
+  const active = f.release("0.1.622"), other = f.release("0.1.624");
+  f.register(active);
+  fs.unlinkSync(f.link); fs.symlinkSync(other.bundle, f.link, "dir"); // an old rollback's leftover
+  for (const label of LABELS) f.registered.set(label, 123);
+  const result = await repairMacServiceRegistrations(f.opts);
+  assert.equal(result.ok, true, result.lastError);
+  assert.deepEqual(result.repaired, ["stable-pill-link", LABELS[1]]);
+  assert.deepEqual(f.calls.filter(c => c[1] === "kickstart").map(c => c.slice(2)), [["-k", `gui/${process.getuid?.() ?? 0}/${LABELS[1]}`]]);
+  // Someone else's real directory: never replaced, and its own executable decides.
+  fs.unlinkSync(f.link); fs.mkdirSync(path.join(f.link, "Contents", "MacOS"), { recursive: true });
+  assert.throws(() => prepareSnapshot({ packageRoot: "candidate" }, f.opts), /ENOENT/);
+  fs.writeFileSync(path.join(f.link, "Contents", "MacOS", "Relay"), "real");
+  assert.equal(prepareSnapshot({ packageRoot: "candidate" }, f.opts).previousRoot, active.packageRoot);
+  assert.equal(fs.lstatSync(f.link).isSymbolicLink(), false);
 });

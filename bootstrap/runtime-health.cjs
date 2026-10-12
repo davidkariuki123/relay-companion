@@ -56,13 +56,32 @@ function runtimeProcessCommands(platform, run = defaultRun, userId = typeof proc
   return commandOk(result) ? parseRuntimeProcessCommands(result.stdout, platform, userId) : [];
 }
 
+// Liveness of one known pid. EPERM is "exists, not ours to signal", so alive.
+function processAlive(pid) {
+  const value = Number(pid);
+  if (!Number.isSafeInteger(value) || value <= 0) return false;
+  try { process.kill(value, 0); return true; } catch (error) { return error?.code === "EPERM"; }
+}
+
 function exactRuntimeHealth(target, {
   platform = process.platform,
   run = defaultRun,
   commands = null,
   userId = typeof process.getuid === "function" ? process.getuid() : 0,
+  // A sample taken between two full enumerations: the daemon and pill pids
+  // the last full sample and the probe confirmed are checked for liveness
+  // instead of listing every process on the machine. On Windows a full sample
+  // is a PowerShell/WMI query that costs about a second; the readiness window
+  // used to take one every second.
+  full = true,
+  watched = null,
+  alive = processAlive,
 } = {}) {
   const api = platform === "win32" ? path.win32 : path.posix;
+  if (!full && Number.isSafeInteger(watched?.daemon) && Number.isSafeInteger(watched?.pill)) {
+    const daemon = alive(watched.daemon), pill = alive(watched.pill);
+    return { ok: daemon && pill, known: true, cheap: true, daemon, pill, daemonCount: daemon ? 1 : 0, pillCount: pill ? 1 : 0, brokerCount: 0, oldBroker: false, oldDaemon: false, oldPill: false, packageRoot: target.packageRoot };
+  }
   let observed = commands;
   if (observed === null) {
     const query = runtimeProcessQuery(platform);
@@ -467,7 +486,14 @@ async function restoreMissingPill(target, {
       command = "systemctl"; args = ["--user", "start", unit];
     } else if (platform === "darwin") {
       const mac = require("./mac-service-recovery.cjs");
-      const record = mac.readRegistration(PILL_LABEL, { homeDir, run });
+      // An unusable registration is a failure, not a reason to wait: deferring
+      // refunds the runner's budget and it would retry this same step forever
+      // instead of escalating to reactivation or a download (Sven, 2026-10-12).
+      let record;
+      try {
+        record = mac.readRegistration(PILL_LABEL, { homeDir, run });
+        if (record.packageRoot === target.packageRoot) mac.alignPillLink([record], { homeDir });
+      } catch (error) { return { ok: false, reason: `pill-registration-invalid: ${error.message}` }; }
       if (record.packageRoot !== target.packageRoot) return defer("runtime-changed");
       const observed = mac.registration(PILL_LABEL, { run, userId });
       if (!observed.known) return defer("service-registration-query-failed");
@@ -534,3 +560,5 @@ module.exports = {
   terminateInstalledServiceProcesses,
   WINDOWS_STOP_INSTALLED_SERVICES_PS,
 };
+
+module.exports.processAlive = processAlive;

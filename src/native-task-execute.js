@@ -5,6 +5,7 @@ import { configDir } from "./config.js";
 import atomicJson from "./atomic-json.cjs";
 import * as native from "./native-task-launch.js";
 import conductor from "./conductor.cjs";
+import { CLAUDE_TASK_LINK_WAITING } from "./claude-task-fallback.js";
 
 const active = new Set();
 const { atomicWriteJsonSync } = atomicJson;
@@ -36,11 +37,18 @@ export function nativeExecutionStatus(record) {
   if (record.session?.provider === "conductor") {
     return record.phase === "conductor_opened" ? CONDUCTOR_TASK_WAITING : "Conductor launch unconfirmed · run Execute again if nothing opened";
   }
+  // A Task-in-the-box link is the same kind of record: the agent there stamps
+  // the Task Started, and the server's state takes over from this one.
+  if (record.session?.taskLink) {
+    return record.phase === "task_link_opened"
+      ? `${CLAUDE_TASK_LINK_WAITING}, and choose the ${folderName(record.session.cwd)} folder if asked`
+      : "Claude launch unconfirmed · run Execute again if nothing opened";
+  }
   if (record.draftError) return `Task not sent · ${record.draftError}`;
   if (record.phase === "draft_opening") return "Claude draft launch unconfirmed · check Claude or open a fresh draft";
   if (record.phase === "awaiting_send") return `Ready in Claude · press Send, and choose the ${folderName(record.session?.cwd)} folder if asked`;
   if (record.phase === "submitting" || record.phase === "uncertain") return "Launch unconfirmed · check the existing native conversation";
-  if (record.phase === "accepted") return native.nativeProgress(record.session);
+  if (record.phase === "accepted") return native.nativeProgress(record.session, { messageId: record.messageId });
   if (record.session?.fromDraft) return "Connecting the Task to this Claude conversation…";
   return "Native conversation prepared";
 }
@@ -120,9 +128,11 @@ export async function executeNativeTask({ id, config, client, choose, consent, o
       update(record);
       return { ok: true, message: "Opened the existing native conversation. Relay will not submit this Task twice." };
     }
-    // A Conductor record is a link that was opened, never a conversation Relay
-    // holds: until the agent there stamps the Task Started, Execute asks again.
-    if (!record?.session || record.phase === "preparing" || record.session.provider === "conductor") {
+    // A Conductor record, or a Task-in-the-box link, is a link that was
+    // opened, never a conversation Relay holds: until the agent there stamps
+    // the Task Started, Execute asks again.
+    const linkOnly = (session) => session?.provider === "conductor" || session?.taskLink === true;
+    if (!record?.session || record.phase === "preparing" || linkOnly(record.session)) {
       const options = nativeApi.nativeProviders();
       if (!options.length) throw new Error("Install and sign in to the Codex or Claude desktop app to use Execute.");
       const chosen = await choose(options, nativeApi.executionPreferences(config));
@@ -133,7 +143,7 @@ export async function executeNativeTask({ id, config, client, choose, consent, o
       const brief = await client.fetchRelay(id);
       const title = String((brief.packet || brief.relay || brief).title || "Relay Task").slice(0, 200);
       nativeApi.setExecutionPreferences(config, { cwd: chosen.cwd });
-      save({ phase: "preparing", messageId: randomUUID(), title, ...(record?.session?.provider === "conductor" ? { session: null } : {}) });
+      save({ phase: "preparing", messageId: randomUUID(), title, ...(linkOnly(record?.session) ? { session: null } : {}) });
       if (selected.provider === "conductor") {
         if (!allowed()) throw new Error("Device execution was disabled or the account changed. No prompt was sent.");
         // The link carries one sentence naming this exact Task, never its
@@ -145,6 +155,22 @@ export async function executeNativeTask({ id, config, client, choose, consent, o
         await open(conductorLink({ prompt: conductorTaskPrompt({ id, title }), path: chosen.cwd }));
         save({ phase: "conductor_opened" });
         return { ok: true, awaitingCreate: true, message: CONDUCTOR_TASK_WAITING };
+      }
+      // With Remote Control on for all sessions, Claude holds a pushed
+      // message until the person's next turn, so the automatic launch cannot
+      // start there. Decided before anything is sent: one conversation,
+      // opened through Claude's link with the Task in the box, Enter starts it.
+      if (selected.provider === "claude" && typeof nativeApi.prepareClaudeTaskLink === "function") {
+        let preflight = null;
+        try { preflight = typeof nativeApi.claudeLaunchPreflight === "function" ? await nativeApi.claudeLaunchPreflight() : null; } catch { /* diagnostics only */ }
+        if (preflight?.remoteControlDefault === true) {
+          if (!allowed()) throw new Error("Device execution was disabled or the account changed. No prompt was sent.");
+          nativeApi.prepareClaudeTaskLink({ id, cwd: chosen.cwd, title, packet: brief.packet || brief.relay || brief, preflight: { ...preflight, reason: "remote_control" },
+            persist: (session) => save({ session, phase: "task_link_opening", draftError: null }) });
+          await open(record.session.url);
+          save({ phase: "task_link_opened" });
+          return { ok: true, awaitingSend: true, message: `${CLAUDE_TASK_LINK_WAITING}, and choose the ${folderName(chosen.cwd)} folder if Claude asks.` };
+        }
       }
       // An untrusted folder cannot be imported; Claude's own folder prompt is
       // the only way in. Everything else tries the automatic launch first.
@@ -188,7 +214,11 @@ export async function executeNativeTask({ id, config, client, choose, consent, o
     if (!allowed()) throw new Error("Device execution was disabled or the account changed. No prompt was sent.");
     save({ phase: "submitting", draftError: null, startedAt: reserved.startedAt, taskClaim: reserved.taskClaim, taskRunOwner: reserved.taskRunOwner });
     await nativeApi.submitNativeTurn(record.session, ready, executionPrompt(packet, id, record.session), record.messageId);
-    save({ phase: "accepted", draftError: null });
+    // Delivered is not launched. Claude can hold the pushed Task until the
+    // person's next turn; only an answer from the model counts as a start.
+    const started = typeof nativeApi.nativeTurnStarted === "function" ? await nativeApi.nativeTurnStarted(record.session, record.messageId) : true;
+    save({ phase: "accepted", draftError: null, ...(started ? { turnStartedAt: new Date().toISOString() } : { deliveredIdleAt: new Date().toISOString() }) });
+    if (!started) return { ok: true, deliveredIdle: true, message: `${native.CLAUDE_DELIVERED_NOT_STARTED}.` };
     return { ok: true, message: `Task launched in ${record.session.provider === "claude" ? "Claude Code" : "Codex"}. Continue there.` };
   } catch (error) {
     if (record?.phase === "submitting") save({ phase: "uncertain" });

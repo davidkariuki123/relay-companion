@@ -4,13 +4,41 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { claudeLaunchPreflight, prepareClaudeDraft, findClaudeDraftSession } from "../src/claude-task-fallback.js";
+import { claudeLaunchPreflight, prepareClaudeDraft, findClaudeDraftSession, prepareClaudeTaskLink } from "../src/claude-task-fallback.js";
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-claude-draft-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
 }
+test("the Task-in-the-box link names the Task, folder and project, carries the person's words as far as the link allows, never the agent document", (t) => {
+  const root = fixture(t), cwd = path.join(root, "work");
+  fs.mkdirSync(cwd);
+  let persisted;
+  const packet = { forHuman: "Please set the homepage.", forAgent: "agent-only-context", source: { workspace: { label: "relay-companion" } } };
+  const link = prepareClaudeTaskLink({ id: "relay_1", cwd, title: "Set the\nhomepage", packet, preflight: { remoteControlDefault: true }, persist: (s) => { persisted = s; } });
+  assert.equal(persisted, link);
+  assert.equal(link.taskLink, true);
+  assert.equal(link.preflight.remoteControlDefault, true);
+  const url = new URL(link.url);
+  assert.equal(url.searchParams.get("folder"), cwd);
+  const q = url.searchParams.get("q");
+  assert.equal(q, link.taskPrompt);
+  assert.match(q, /Relay Task relay_1 \(“Set the homepage”\)/);
+  assert.match(q, /relay_inbox_list with relayIds \["relay_1"\]/);
+  assert.ok(q.includes(`carry it out in ${cwd}, their checkout of the relay-companion project`));
+  assert.match(q, /relay_task_start[\s\S]*relay_task_complete/);
+  assert.match(q, /For the person:\nPlease set the homepage\.$/);
+  assert.doesNotMatch(q, /agent-only-context/);
+  assert.equal(fs.readdirSync(cwd).length, 0, "no transcript: Claude creates the conversation itself");
+  const long = prepareClaudeTaskLink({ id: "relay_1", cwd, title: "T", packet: { forHuman: "word ".repeat(2000) }, persist: () => {} });
+  assert.ok(long.url.length <= 2000, `link stays within protocol-handler limits (${long.url.length})`);
+  assert.match(long.taskPrompt, /For the person:\nword word[\s\S]*…$/);
+  assert.match(long.taskPrompt, /relay_task_complete/, "the instructions are never the part that is cut");
+  const bare = prepareClaudeTaskLink({ id: "relay_1", cwd, title: "", packet: {}, persist: () => {} });
+  assert.doesNotMatch(bare.taskPrompt, /For the person/);
+  assert.throws(() => prepareClaudeTaskLink({ id: "", cwd, title: "T", packet: {}, persist: () => {} }), /Nothing to run/);
+});
 test("preflight counts live desktop processes, not working tasks or the RC default", async (t) => {
   const root = fixture(t);
   const put = (name, value) => fs.writeFileSync(path.join(root, name), JSON.stringify(value));

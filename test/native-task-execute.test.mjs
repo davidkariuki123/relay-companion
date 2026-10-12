@@ -4,8 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { executeNativeTask, executionPrompt, executionRecord, pendingNativeDrafts, nativeExecutionStatus } from "../src/native-task-execute.js";
-import { prepareClaudeDraft } from "../src/claude-task-fallback.js";
-import { claudeWorkspaceTrusted, executionEnabled, executionMode, executionPreferences, setExecutionPreferences, nativeProgress, nativeSessionReady, prepareNativeSession, selectCodexModel, submitNativeTurn } from "../src/native-task-launch.js";
+import { prepareClaudeDraft, prepareClaudeTaskLink } from "../src/claude-task-fallback.js";
+import { CLAUDE_DELIVERED_NOT_STARTED, claudeTurnStartedAfter, claudeWorkspaceTrusted, executionEnabled, executionMode, executionPreferences, setExecutionPreferences, nativeProgress, nativeSessionReady, prepareNativeSession, selectCodexModel, submitNativeTurn } from "../src/native-task-launch.js";
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-native-test-"));
@@ -35,6 +35,7 @@ function fixture(t) {
       prepareNativeSession: async ({ persist }) => { calls.push("prepare"); persist(session); return session; },
       nativeSessionReady: async () => { calls.push("ready"); return {}; },
       submitNativeTurn: async () => { calls.push("submit"); },
+      nativeTurnStarted: async () => true,
     },
   };
   return { root, config, args, calls, session };
@@ -396,6 +397,74 @@ test("Codex task_complete with an error is a failed turn, not success", (t) => {
   assert.match(nativeProgress({ provider: "codex", transcript }), /could not finish/);
   fs.appendFileSync(transcript, JSON.stringify({ type: "event_msg", payload: { type: "task_complete", last_agent_message: "Actual answer" } }) + "\n");
   assert.match(nativeProgress({ provider: "codex", transcript }), /finished a turn/);
+});
+
+test("delivered is not launched: a Task Claude is holding is reported as not started, never as working", async (t) => {
+  const { args, config, session, root } = fixture(t);
+  const transcript = path.join(root, "held.jsonl");
+  session.transcript = transcript;
+  // Claude wrote the pushed message to the conversation and did nothing else.
+  args.nativeApi.nativeTurnStarted = async (_session, messageId) => {
+    fs.writeFileSync(transcript, JSON.stringify({ type: "user", uuid: messageId, message: { role: "user", content: "the Task" } }) + "\n");
+    return false;
+  };
+  const result = await executeNativeTask(args);
+  assert.equal(result.deliveredIdle, true);
+  assert.match(result.message, /not started yet/);
+  const record = executionRecord(config, args.id);
+  assert.equal(record.phase, "accepted", "the Task is in that conversation; Relay never sends it twice");
+  assert.ok(record.deliveredIdleAt);
+  assert.equal(record.turnStartedAt, undefined);
+  assert.equal(nativeExecutionStatus(record), CLAUDE_DELIVERED_NOT_STARTED);
+  // The moment the model answers, the same record reads as working.
+  fs.appendFileSync(transcript, JSON.stringify({ type: "assistant", entrypoint: "claude-desktop", message: { stop_reason: "tool_use" } }) + "\n");
+  assert.match(nativeExecutionStatus(record), /Working in Claude Code/);
+  const rows = fs.readFileSync(transcript, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(claudeTurnStartedAfter(rows, record.messageId), true);
+  assert.equal(claudeTurnStartedAfter(rows.slice(0, 1), record.messageId), false);
+  assert.equal(claudeTurnStartedAfter(rows, "some-other-message"), false);
+  // A launch the model answered records when it started.
+  const g = fixture(t);
+  await executeNativeTask({ ...g.args, id: "relay-started" });
+  assert.ok(executionRecord(g.config, "relay-started").turnStartedAt);
+});
+
+test("Remote Control on for all sessions opens one conversation with the Task in the box; nothing is pushed or reserved", async (t) => {
+  const { args, calls, config, root } = draftFixture(t);
+  args.nativeApi.claudeWorkspaceTrusted = () => true;
+  args.nativeApi.claudeLaunchPreflight = async () => ({ manual: false, reason: "headroom", remoteControlDefault: true });
+  args.nativeApi.prepareClaudeTaskLink = prepareClaudeTaskLink;
+  args.client.fetchRelay = async () => { calls.push("fetch"); return { packet: { title: "Fix the login bug", forHuman: "Please fix the login bug today.", forAgent: "Long context.", source: { workspace: { label: "relay" } } } }; };
+  const result = await executeNativeTask(args);
+  assert.equal(result.awaitingSend, true);
+  assert.match(result.message, /press Enter/);
+  assert.deepEqual(calls, ["gate", "consent", "fetch", "open"]);
+  const record = executionRecord(config, args.id);
+  assert.equal(record.phase, "task_link_opened");
+  assert.equal(record.session.taskLink, true);
+  assert.equal(record.session.preflight.reason, "remote_control");
+  const url = new URL(record.session.url);
+  assert.equal(url.searchParams.get("folder"), root);
+  const q = url.searchParams.get("q");
+  assert.match(q, /Relay Task relay-test \(“Fix the login bug”\)/);
+  assert.match(q, /relay_task_start/);
+  assert.ok(q.includes(`carry it out in ${root}, their checkout of the relay project`));
+  assert.match(q, /For the person:\nPlease fix the login bug today\./);
+  assert.doesNotMatch(q, /Long context/);
+  assert.match(nativeExecutionStatus(record), /press Enter there to start/);
+  assert.deepEqual(pendingNativeDrafts(config), [], "nothing to observe: the agent there stamps the Task itself");
+  // Execute again asks again and reopens the link; Relay never pushes into a
+  // conversation it cannot see.
+  calls.length = 0;
+  await executeNativeTask(args);
+  assert.deepEqual(calls, ["gate", "fetch", "open"]);
+  assert.equal(executionRecord(config, args.id).phase, "task_link_opened");
+  // With the setting off, the automatic launch runs exactly as before.
+  args.nativeApi.claudeLaunchPreflight = async () => ({ manual: false, reason: "headroom", remoteControlDefault: false });
+  calls.length = 0;
+  await executeNativeTask({ ...args, id: "relay-test-2" });
+  assert.deepEqual(calls, ["gate", "fetch", "prepare", "open", "ready", "reserve", "fetch", "submit"]);
+  assert.equal(executionRecord(config, "relay-test-2").phase, "accepted");
 });
 
 test("Settings offers Auto or Manual for Tasks, and main accepts only those two", () => {

@@ -186,7 +186,7 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   catch (error) { services = { ok: false, status: "service-repair-failed", lastError: error.message }; }
   const serviceQueryUncertain = /^service-registration-query-failed/.test(services.lastError || "");
   if (reservedService && (serviceQueryUncertain || services.status === "deferred-update-owner" || (services.ok && !services.changed))) progress.refund("services");
-  const ready = (target = null, after = 0) => verifyReady({ homeDir, platform, target, after, now, sleep, health });
+  const ready = (target = null, after = 0, extra = {}) => verifyReady({ homeDir, platform, target, after, now, sleep, health, ...extra });
   const rememberReady = observed => {
     progress.clearObservation();
     const active = observed?.current || read(path.join(root, "runtime", "current.json"));
@@ -201,7 +201,11 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     }
     return probation;
   };
-  const proven = (value, observed) => { const probation = rememberReady(observed); return status({ ...value, runtimeHealthy: !observed.legacy, runtimeAvailable: true, runtimeProven: probation.proven, probationRemainingMs: probation.remainingMs }); };
+  // What the next check needs to recognise this runtime as the one proven
+  // here: the readiness identity, the heartbeat and the loop sequence it saw.
+  const proven = (value, observed) => { const probation = rememberReady(observed); return status({ ...value, runtimeHealthy: !observed.legacy, runtimeAvailable: true, runtimeProven: probation.proven, probationRemainingMs: probation.remainingMs,
+    readyIdentity: observed.identity || null, heartbeatAt: Number.isFinite(observed.heartbeatAt) ? observed.heartbeatAt : null,
+    progressSequence: Number.isSafeInteger(observed.progressSequence) ? observed.progressSequence : null, readyContinued: observed.continued === true }); };
   const stateFile = path.join(root, "recovery", "status.json");
   const configFile = env.RELAY_CONFIG || path.join(env.RELAY_CONFIG_DIR || root, "config.json");
   const recoveredConfig = require("./recovery-config.cjs").loadRecoveryConfig(configFile);
@@ -296,8 +300,21 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     if (!installedIsDesired) await discoverDesired();
     if (live && platform === "darwin" && !services.ok) live.ok = false;
     let readiness = null;
+    const cadence = platform === "darwin" && read(path.join(root, "recovery", "scheduler.json"))?.intervalSeconds !== 60 ? 5 * 60_000 : CHECK_MS;
     if (installedIsDesired && heartbeatFresh && heartbeat.version === current.version && live.ok) {
-      const observed = await ready(current);
+      // A runtime this runner proved healthy on its previous check, still the
+      // same daemon under the same release, is asked for one full sample
+      // showing it has beaten and worked since. The ten-second stability
+      // window remains for everything nothing has vouched for: a new daemon
+      // pid, a new release, a check that found it unhealthy, a runtime still
+      // on probation, or a previous check too long ago to count as recent.
+      const continuity = previous?.ok === true && previous.runtimeHealthy === true && previous.runtimeProven === true
+        && ["current", "ahead"].includes(previous.status) && previous.version === current.version
+        && typeof previous.readyIdentity === "string" && previous.readyIdentity.startsWith(`${current.packageRoot}:${heartbeat.pid}:`)
+        && Number.isFinite(previous.checkedAt) && now() - previous.checkedAt <= 3 * cadence
+        ? { identity: previous.readyIdentity, heartbeatAt: previous.heartbeatAt, progressSequence: previous.progressSequence ?? null }
+        : null;
+      const observed = await ready(current, 0, continuity ? { continuity } : {});
       readiness = observed;
       if (observed.ok) {
         await discoverDesired();
@@ -330,7 +347,6 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
     if (installedIsDesired) {
       repairState.version = current.version;
       repairState.restarts = progress.count(`restart:${current.packageRoot || current.version}`);
-      const cadence = platform === "darwin" && read(path.join(root, "recovery", "scheduler.json"))?.intervalSeconds !== 60 ? 5 * 60_000 : CHECK_MS;
       const incarnation = read(path.join(root, "recovery", "daemon-progress.json"));
       const identity = JSON.stringify([current.packageRoot, current.version, current.committedAt,
         heartbeat?.pid, incarnation?.pid === heartbeat?.pid ? incarnation?.startedAt : null]);

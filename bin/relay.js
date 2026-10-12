@@ -866,15 +866,33 @@ async function cmdPill(flags = {}, positional = []) {
 async function cmdDoctor(flags = {}) {
   const { collectCompanionFleetTelemetry } = await import("../src/fleet-telemetry.js");
   const health = { ...collectCompanionFleetTelemetry(), hookRetirement: agentHookRetirementStatus() };
-  const { describeInstallationHealth } = await import("../bootstrap/installation-health.cjs");
+  const { describeInstallationHealth, describePillLiveness } = await import("../bootstrap/installation-health.cjs");
   const serviceStatus = describeInstallationHealth(health.installation);
+  // launchd starts the pill through this link. A dangling one leaves the app
+  // closed (EX_CONFIG) while everything else here looks healthy (Sven, 2026-10-12).
+  const pillLink = process.platform === "darwin"
+    ? createRequire(import.meta.url)("../bootstrap/mac-background-identity.cjs").inspectStablePillLink({ homeDir: os.homedir() })
+    : null;
+  // Only a pill plist that launches through the link is broken by it.
+  const pillLinkBroken = pillLink?.symlink === true && !pillLink.resolves && (() => {
+    try {
+      return fsSync.readFileSync(path.join(os.homedir(), "Library", "LaunchAgents", "work.relay.companion.pill.plist"), "utf8").includes(pillLink.link);
+    } catch { return false; }
+  })();
   if (flags.json) {
     console.log(JSON.stringify({ schema: 1, cliVersion: companionVersion(), ...health,
-      ok: health.installation.health?.state === "healthy", serviceStatus }, null, 2));
+      ...(pillLink ? { pillLink: { ...pillLink, ...(pillLinkBroken ? { repair: "relay repair-installation" } : {}) } } : {}),
+      ok: health.installation.health?.state === "healthy" && !pillLinkBroken, serviceStatus }, null, 2));
     return;
   }
   const hooks = health.hookRetirement;
   console.log(`  health: ${serviceStatus}`);
+  if (pillLinkBroken) {
+    console.log(`  BROKEN app link: ${pillLink.link} -> ${pillLink.target || "unreadable"} (missing), so Relay cannot open`);
+    console.log("    fix with: relay repair-installation");
+  } else if (pillLink?.present) {
+    console.log("  app link: ok");
+  }
   console.log(`  retired Relay hooks still registered: ${hooks.registeredHandlers}`);
   if (hooks.unreadableFiles.length) console.log(`  hook cleanup could not inspect: ${hooks.unreadableFiles.join(", ")}`);
   if (hooks.registeredHandlers || hooks.unreadableFiles.length) console.log("    run: relay repair-installation");
@@ -885,6 +903,7 @@ async function cmdDoctor(flags = {}) {
   console.log(`  installation: ${installation.installationId || "not yet assigned"}`);
   console.log(`  OS: ${installation.os} ${installation.osVersion} (${installation.arch})`);
   console.log(`  daemon responding: ${installation.daemonResponsive ? "yes" : "not verified"}`);
+  console.log(`  app: ${describePillLiveness(installation.pill)}`);
   for (const component of installation.components) console.log(`  ${component.role}: ${component.version || "unknown version"} × ${component.count}`);
   console.log(`  component health: ${installation.duplicates ? "duplicate services" : installation.mixed ? "mixed versions" : "see reported processes above"}`);
   console.log(`  independent recovery: ${installation.recovery?.status || "not reported"} (checked ${installation.recovery?.checkedAt || "never"})`);
@@ -1283,6 +1302,12 @@ let trampolineArrival = null;
 
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
+  // First, before any hand-off: an older updater runs this release's CLI as its
+  // startup check, and that is the one chance to clear a dangling pill link it
+  // would otherwise fail on forever (see healDanglingPillLink).
+  if (process.platform === "darwin") {
+    try { createRequire(import.meta.url)("../bootstrap/mac-service-recovery.cjs").healDanglingPillLink(); } catch {}
+  }
   // The one-time full migration bridge still publishes bin/relay.js so older
   // fleets can reach it. A human's first `setup`, however, must exercise the
   // same signed canonical bootstrap and release canary as the later thin

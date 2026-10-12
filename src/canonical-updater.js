@@ -38,10 +38,10 @@ const {
 
 export { exactRuntimeHealth };
 
-export async function installSignedRuntimeCandidate({ stagingRoot, version, platform = process.platform } = {}) {
+export async function installSignedRuntimeCandidate({ stagingRoot, version, platform = process.platform, log } = {}) {
   try {
     const expectedPlatform = releasePlatform(platform, process.arch);
-    await stageVerifiedRuntime({ version, platformKey: expectedPlatform, destination: stagingRoot });
+    await stageVerifiedRuntime({ version, platformKey: expectedPlatform, destination: stagingRoot, ...(log ? { log } : {}) });
     return { ok: true, source: "signed-runtime-artifact" };
   } catch (error) {
     return { ok: false, detail: error?.message || String(error) };
@@ -376,7 +376,10 @@ export async function runCanonicalUpdateTransaction({
     platform,
     node: serviceNode,
     npmCommand: npmExecutable,
-    installCandidate: (options) => stage("download-and-extract", () => installCandidate(options)),
+    // The download's own progress lines (resumed from, every 10%) go to the
+    // same update.log as the stage lines, so a slow or flaky download is
+    // readable afterwards instead of a silent gap before a timeout.
+    installCandidate: (options) => stage("download-and-extract", () => installCandidate({ ...options, log })),
     protectedPackageRoots,
     normalizePreviousTarget: (target) => ({
       ...target,

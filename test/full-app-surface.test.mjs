@@ -54,6 +54,7 @@ function harness() {
     function setOverlayElevated(next) { if (appSurface) next = false; overlayElevated = Boolean(next); calls.push(["elevated", overlayElevated]); }
     function showOverlayWindow() { calls.push(["show"]); }
     function reinforceSpacePresence() {}
+    function syncAppBadge() {}
     function setImmediate(fn) { fn(); }
     function setTimeout() {}
     ${block}
@@ -163,6 +164,7 @@ function windowsHarness({ platform = "win32", topmost = true } = {}) {
     let cardSize = { w: 344, h: 524 };
     let overlayElevated = true;
     function setCompanionAppWindow(w, on, { owner }) { calls.push(["appWindow", on, owner && owner.id]); }
+    function syncAppBadge() {}
     ${block}
     pillTopmost = topmost;
     return {
@@ -226,4 +228,21 @@ test("Windows and Linux become the full app before growing and the pill after sh
   assert.match(main, /if \(appSurface \|\| appWindow\) return; \/\/ the full app fills the screen/);
   assert.match(main, /const maximum = appWindow \? \{ w: wa\.width, h: wa\.height \} : CARD_MAX;/, "re-showing the full app never shrinks it");
   assert.match(main, /\}, \{ owner: pillOwner \}\);\n\s+setPillAppDetails\(\);/, "the pill is created owned and carries Relay's taskbar identity");
+});
+
+// The full app on Windows (Shane, 2026-10-12): main keeps the native window
+// inside the work area, so a card sized to the whole screen ran under the
+// taskbar and the sidebar list's last rows could not be scrolled to.
+test("off the Mac the full app is sized to the work area, clear of the taskbar", () => {
+  const start = html.indexOf("function wideSize() {");
+  const body = html.slice(start, html.indexOf("\n  }\n", start) + 4);
+  const wideSize = (platform) => Function("window", "navigator", `
+    const WIDE = { w: 1200, h: 800 }, READER = { w: 720, h: 600 }, EXPANDED = { w: 344, h: 524 };
+    const payload = { features: { fullAppExpand: true } };
+    const surfaceFullSize = null;
+    ${body}
+    return wideSize();
+  `)({ screen: { width: 1600, height: 1000, availWidth: 1600, availHeight: 952, availTop: 0 } }, { platform, userAgent: "" });
+  assert.deepEqual(wideSize("Win32"), { w: 1600, h: 952 }, "the taskbar's strip is left out");
+  assert.deepEqual(wideSize("MacIntel"), { w: 1600, h: 1000 }, "the Mac still covers the Dock's strip");
 });

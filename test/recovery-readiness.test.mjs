@@ -152,3 +152,59 @@ test("Mac readiness distinguishes missing heartbeat evidence from launchd proces
   assert.equal(result.ok, false);
   assert.match(result.detail, /launchd-jobs-not-matching-heartbeat:daemon=12,pill=13,heartbeat=missing/);
 });
+
+// Between the enumeration that opens the healthy window and the one that
+// closes it, liveness is checked by pid. On Windows a full sample is a
+// PowerShell/WMI listing of every process; one every second, every minute,
+// was most of what the recovery task cost a laptop.
+test("the healthy window enumerates processes at its start and end and checks pids in between", async () => {
+  const samples = [];
+  const result = await probe(() => ({ health: (_current, options) => {
+    samples.push(options.full ? "full" : `pids:${options.watched.daemon}/${options.watched.pill}`);
+    return { ok: true };
+  } }));
+  assert.equal(result.ok, true);
+  assert.equal(samples[0], "full");
+  assert.equal(samples.at(-1), "full");
+  assert.equal(samples.filter((sample) => sample === "full").length, 2);
+  assert.deepEqual([...new Set(samples.slice(1, -1))], ["pids:12/13"]);
+});
+
+test("a watched process that dies between enumerations resets the window", async () => {
+  const result = await probe(({ now }) => ({ health: (_current, options) => ({ ok: options.full || now() !== 105000 }) }));
+  assert.equal(result.ok, true); assert.equal(result.heartbeatAt, 115000);
+});
+
+test("a legacy runtime, whose probe names no pids, is enumerated on every sample", async () => {
+  let full = 0;
+  const result = await probe(() => ({ probe: async () => ({ ok: true, legacy: true }), health: (_current, options) => { if (options.full) full++; return { ok: true }; } }));
+  assert.equal(result.ok, true); assert.equal(full, 11);
+});
+
+// A runtime the previous check proved, still the same identity, that has
+// beaten and progressed since then, needs one full sample, not a new window.
+const IDENTITY = "/relay/node_modules/relay-companion:12:13:daemon:renderer";
+test("continuity from the previous check lets a live, advancing runtime pass on one enumeration", async () => {
+  let sampled = 0;
+  const result = await probe(() => ({ continuity: { identity: IDENTITY, heartbeatAt: 95000, progressSequence: null }, health: () => { sampled++; return { ok: true }; } }));
+  assert.equal(result.ok, true); assert.equal(result.continued, true); assert.equal(sampled, 1); assert.equal(result.identity, IDENTITY);
+});
+
+for (const [name, continuity] of [
+  ["a different runtime identity", { identity: "/relay/node_modules/relay-companion:12:13:other", heartbeatAt: 95000 }],
+  ["a heartbeat that has not advanced since", { identity: IDENTITY, heartbeatAt: 100000 }],
+]) test(`continuity with ${name} does not shorten the proof`, async () => {
+  let sampled = 0;
+  const result = await probe(() => ({ continuity, health: () => { sampled++; return { ok: true }; } }));
+  assert.equal(result.ok, true); assert.notEqual(result.continued, true); assert.equal(sampled, 11);
+});
+
+test("continuity cannot vouch for loop progress it never recorded", async () => {
+  const progressing = (now) => ({ ok: true, daemon: { pid: 12, progress: { sequence: Math.floor(now() / 1000), at: now(), phase: "running" } }, pill: { pid: 13 }, identity: "daemon:renderer" });
+  const without = await probe(({ now }) => ({ requireProgress: true, continuity: { identity: IDENTITY, heartbeatAt: 95000, progressSequence: null }, probe: async () => progressing(now) }));
+  assert.equal(without.ok, true); assert.notEqual(without.continued, true);
+  const withSequence = await probe(({ now }) => ({ requireProgress: true, continuity: { identity: IDENTITY, heartbeatAt: 95000, progressSequence: 50 }, probe: async () => progressing(now) }));
+  assert.equal(withSequence.ok, true); assert.equal(withSequence.continued, true); assert.equal(withSequence.progressSequence, 100);
+  const stalled = await probe(({ now }) => ({ requireProgress: true, continuity: { identity: IDENTITY, heartbeatAt: 95000, progressSequence: 100 }, probe: async () => progressing(now) }));
+  assert.notEqual(stalled.continued, true);
+});

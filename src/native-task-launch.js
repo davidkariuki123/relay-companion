@@ -12,7 +12,7 @@ import installedApps from "./installed-apps.cjs";
 import { claudeHome, codexHome } from "./host-paths.js";
 import { configDir } from "./config.js";
 import atomicJson from "./atomic-json.cjs";
-export { claudeLaunchPreflight, prepareClaudeDraft, findClaudeDraftSession } from "./claude-task-fallback.js";
+export { claudeLaunchPreflight, prepareClaudeDraft, findClaudeDraftSession, prepareClaudeTaskLink } from "./claude-task-fallback.js";
 
 const { atomicWriteJsonSync } = atomicJson;
 const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; } };
@@ -273,6 +273,26 @@ export async function submitNativeTurn(session, ready, prompt, messageId) {
   throw new Error("Claude has not confirmed receipt. Open the existing conversation to check; Relay will not send the task twice.");
 }
 
+// A message in the transcript is delivery, not a start. Claude Desktop can
+// hold a pushed message until the person's next turn (seen on a Mac with
+// Remote Control on for all sessions, 2026-10-12), so "launched" means the
+// model answered it: an assistant row after the pushed one. Codex confirmed
+// the turn itself when it accepted the submission.
+export function claudeTurnStartedAfter(rows, messageId) {
+  const at = rows.findIndex((row) => row.type === "user" && row.uuid === messageId);
+  return at >= 0 && rows.slice(at + 1).some((row) => row.type === "assistant");
+}
+export async function nativeTurnStarted(session, messageId, { timeoutMs = 12000 } = {}) {
+  if (session.provider !== "claude") return true;
+  const deadline = Date.now() + timeoutMs;
+  do {
+    if (claudeTurnStartedAfter(nativeTranscriptRows(session), messageId)) return true;
+    await sleep(300);
+  } while (Date.now() < deadline);
+  return false;
+}
+export const CLAUDE_DELIVERED_NOT_STARTED = "Delivered to Claude · not started yet. Open the conversation to check";
+
 export function nativeTranscriptRows(session) {
   if (!session.transcript) return [];
   try {
@@ -287,12 +307,15 @@ export function nativeTranscriptRows(session) {
   } catch { return []; }
 }
 
-export function nativeProgress(session) {
+export function nativeProgress(session, { messageId } = {}) {
   const rows = nativeTranscriptRows(session);
   const last = rows.filter((r) => session.provider === "claude" ? ["user", "assistant"].includes(r.type) && r.entrypoint !== "relay-execute" : r.type === "event_msg").at(-1);
   if (!last) return "Waiting for the native app";
   if (session.provider === "claude") {
     if (last.type === "assistant" && last.message?.stop_reason === "end_turn") return "Claude finished a turn · continue in Claude Code";
+    // The pushed Task is the last thing in the conversation and nothing
+    // answered it: Claude is holding it, not working on it.
+    if (messageId && last.type === "user" && last.uuid === messageId) return CLAUDE_DELIVERED_NOT_STARTED;
     return "Working in Claude Code · approvals and follow-ups happen there";
   }
   if (last.payload?.type === "task_complete" && last.payload.error) return "Codex could not finish the turn · check the error in Codex";

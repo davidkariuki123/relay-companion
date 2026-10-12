@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const html = fs.readFileSync(new URL('../overlay/inbox.html', import.meta.url), 'utf8');
-const start = html.indexOf('      const canReact =');
+const start = html.indexOf('      const canReact = REACTIONS_ENABLED && !m.request');
 const end = html.indexOf('      const chunkDivider =', start);
 const pickerStart = html.indexOf('  function messageReactionPickerHtml(id)');
 const pickerEnd = html.indexOf('  async function commitReaction(', pickerStart);

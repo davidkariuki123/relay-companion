@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld("relay", {
   teachingEvent: (name, way) => ipcRenderer.send("relay:teachingEvent", String(name || ""), String(way || "")),
   // Which view the card is in (pill, banner, card, wide, hidden) and why it changed.
   viewState: (view, cause) => ipcRenderer.send("relay:viewState", String(view || ""), String(cause || "")),
+  // The unread count for the app icon, with the taskbar overlay drawn for Windows.
+  appBadge: (count, overlay) => ipcRenderer.send("relay:appBadge", Number(count) || 0, String(overlay || "")),
 
   // Relay rows
   open: (id, host) => ipcRenderer.send("relay:open", id, host),

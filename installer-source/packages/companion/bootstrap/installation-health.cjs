@@ -3,9 +3,85 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { runtimeProcessCommands, exactRuntimeHealth } = require("./runtime-health.cjs");
+const { spawnSync } = require("node:child_process");
+const { runtimeProcessCommands, exactRuntimeHealth, linuxPillStatusPath } = require("./runtime-health.cjs");
 const { progressPath, PROGRESS_FRESH_MS } = require("./daemon-progress.cjs");
 function read(file) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } }
+const defaultRun = (command, args) => spawnSync(command, args, { encoding: "utf8", timeout: 5_000, windowsHide: true });
+const commandOk = (result) => Boolean(result && !result.error && result.status === 0);
+const PILL_LABEL = "work.relay.companion.pill";
+
+// What the operating system says about the app (the pill), as opposed to what
+// the updater believes it did. Sven's pill was dead for two days on 2026-10-10
+// while the daemon kept reporting in and the fleet showed his machine healthy:
+// the launch agent's program path pointed at a deleted release. Whether a pill
+// process exists, whether its absence was chosen, how it last exited and whether
+// its registered launch path still resolves are the facts that would have said
+// so on the first day. Intent comes with it, so a pill someone quit or put away
+// is never an alarm.
+function pillLiveness({ homeDir, platform, env = process.env, live, current, run = defaultRun, now = Date.now() } = {}) {
+  const running = live?.pill === true;
+  let intent = "running";
+  try { if (require("./recovery-intent.cjs").stopped(homeDir)) intent = "stopped"; } catch {}
+  const statusPath = linuxPillStatusPath({ homeDir, env });
+  let lastSeenAt = null;
+  try {
+    const modified = Number(fs.statSync(statusPath).mtimeMs);
+    if (modified > 0 && modified <= now) lastSeenAt = new Date(modified).toISOString();
+  } catch {}
+  const status = read(statusPath);
+  if (intent === "running" && running && (status?.pillHidden === true || status?.dismissed === true)) intent = "hidden";
+  const pill = { running, intent, lastSeenAt, lastExit: null, launch: null };
+  try {
+    if (platform === "darwin") {
+      pill.launch = macPillLaunch({ homeDir, current, run });
+      if (!running) pill.lastExit = macPillLastExit(run);
+    } else if (platform === "linux" && !running) {
+      pill.lastExit = linuxPillLastExit(run);
+    }
+  } catch {}
+  return pill;
+}
+
+// Does the pill's registered launch path still lead to the release the launch
+// file names? A dangling or re-pointed ~/.relay/runtime/Relay.app link is
+// invisible to every process-based check until launchd fails to start the pill.
+function macPillLaunch({ homeDir, current, run }) {
+  const mac = require("./mac-service-recovery.cjs");
+  let record;
+  try { record = mac.readRegistration(PILL_LABEL, { homeDir, run }); }
+  catch (error) {
+    // The first token only (ENOENT, invalid-service-plist, ...): never a path.
+    return { ok: false, reason: `registration-invalid: ${String(error?.code || error?.message || "unknown").split(/[:\s]/)[0].slice(0, 40)}` };
+  }
+  if (record.releaseExecutable) {
+    const identity = require("./mac-background-identity.cjs");
+    const link = identity.inspectStablePillLink({ homeDir });
+    if (!link.present || !link.resolves) return { ok: false, reason: "link-dangling" };
+    const expected = path.resolve(record.releaseExecutable, "..", "..", "..");
+    const target = link.target ? path.resolve(path.dirname(link.link), link.target) : null;
+    if (target && target !== expected) return { ok: false, reason: "link-wrong-release" };
+  }
+  if (current?.packageRoot && record.packageRoot !== current.packageRoot) return { ok: false, reason: "registration-not-active-runtime" };
+  return { ok: true, reason: null };
+}
+
+function macPillLastExit(run) {
+  const userId = typeof process.getuid === "function" ? process.getuid() : 0;
+  const result = run("/bin/launchctl", ["print", `gui/${userId}/${PILL_LABEL}`]);
+  if (!commandOk(result)) return null;
+  const code = /\blast exit code = (\d+)/.exec(String(result.stdout || ""))?.[1];
+  return code === undefined ? null : { code: Number(code), reason: null };
+}
+
+function linuxPillLastExit(run) {
+  const result = run("systemctl", ["--user", "show", `${PILL_LABEL}.service`, "-p", "ExecMainStatus", "-p", "Result"]);
+  if (!commandOk(result)) return null;
+  const output = String(result.stdout || "");
+  const code = /\bExecMainStatus=(\d+)/.exec(output)?.[1];
+  const reason = /\bResult=([a-z-]+)/.exec(output)?.[1] || null;
+  return code === undefined && !reason ? null : { code: code === undefined ? null : Number(code), reason: reason ? reason.slice(0, 40) : null };
+}
 function installationId({ homeDir = os.homedir(), create = false } = {}) {
   const file = path.join(homeDir, ".relay", "installation-id.json");
   const existing = read(file);
@@ -36,7 +112,7 @@ function componentInventory(commands, activeVersion = null) {
   return { components: components.slice(0, 12), duplicates, mixed };
 }
 function collectInstallationHealth({ homeDir = os.homedir(), platform = process.platform, arch = process.arch,
-  osVersion = os.release(), commands, now = Date.now() } = {}) {
+  osVersion = os.release(), commands, now = Date.now(), run = defaultRun, env = process.env } = {}) {
   const root = path.join(homeDir, ".relay"), current = read(path.join(root, "runtime", "current.json"));
   const activeVersion = current?.active === true ? current.version : null;
   const processCommands = commands || runtimeProcessCommands(platform);
@@ -54,10 +130,15 @@ function collectInstallationHealth({ homeDir = os.homedir(), platform = process.
     && (!progressSupported || progressFresh));
   const componentNames = ["inbox-background", "agent-sessions", "topics", "tasks"];
   const unhealthyComponents = progressMatches ? componentNames.filter(name => ["failed", "stalled"].includes(progress.components?.[name])) : [];
+  const pill = pillLiveness({ homeDir, platform, env, live, current, run, now });
   let serviceHealth = { state: "healthy", reason: "ready", components: unhealthyComponents };
   if (!activeVersion) serviceHealth = { ...serviceHealth, state: "unverified", reason: "runtime-not-active" };
   else if (!live?.daemon) serviceHealth = { ...serviceHealth, state: "failed", reason: "daemon-missing" };
   else if (!daemonResponsive) serviceHealth = { ...serviceHealth, state: "failed", reason: "daemon-not-responsive" };
+  // A pill that was quit is waiting on the person; one that is simply gone is a
+  // failure of its own, named as such rather than folded into a process mismatch.
+  else if (!live?.pill && pill.intent === "stopped") serviceHealth = { ...serviceHealth, state: "waiting", reason: "pill-stopped" };
+  else if (!live?.pill) serviceHealth = { ...serviceHealth, state: "failed", reason: "pill-missing" };
   else if (!live?.ok) serviceHealth = { ...serviceHealth, state: "failed", reason: "service-process-mismatch" };
   else if (unhealthyComponents.length) serviceHealth = { ...serviceHealth, state: "degraded", reason: "component-failed" };
   else if (progressMatches && ["offline", "signed-out"].includes(progress.phase)) serviceHealth = { ...serviceHealth, state: "waiting", reason: progress.phase };
@@ -69,7 +150,7 @@ function collectInstallationHealth({ homeDir = os.homedir(), platform = process.
   };
   return {
     installationId: installationId({ homeDir }), os: platform, osVersion: osVersion.slice(0, 80), arch,
-    ...inventory, daemonResponsive, health: serviceHealth,
+    ...inventory, daemonResponsive, health: serviceHealth, pill,
     recovery: supervisor || monitorFailure ? { status: supervisor?.status || monitor.state, version: supervisor?.launcherVersion || null,
       checkedAt: supervisor?.checkedAt > 0 ? new Date(supervisor.checkedAt).toISOString() : null,
       desiredVersion: supervisor?.desiredVersion || null,
@@ -90,9 +171,22 @@ function describeInstallationHealth(installation) {
   const reason = installation?.health?.reason;
   const message = ({ "daemon-missing": "Background service stopped", "daemon-not-responsive": "Background service is not responding",
     "service-process-mismatch": "Relay services are not running together correctly", "component-failed": "An optional background component needs attention",
+    "pill-missing": "Relay app is not running", "pill-stopped": "Relay app was quit",
     "recovery-failed": "Recovery needs attention", "offline": "Waiting for Relay's connection", "signed-out": "Waiting for sign-in",
     "runtime-not-active": "Runtime health has not been verified", "legacy-readiness": "Background service running; readiness not verified",
     "ready": "Relay is running" })[reason] || "Runtime health has not been verified";
   return message + (["restarting", "reactivating", "restoring-local", "downloading"].includes(installation?.recovery?.status) ? "; recovery in progress" : "");
 }
-module.exports = { installationId, componentInventory, collectInstallationHealth, recordTransport, describeInstallationHealth };
+/** One doctor line about the app, from the OS facts above. */
+function describePillLiveness(pill) {
+  if (!pill) return "not reported";
+  if (pill.running) return pill.intent === "hidden" ? "running, hidden by choice" : "running";
+  if (pill.intent === "stopped") return "not running; it was quit on purpose (relay pill starts it again)";
+  const parts = [`NOT running${pill.lastSeenAt ? ` since ${pill.lastSeenAt}` : ""}`];
+  if (pill.lastExit && pill.lastExit.code !== null) parts.push(`last exit code ${pill.lastExit.code}${pill.lastExit.reason ? ` (${pill.lastExit.reason})` : ""}`);
+  else if (pill.lastExit?.reason) parts.push(`last exit ${pill.lastExit.reason}`);
+  if (pill.launch && pill.launch.ok === false) parts.push(`cannot launch: ${pill.launch.reason}`);
+  parts.push("fix with: relay repair-installation");
+  return parts.join("; ");
+}
+module.exports = { installationId, componentInventory, collectInstallationHealth, recordTransport, describeInstallationHealth, describePillLiveness, pillLiveness };

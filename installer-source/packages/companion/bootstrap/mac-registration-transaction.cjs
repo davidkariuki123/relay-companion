@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
-const { LABELS, registration, readRegistration } = require("./mac-service-recovery.cjs");
+const { LABELS, alignPillLink, registration, readRegistration } = require("./mac-service-recovery.cjs");
 const defaultRun = (cmd, args, options = {}) => spawnSync(cmd, args, { encoding: "utf8", timeout: 10_000, windowsHide: true, ...options });
 const snapshotPath = homeDir => path.join(homeDir, ".relay", "runtime", "mac-registrations.json");
 const ok = r => Boolean(r && !r.error && r.status === 0);
@@ -119,6 +119,11 @@ async function restoreSnapshot({ homeDir = os.homedir(), fsImpl = fs, run = defa
       return readRegistration(label, { homeDir, fsImpl, run, contents: saved.bytes });
     });
     if (records.some(record => record.packageRoot !== snapshot.previousRoot) || (expectedRoot && expectedRoot !== snapshot.previousRoot)) throw Error("registration-snapshot-target-mismatch");
+    // The restored pill plist names ~/.relay/runtime/Relay.app, which the failed
+    // activation re-pointed at its own release; that release is deleted once the
+    // rollback succeeds. Point the link back before anything is relaunched.
+    // Fail open: cleanup keeps whatever release the link still points into.
+    try { if (alignPillLink(records, { homeDir, fsImpl }).changed) changed = true; } catch {}
     // Restore both durable files first. Interruption here is replayed from the
     // intact snapshot; the application tree is never needed to regenerate them.
     for (const record of records) {

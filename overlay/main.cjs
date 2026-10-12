@@ -21,6 +21,7 @@
 
 const { app, dialog, BaseWindow, BrowserWindow, Menu, Tray, clipboard, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, shell, screen, systemPreferences } = require("electron");
 const { createCompanionWindow, createCompanionWindowOwner, setCompanionAppWindow } = require("./companion-window.cjs");
+const { applyAppBadge } = require("./app-badge.cjs");
 const { createFirstRelayOnboarding, firstMintedLink } = require("./first-relay-onboarding.cjs");
 const { createAgentOnboarding } = require("./agent-onboarding.cjs");
 const { createAgentConnections } = require("./agent-connections.cjs");
@@ -1119,11 +1120,12 @@ function nativeExecutionSummary(rows) {
   return Object.fromEntries(rows.flatMap((row) => {
     const record = nativeTaskModules.execute.executionRecord(config, row.id);
     if (!record?.session) return [];
-    // A Conductor record is only "a link was opened". Once the agent there has
-    // stamped the Task, the server's record is the state and this one retires;
-    // an account that lost the Conductor row never sees it named.
-    if (record.session.provider === "conductor"
-      && (!conductorOn || row.taskStartedAt || row.taskCompletedAt || row.taskRejectedAt || row.taskCancelledAt)) return [];
+    // A Conductor record, or a Task-in-the-box Claude link, is only "a link
+    // was opened". Once the agent there has stamped the Task, the server's
+    // record is the state and this one retires; an account that lost the
+    // Conductor row never sees it named.
+    const linkOnly = record.session.provider === "conductor" || record.session.taskLink === true;
+    if (linkOnly && ((record.session.provider === "conductor" && !conductorOn) || row.taskStartedAt || row.taskCompletedAt || row.taskRejectedAt || row.taskCancelledAt)) return [];
     const status = nativeTaskModules.execute.nativeExecutionStatus(record);
     return [[row.id, { phase: record.phase, provider: record.session.provider, status }]];
   }));
@@ -6531,6 +6533,7 @@ function enterAppSurface() {
     Promise.resolve(app.dock.show()).catch(() => {}).then(() => {
       // Showing in the Dock can reorder the window; the app is the one in front.
       if (appSurface && win && !win.isDestroyed()) { try { app.focus({ steal: true }); win.focus(); } catch {} }
+      syncAppBadge();
     });
   } else {
     try { win.focus(); } catch {}
@@ -6629,6 +6632,9 @@ function enterAppWindow() {
   try { win.setAlwaysOnTop(false); } catch {}
   try { setCompanionAppWindow(win, true, { owner: pillOwner }); } catch {}
   try { win.focus(); } catch {}
+  // The taskbar button is new, and an overlay set before it existed is lost.
+  syncAppBadge();
+  setTimeout(syncAppBadge, 300);
 }
 function exitAppWindow() {
   if (!appWindow) return;
@@ -9526,6 +9532,21 @@ ipcMain.on("relay:teachingEvent", (event, name, way) => {
 });
 // The card's own view (pill, banner, card, wide or hidden) and what caused
 // the change; main adds whether the window is on screen (view-telemetry.cjs).
+// The pill's unread count, put on the app icon (app-badge.cjs). It is visible
+// only while Relay is the full app: that is when Relay has a Dock icon or a
+// taskbar button. The overlay image is the renderer's drawing of the number.
+let appBadge = { count: 0, overlay: "" };
+function syncAppBadge() {
+  applyAppBadge({ app, win, nativeImage, count: appBadge.count, overlayDataUrl: appBadge.overlay });
+}
+ipcMain.on("relay:appBadge", (event, count, overlay) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  const image = typeof overlay === "string" && overlay.startsWith("data:image/png;base64,") && overlay.length < 65536 ? overlay : "";
+  if (n === appBadge.count && image === appBadge.overlay) return;
+  appBadge = { count: n, overlay: image };
+  syncAppBadge();
+});
 ipcMain.on("relay:viewState", (event, view, cause) => {
   if (!win || win.isDestroyed() || event.sender !== win.webContents) return;
   if (!["pill", "banner", "card", "wide", "hidden"].includes(view)) return;

@@ -232,7 +232,10 @@ test("main offers Conductor only with the account's row and the OS's registratio
   assert.match(consent, /\$\{conductorOffered \? " In Conductor, /, "the consent names Conductor only where it is offered");
 
   const summary = main.slice(main.indexOf("function nativeExecutionSummary("), main.indexOf("let checkingNativeDrafts"));
-  assert.match(summary, /record\.session\.provider === "conductor"\s*&& \(!conductorOn \|\| row\.taskStartedAt \|\| row\.taskCompletedAt \|\| row\.taskRejectedAt \|\| row\.taskCancelledAt\)\) return \[\];/);
+  // A Conductor record retires without the row, or once the server shows the
+  // Task moved; the Task-in-the-box Claude link shares the second half.
+  assert.match(summary, /const linkOnly = record\.session\.provider === "conductor" \|\| record\.session\.taskLink === true;/);
+  assert.match(summary, /if \(linkOnly && \(\(record\.session\.provider === "conductor" && !conductorOn\) \|\| row\.taskStartedAt \|\| row\.taskCompletedAt \|\| row\.taskRejectedAt \|\| row\.taskCancelledAt\)\) return \[\];/);
 });
 
 test("the pill paints no Conductor tile, switch or word without both the row and the app", () => {

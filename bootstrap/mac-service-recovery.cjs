@@ -30,11 +30,43 @@ function readRegistration(label, { homeDir = os.homedir(), run = defaultRun, fsI
   const suffix = label === LABELS[0] ? /[\\/]bin[\\/]relay\.js$/ : /[\\/]overlay[\\/]main\.cjs$/;
   const script = args.find(x => /[\\/]node_modules[\\/]relay-companion[\\/]/.test(x) && suffix.test(x));
   if (!script || !path.isAbsolute(args[0]) || !path.isAbsolute(script) || (label === LABELS[0] && !args.includes("daemon"))) throw Error(`invalid-service-target: ${label}`);
-  for (const filename of [args[0], script]) if (!fsImpl.statSync(filename).isFile()) throw Error(`missing-service-target: ${label}`);
   const packageRoot = script.replace(suffix, "");
+  // A pill that launches through ~/.relay/runtime/Relay.app is checked against
+  // its own package's Electron, not the link's current target; callers align
+  // the link before launchd starts it (see stablePillReleaseExecutable).
+  const releaseExecutable = label === LABELS[1]
+    ? require("./mac-background-identity.cjs").stablePillReleaseExecutable(args[0], packageRoot, { homeDir, fsImpl })
+    : null;
+  for (const filename of [releaseExecutable || args[0], script]) if (!fsImpl.statSync(filename).isFile()) throw Error(`missing-service-target: ${label}`);
   const pkg = JSON.parse(fsImpl.readFileSync(path.join(packageRoot, "package.json"), "utf8"));
   if (pkg.name !== "relay-companion") throw Error(`invalid-service-package: ${label}`);
-  return { label, file, bytes, executable: args[0], script, packageRoot, version: pkg.version };
+  return { label, file, bytes, executable: args[0], releaseExecutable, script, packageRoot, version: pkg.version };
+}
+
+// Before launchd starts a pill registration, make the stable link it may launch
+// through point at that registration's own bundle.
+function alignPillLink(records, { homeDir, fsImpl = fs } = {}) {
+  const pill = records.find(record => record.label === LABELS[1]);
+  return require("./mac-background-identity.cjs").alignStablePillLink(pill, { homeDir, fsImpl });
+}
+
+// Updaters from 0.1.613 to 0.1.634 refuse every activation while the link
+// dangles, and their watchdog never gets past restarting the pill, so the only
+// new code such a Mac runs is the candidate's CLI startup check. Every CLI start
+// therefore repairs exactly this state: a dangling link, a committed runtime,
+// and a pill plist that runs that runtime. Anything else is left alone.
+function healDanglingPillLink({ homeDir = os.homedir(), platform = process.platform, run = defaultRun, fsImpl = fs } = {}) {
+  if (platform !== "darwin") return { changed: false };
+  const identity = require("./mac-background-identity.cjs");
+  const link = identity.inspectStablePillLink({ homeDir, fsImpl });
+  if (!link.present || !link.symlink || link.resolves) return { changed: false };
+  let current;
+  try { current = JSON.parse(fsImpl.readFileSync(path.join(homeDir, ".relay", "runtime", "current.json"), "utf8")); }
+  catch { return { changed: false, skipped: "runtime-pointer-unreadable" }; }
+  if (current?.active !== true || !current.packageRoot) return { changed: false, skipped: "runtime-not-active" };
+  const record = readRegistration(LABELS[1], { homeDir, run, fsImpl });
+  if (record.packageRoot !== current.packageRoot) return { changed: false, skipped: "registration-not-active-runtime" };
+  return identity.alignStablePillLink(record, { homeDir, fsImpl });
 }
 
 async function repairMacServiceRegistrations({
@@ -61,12 +93,16 @@ async function repairMacServiceRegistrations({
     // registration. They may describe a candidate while the journal is inactive.
     const records = LABELS.map(label => readRegistration(label, { homeDir, run, fsImpl }));
     if (records[0].packageRoot !== records[1].packageRoot) throw Error("mixed-service-targets");
+    const link = alignPillLink(records, { homeDir, fsImpl });
+    if (link.changed) repaired.push("stable-pill-link");
     for (const record of records) {
       const observed = registration(record.label, { run, userId });
       if (!observed.known) throw Error(`service-registration-query-failed: ${record.label}`);
-      if (observed.present && observed.pid && isAlive(observed.pid)) continue;
+      // A pill running through the link that just moved would start its next
+      // Electron helper from the other bundle; restart it on the new one.
+      if (observed.present && observed.pid && isAlive(observed.pid) && !(link.changed && record.label === LABELS[1])) continue;
       const args = observed.present
-        ? ["kickstart", `gui/${userId}/${record.label}`]
+        ? ["kickstart", ...(observed.pid ? ["-k"] : []), `gui/${userId}/${record.label}`]
         : ["bootstrap", `gui/${userId}`, record.file];
       if (require("./recovery-intent.cjs").stopped(homeDir)) return { ok: true, changed: repaired.length > 0, status: "intentionally-stopped" };
       const result = run("/bin/launchctl", args);
@@ -96,6 +132,7 @@ async function restartMacRegisteredServices(target, {
     if (!current?.active || current.packageRoot !== target.packageRoot) return { ok: false, reason: "runtime-changed" };
     const records = LABELS.map(label => readRegistration(label, { homeDir, run }));
     if (records.some(r => r.packageRoot !== target.packageRoot)) return { ok: false, reason: "runtime-changed" };
+    alignPillLink(records, { homeDir });
     releaseDrain = await require("./update-activity.cjs").drainCalls({ homeDir, sleep });
     for (const record of records) {
       const observed = registration(record.label, { run, userId });
@@ -114,4 +151,4 @@ async function restartMacRegisteredServices(target, {
   finally { releaseDrain?.(); lock.release(); }
 }
 
-module.exports = { LABELS, registration, readRegistration, repairMacServiceRegistrations, restartMacRegisteredServices };
+module.exports = { LABELS, alignPillLink, healDanglingPillLink, registration, readRegistration, repairMacServiceRegistrations, restartMacRegisteredServices };

@@ -74,33 +74,106 @@ function preferredMacElectronExecutable(electronPath, { existsSync = fs.existsSy
 // behaviour), and a real directory at the link path is never replaced.
 const STABLE_PILL_BUNDLE = Object.freeze([".relay", "runtime", "Relay.app"]);
 
+function stablePillLink(homeDir) {
+  return path.join(homeDir, ...STABLE_PILL_BUNDLE);
+}
+
+// Re-point the link at `bundle` atomically. A real directory at the link path
+// is never replaced: false means the link could not be (and was not) changed.
+function pointStablePillLink(bundle, { homeDir, fsImpl = fs, pid = process.pid } = {}) {
+  const link = stablePillLink(homeDir);
+  const existing = fsImpl.lstatSync(link, { throwIfNoEntry: false });
+  if (existing && !existing.isSymbolicLink()) return false;
+  if (existing && fsImpl.readlinkSync(link) === bundle) return true;
+  fsImpl.mkdirSync(path.dirname(link), { recursive: true });
+  const temporary = `${link}.${pid}.tmp`;
+  try { fsImpl.unlinkSync(temporary); } catch {}
+  fsImpl.symlinkSync(bundle, temporary, "dir");
+  fsImpl.renameSync(temporary, link);
+  return true;
+}
+
 function stablePillExecutable(electronExecutable, { homeDir, fsImpl = fs, pid = process.pid } = {}) {
   const value = String(electronExecutable || "");
   if (!homeDir || !value) return electronExecutable;
   const bundle = path.resolve(value, "..", "..", "..");
   if (path.extname(bundle) !== ".app" || path.basename(path.dirname(value)) !== "MacOS") return electronExecutable;
-  const link = path.join(homeDir, ...STABLE_PILL_BUNDLE);
   try {
-    const existing = fsImpl.lstatSync(link, { throwIfNoEntry: false });
-    if (existing && !existing.isSymbolicLink()) return electronExecutable;
-    if (!existing || fsImpl.readlinkSync(link) !== bundle) {
-      fsImpl.mkdirSync(path.dirname(link), { recursive: true });
-      const temporary = `${link}.${pid}.tmp`;
-      try { fsImpl.unlinkSync(temporary); } catch {}
-      fsImpl.symlinkSync(bundle, temporary, "dir");
-      fsImpl.renameSync(temporary, link);
-    }
-    const stable = path.join(link, "Contents", "MacOS", path.basename(value));
+    if (!pointStablePillLink(bundle, { homeDir, fsImpl, pid })) return electronExecutable;
+    const stable = path.join(stablePillLink(homeDir), "Contents", "MacOS", path.basename(value));
     return fsImpl.statSync(stable).isFile() ? stable : electronExecutable;
   } catch {
     return electronExecutable;
   }
 }
 
+// The link is ours to rewrite, so a pill plist that launches through it is
+// only as good as the Electron bundle of the package it runs. 2026-10-10: a
+// rolled-back activation restored the plist but left the link on the failed
+// release, cleanup then deleted that release, and every later update refused
+// to start because the link no longer resolved. Validate and repair against
+// the registered package instead of wherever the link happens to point.
+//
+// Returns the same executable inside packageRoot's own bundle, or null when
+// `executable` does not launch through the link.
+function stablePillReleaseExecutable(executable, packageRoot, { homeDir, fsImpl = fs } = {}) {
+  if (!homeDir || !packageRoot) return null;
+  const prefix = path.join(stablePillLink(homeDir), "Contents", "MacOS") + path.sep;
+  const value = String(executable || "");
+  if (!value.startsWith(prefix) || value.slice(prefix.length).includes(path.sep)) return null;
+  // A real directory there is never re-pointed, so it is checked as it stands.
+  const lstat = typeof fsImpl.lstatSync === "function" ? fsImpl.lstatSync.bind(fsImpl) : fs.lstatSync;
+  try {
+    const existing = lstat(stablePillLink(homeDir), { throwIfNoEntry: false });
+    if (existing && !existing.isSymbolicLink()) return null;
+  } catch { return null; }
+  const existsSync = typeof fsImpl.existsSync === "function" ? fsImpl.existsSync.bind(fsImpl) : fs.existsSync;
+  const inventory = require("./runtime-executables.cjs").runtimeExecutableInventory(packageRoot, { platform: "darwin", existsSync });
+  const bundle = inventory.ok
+    ? path.resolve(inventory.electronPath, "..", "..", "..")
+    : path.join(packageRoot, "node_modules", "electron", "dist", "Electron.app");
+  return path.join(bundle, "Contents", "MacOS", path.basename(value));
+}
+
+/**
+ * Point the link at the bundle a pill registration runs, before launchd starts
+ * it. `record` is a readRegistration result; a plist that names a release path
+ * directly needs nothing.
+ */
+function alignStablePillLink(record, { homeDir, fsImpl = fs } = {}) {
+  if (!record?.releaseExecutable) return { ok: true, changed: false };
+  const bundle = path.resolve(record.releaseExecutable, "..", "..", "..");
+  let before = null;
+  try { before = fsImpl.readlinkSync(stablePillLink(homeDir)); } catch {}
+  if (before === bundle) return { ok: true, changed: false };
+  // A real directory there is someone else's; leave it exactly as before.
+  if (!pointStablePillLink(bundle, { homeDir, fsImpl })) return { ok: true, changed: false, skipped: "stable-pill-link-not-symlink" };
+  return { ok: true, changed: true, from: before, to: bundle };
+}
+
+/** Where the link points and whether its executable exists, for doctor and cleanup. */
+function inspectStablePillLink({ homeDir, fsImpl = fs } = {}) {
+  const link = stablePillLink(homeDir);
+  let stat;
+  try { stat = fsImpl.lstatSync(link, { throwIfNoEntry: false }); } catch { stat = null; }
+  if (!stat) return { present: false, link };
+  if (!stat.isSymbolicLink()) return { present: true, symlink: false, link, resolves: true };
+  let target = null;
+  try { target = fsImpl.readlinkSync(link); } catch {}
+  const resolves = [RELAY_MAC_EXECUTABLE_NAME, LEGACY_MAC_EXECUTABLE_NAME].some((name) => {
+    try { return fsImpl.statSync(path.join(link, "Contents", "MacOS", name)).isFile(); } catch { return false; }
+  });
+  return { present: true, symlink: true, link, target, resolves };
+}
+
 module.exports = {
   LEGACY_MAC_EXECUTABLE_NAME,
   STABLE_PILL_BUNDLE,
+  alignStablePillLink,
+  inspectStablePillLink,
   stablePillExecutable,
+  stablePillLink,
+  stablePillReleaseExecutable,
   RELAY_MAC_ASSOCIATED_BUNDLE_IDENTIFIERS,
   RELAY_MAC_EXECUTABLE_NAME,
   associatedBundleIdentifiersPlist,

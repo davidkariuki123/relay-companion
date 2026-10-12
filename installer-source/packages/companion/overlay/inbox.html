@@ -1964,6 +1964,10 @@
   .rd-reply-text .deleted { color:var(--muted-2); font-style:italic; }
   .rd-reply-text.rd-reply-working { color:var(--muted-2); }
   .rd-reply .rd-reply-work { opacity:1; }
+  /* A reply's ⋯ sits at the end of its name line, like the quote verb it replaced. */
+  .rd-reply-head .th-message-more { position:static; transform:none; align-self:center; margin:-6px -6px -6px auto; width:28px; height:28px; }
+  .rd-reply:hover .th-message-more, .rd-reply:focus-within .th-message-more { opacity:1; }
+  .rd-reply .rx-badges { position:static; margin-top:6px; }
   .agent-allow { margin-top:8px; display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; font-size:12.5px; line-height:1.45; color:var(--muted-2); white-space:normal; }
   .agent-allow button { appearance:none; padding:4px 10px; border:1px solid var(--accent); border-radius:999px; background:transparent;
     color:var(--accent); font:600 12px var(--sans, inherit); cursor:pointer; }
@@ -2992,9 +2996,6 @@
   #settingRequests .tp-banner .tp-note { margin:0 0 10px; padding:0; color:var(--ink-2); font:12px/1.5 var(--sans); }
   .tp-rules ol { margin:6px 0 0; padding-left:18px; color:var(--ink-2); font:12px/1.5 var(--sans); }
   .tp-rules li { margin-top:3px; }
-  .tp-lanes { display:flex; gap:4px; padding:10px 16px 4px; }
-  .tp-lane { appearance:none; border:0; border-radius:var(--r-pill); padding:5px 11px; background:transparent; color:var(--muted-2); font:600 11px/1.2 var(--sans); cursor:pointer; }
-  .tp-lane.on { background:var(--wash-2); color:var(--ink); }
   .tp-post { padding:12px 16px; border-bottom:1px solid var(--hair); }
   .tp-post-meta { display:flex; align-items:baseline; flex-wrap:wrap; gap:5px; color:var(--muted-2); font:10.5px/1.3 var(--sans); }
   .tp-post-meta .who { color:var(--muted); font-weight:600; }
@@ -3007,7 +3008,7 @@
   .tp-post-acts { display:flex; gap:12px; margin-top:6px; }
   .tp-post-acts button { appearance:none; border:0; padding:0; background:transparent; color:var(--muted-2); font:500 10.5px/1.2 var(--sans); cursor:pointer; }
   .tp-post-acts button:hover { color:var(--ink); }
-  /* In the people lane a post is a card: the whole card opens the post on its
+  /* A post is a card: the whole card opens the post on its
      own page, the way a Relay row opens the reader. Its buttons keep their jobs. */
   .tp-post.tp-post-card { cursor:pointer; }
   .tp-post.tp-post-card:hover { background:var(--wash); }
@@ -4920,6 +4921,8 @@
     // the exact area once the surface has grown; until then the screen's
     // height less the menu bar, exact on the main display).
     if (surfaceFullSize) return { ...surfaceFullSize };
+    // Off the Mac the app keeps to the work area, clear of the taskbar.
+    if (!/Mac/i.test(navigator.platform || navigator.userAgent || "")) return { w: Math.max(READER.w, Math.round(aw)), h: Math.max(EXPANDED.h, Math.round(ah)) };
     const sh = Number(window.screen?.height) || ah;
     const sw = Number(window.screen?.width) || aw;
     const menu = Math.max(0, Math.min(sh - ah, Number(window.screen?.availTop) || 0));
@@ -8188,6 +8191,36 @@
     cardEl.classList.toggle("has-unread", n > 0);
     countEl.classList.toggle("zero", n === 0);
     refreshCountLabel();
+    publishAppBadge(n);
+  }
+
+  // The same number on Relay's app icon, which shows while Relay is the full
+  // app (app-badge.cjs). macOS draws its own Dock badge; the Windows taskbar
+  // takes a 16 px overlay icon, drawn here in the blue of the app icon.
+  let appBadgeSent = -1;
+  function appBadgeOverlay(n) {
+    if (!n || !/^Win/i.test(navigator.platform || "")) return "";
+    try {
+      const size = 32;
+      const canvas = document.createElement("canvas");
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      ctx.beginPath(); ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+      ctx.fillStyle = "#FFFFFF"; ctx.fill();
+      ctx.beginPath(); ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
+      ctx.fillStyle = "#3B4BF2"; ctx.fill();
+      const label = n > 9 ? "9+" : String(n);
+      ctx.fillStyle = "#FFFFFF";
+      ctx.font = `700 ${label.length > 1 ? 17 : 21}px "Segoe UI", system-ui, sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(label, size / 2, size / 2 + 1);
+      return canvas.toDataURL("image/png");
+    } catch { return ""; }
+  }
+  function publishAppBadge(n) {
+    if (n === appBadgeSent || !window.relay?.appBadge) return;
+    appBadgeSent = n;
+    window.relay.appBadge(n, appBadgeOverlay(n));
   }
 
   function setBadge(el, n) {
@@ -10413,7 +10446,7 @@
     // Posts newer than the open board, held behind the "N new posts" pill until
     // the person asks for them. incomingGap: more arrived than one page holds.
     incoming:[], incomingGap:false,
-    lane:"human", creating:false, editingMandate:false, inviteQuery:"", armed:null,
+    creating:false, editingMandate:false, inviteQuery:"", armed:null,
     // The open topic's face: messages (posts, lanes, compose), members, mandate.
     pane:"messages",
     // An inline reply being written: { postId, mode: "topic" | "private",
@@ -10421,7 +10454,7 @@
     // a failed send replays rather than duplicates.
     replying:null,
     notice:"",
-    // The post opened from the people lane onto its own page, and whether its
+    // The post opened from the board onto its own page, and whether its
     // Details fold is open. Null while the board itself is showing.
     openPostId:null, postDetailsOpen:false,
     // Where the board was scrolled when a post opened, so Back lands there.
@@ -10562,7 +10595,7 @@
     return `<button class="gd-back" type="button" data-thread-back>‹ All threads</button>${t ? `<div class="tp-banner"><strong>${esc(t.title)}</strong><div class="tp-note">${t.status === 'resolved' ? 'Resolved' : 'Open'} · ${Number(t.postCount)} posts · ${Number(t.contributorCount)} contributors</div><div class="mandate">${esc(t.summary)}</div><div class="tp-note">${esc(t.summaryAuthor?.name || 'Former member')}${t.summaryOrigin === 'agent' ? "’s agent" : ''} · ${esc(timeAgo(t.attentionAt))}</div>${t.relatedThreadId ? `<button class="gd-action" data-thread-open="${esc(t.relatedThreadId)}">Earlier related thread</button>` : ''}</div>` : ''}`;
   }
   function topicThreadsHtml() {
-    const rows = topicsState.threads.filter(t => topicsState.lane === 'agent' || t.summary.trim());
+    const rows = topicsState.threads;
     return `<form class="tp-thread-search" data-thread-search><input class="cv-input" name="query" aria-label="Search threads" placeholder="Search this topic…" value="${esc(topicsState.threadQuery)}"/><button class="gd-action" type="submit">Search</button></form>${rows.map(t => `<button type="button" class="tp-thread" data-thread-open="${esc(t.id)}"><span class="tp-thread-meta">${t.status === 'resolved' ? 'Resolved' : 'Open'} · ${Number(t.postCount)} posts · ${Number(t.contributorCount)} contributors${t.newPostCount ? ' · updated' : ''}</span><strong>${esc(t.title)}</strong><span class="tp-thread-summary">${esc(t.summary || 'Agent context available inside.')}</span><span class="tp-thread-meta">${esc(t.summaryAuthor?.name || 'Former member')}${t.summaryOrigin === 'agent' ? "’s agent" : ''} · ${esc(timeAgo(t.attentionAt))}</span></button>`).join('') || `<div class="tp-loading">${topicsState.postsLoading ? 'Loading threads…' : topicsState.threadQuery ? 'No matching threads.' : 'No threads in this lane yet.'}</div>`}${topicsState.threadsCursor ? '<button class="tp-more" data-thread-more>Older threads</button>' : ''}`;
   }
   function topicMoveFormHtml(p) {
@@ -10624,7 +10657,7 @@
   let topicIncomingInFlight = false;
   function topicIncomingCount() {
     const shown = new Set(topicsState.posts.map((p) => p.id));
-    return topicsState.incoming.filter((p) => p.importance !== "detail" && (topicsState.lane === "agent" || String(p.forHuman || "").trim())).length;
+    return topicsState.incoming.filter((p) => p.importance !== "detail").length;
   }
   function topicIncomingHtml() {
     const n = topicIncomingCount();
@@ -10779,15 +10812,15 @@
     const who = p.author?.name || "Someone";
     return { who, origin: p.origin === "agent" ? `${who}'s agent` : who };
   }
-  function topicPostHtml(p, lane, detail) {
+  function topicPostHtml(p, detail) {
     const { who, origin } = topicPostOrigin(p);
-    const body = lane === "agent"
-      ? `${p.forHuman ? `<div class="tp-post-body">${readerParagraphs(p.forHuman)}</div>` : ""}<div class="tp-post-body agent">${esc(p.forAgent || "")}</div>`
-      : `<div class="tp-post-body">${readerParagraphs(p.forHuman || "")}</div>`;
-    // In the people lane the card is the door to the full post, the way a
-    // Relay row opens the reader. The agent lane already shows both documents.
-    const card = lane === "human" ? ` tp-post-card" role="button" tabindex="0" data-topic-post-open="${esc(p.id)}"` : `"`;
-    return `<article class="tp-post${card} data-topic-post="${esc(p.id)}">
+    // A post an agent wrote only for agents still shows on the board; opening
+    // it reads the agent document under Details.
+    const body = String(p.forHuman || "").trim()
+      ? `<div class="tp-post-body">${readerParagraphs(p.forHuman)}</div>`
+      : `<div class="tp-post-body tp-note">Written for agents. Open it to read.</div>`;
+    // The card is the door to the full post, the way a Relay row opens the reader.
+    return `<article class="tp-post tp-post-card" role="button" tabindex="0" data-topic-post-open="${esc(p.id)}" data-topic-post="${esc(p.id)}">
       <div class="tp-post-meta"><span class="tp-nature ${esc(p.nature)}">${esc(TOPIC_NATURE_LABEL[p.nature] || p.nature)}</span><span class="who">${esc(origin)}</span><span>${esc(timeAgo(p.createdAt))}${p.editedAt ? " · edited" : ""}</span></div>
       <div class="tp-post-title">${esc(p.title)}</div>
       ${topicPostRefHtml(p)}${body}${topicPostActsHtml(p, detail)}${topicPostReplyFormHtml(p, who)}${topicMoveFormHtml(p)}
@@ -10871,12 +10904,10 @@
       ? `<form class="tp-new" data-topic-mandate-form><textarea class="cv-input" name="mandate" required>${esc(d.mandate)}</textarea><div class="tp-note">Saving a changed mandate pauses every other member's agent until they approve it.</div><div class="tp-actions"><button class="cv-save" type="submit">Save mandate</button><button class="cv-cancel" type="button" data-topic-mandate-cancel>Cancel</button></div><div class="tp-error" data-topic-mandate-error></div></form>`
       : (m.state === "active" && m.mandateCurrent !== false ? `<div class="tp-banner"><strong>Mandate · v${Number(d.mandateVersion)}</strong><div class="mandate">${esc(d.mandate)}</div>${admin ? `<div class="acts"><button class="gd-action" type="button" data-topic-mandate-edit>Edit mandate</button></div>` : ""}</div>` : "");
     const settings = current ? `<div class="tp-note">Your agent ${m.postConfirmation === "ask" ? "shows you each post before it goes out." : "posts here on its own and tells you."}<button class="gd-action" type="button" data-topic-confirmation="${m.postConfirmation === "ask" ? "auto" : "ask"}">${m.postConfirmation === "ask" ? "Let it post on its own" : "Ask me first"}</button></div>` : "";
-    const lanes = readable ? `<div class="tp-lanes"><button class="tp-lane${topicsState.lane === "human" ? " on" : ""}" type="button" data-topic-lane="human">People</button><button class="tp-lane${topicsState.lane === "agent" ? " on" : ""}" type="button" data-topic-lane="agent">Agents</button></div>` : "";
-    const visible = topicsState.lane === "agent" ? topicsState.posts : topicsState.posts.filter((p) => String(p.forHuman || "").trim());
     const posts = !readable ? ""
       : topicsState.postsLoading && !topicsState.posts.length ? `<div class="tp-loading">Loading posts…</div>`
-      : visible.length ? visible.map((p) => topicPostHtml(p, topicsState.lane, d)).join("")
-      : `<div class="tp-loading">${topicsState.lane === "agent" ? "No posts yet." : "Nothing in the people lane yet. Agents shows what agents have posted."}</div>`;
+      : topicsState.posts.length ? topicsState.posts.map((p) => topicPostHtml(p, d)).join("")
+      : `<div class="tp-loading">No posts yet.</div>`;
     const more = readable && topicsState.nextCursor ? `<button class="tp-more" type="button" data-topic-more>${topicsState.postsLoading ? "Loading…" : "Older posts"}</button>` : "";
     const notice = topicsState.notice ? `<div class="tp-notice" role="status">${esc(topicsState.notice)}</div>` : "";
     const leave = current
@@ -10890,7 +10921,7 @@
       ? topicPaneTabsHtml() + (
         topicsState.pane === "members" ? `${topicMembersHtml(d)}${leave}`
         : topicsState.pane === "mandate" ? `${mandateBlock}${topicStandingRulesHtml()}${settings}`
-        : `${notice}${lanes}${readable ? topicIncomingHtml() : ""}${topicsState.openThreadId ? topicThreadHeaderHtml() + posts + more : topicThreadsHtml()}`)
+        : `${notice}${readable ? topicIncomingHtml() : ""}${topicsState.openThreadId ? topicThreadHeaderHtml() + posts + more : topicThreadsHtml()}`)
       : `${topicStandingRulesHtml()}${topicMembersHtml(d)}`;
     return `<div class="tp-detail" data-topic-detail="${esc(d.id)}">
       <button class="gd-back" type="button" data-topic-back>‹ Topics</button>
@@ -11029,7 +11060,6 @@
       if (scrollEl) scrollEl.scrollTop = Math.max(0, Number(topicsState.boardScrollTop) || 0);
     });
     on("[data-topic-post-details]", () => { topicsState.postDetailsOpen = !topicsState.postDetailsOpen; renderTopics(); });
-    on("[data-topic-lane]", (el) => { topicsState.lane = el.getAttribute("data-topic-lane"); renderTopics(); });
     wireTopicIncoming(c);
     // Reply: one box at a time, keyed once so a retry replays instead of
     // duplicating a post whose Relay half failed.
@@ -19753,18 +19783,33 @@
       const divider = start + offset === firstFresh
         ? `<div class="rd-replies-new" role="separator"><span>${freshCount} new</span></div>`
         : "";
+      // A reply here is reacted to and quoted from the same ⋯ menu a message
+      // in the room has.
+      const canAct = !author.agent && !reply.deletedAt && !reply.pending && !reply.request;
+      const canReact = REACTIONS_ENABLED && canAct;
+      const menuId = `reader-reply-options-${reply.id}`;
+      const menuHtml = canAct ? `<button type="button" class="th-message-more rd-reply-more" data-message-more="${esc(reply.id)}"
+          aria-label="Message options" aria-haspopup="true" aria-expanded="false" aria-controls="${esc(menuId)}"><svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor" aria-hidden="true"><circle cx="4" cy="9" r="1.3"/><circle cx="9" cy="9" r="1.3"/><circle cx="14" cy="9" r="1.3"/></svg></button>
+        <div id="${esc(menuId)}" class="th-message-menu" popover="auto" role="group" aria-label="Message options" data-stop="1">
+          ${canReact ? messageReactionPickerHtml(reply.id) : ""}
+          <button type="button" class="th-message-action" data-rd-quote="${esc(reply.id)}">reply</button>
+        </div>` : "";
+      const aggregates = REACTIONS_ENABLED && !reply.deletedAt ? ((reply.reactions && reply.reactions.aggregates) || []) : [];
+      const badges = aggregates.length ? `<div class="rx-badges" data-stop="1">${aggregates.map((reaction) =>
+        reactionBadgeHtml(reply.id, reaction, canReact)).join("")}</div>` : "";
       return `${divider}<div class="rd-reply${reply.pending ? " pending" : ""}" data-rd-reply="${esc(reply.id)}">
           <span class="th-party ${partyColorClass(name, mine)} rd-reply-face" aria-hidden="true">${esc(replyAuthorInitial(author))}</span>
           <div class="rd-reply-main">
             <div class="rd-reply-head"><span class="th-party ${partyColorClass(name, mine)}">${esc(name)}</span>${chatTimestampHtml(reply.at, "rd-reply-time")}${author.agent
               ? `<button type="button" class="rd-reply-quote-btn rd-reply-work" data-rd-open-work="${esc(reply.id)}">open work</button>`
-              : reply.deletedAt || reply.pending ? "" : `<button type="button" class="rd-reply-quote-btn" data-rd-quote="${esc(reply.id)}">reply</button>`}</div>
+              : menuHtml}</div>
             ${quote}
             ${agentWorking
               ? '<div class="rd-reply-text rd-reply-working">Working<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span></div>'
               : String(reply.body || reply.title || "").trim() || reply.deletedAt ? `<div class="rd-reply-text">${words}</div>` : ""}
             ${allowHtml}
             ${files ? `<div class="rd-reply-files">${files} ${files === 1 ? "attachment" : "attachments"}</div>` : ""}
+            ${badges}
           </div>
         </div>`;
     }).join("");
@@ -19814,9 +19859,30 @@
         openReader(String(button.getAttribute("data-rd-open-work") || ""), "threads");
       });
     }
+    const section = document.getElementById("readerReplies");
+    if (section) {
+      wireMessageSideMenus(section);
+      for (const badge of section.querySelectorAll("[data-rx-toggle]")) {
+        badge.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          if (badge.getAttribute("aria-disabled") === "true") return;
+          const id = badge.getAttribute("data-rx-toggle");
+          const emoji = badge.getAttribute("data-emoji");
+          const action = badge.getAttribute("data-mine") === "1" ? "remove" : "add";
+          badge.disabled = true;
+          const result = await commitReaction(id, emoji, action);
+          if (result && result.ok && action === "remove") reactionNotes.delete(id);
+          if (!result || !result.ok) { badge.disabled = false; renderReader(); }
+        });
+      }
+      wireReactionControls(section);
+      reactionNames.sync(section);
+    }
     for (const button of readerBodyEl.querySelectorAll("[data-rd-quote]")) {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
+        const menu = button.closest(".th-message-menu");
+        if (menu?.matches(":popover-open")) menu.hidePopover();
         readerQuoteTargets.set(String(r.id), String(button.getAttribute("data-rd-quote") || ""));
         syncReaderQuoteChip(r, thread);
         const input = document.getElementById("qrInput");

@@ -385,3 +385,44 @@ test("a runtime committed moments ago is given a startup grace before any restar
   const crashed = await attempt(100_000 + 10_000);
   assert.notEqual(crashed.status, "starting"); assert.equal(restarts.length, 1, "a repeated startup crash skips restart as before");
 });
+
+test("a runtime proven healthy on the previous check is re-verified through its continuity, and the proof is remembered for the next", async t => {
+  const homeDir = fixture(t), at = Date.now();
+  const packageRoot = installed(homeDir, "0.1.600");
+  const current = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "runtime", "current.json")));
+  write(path.join(homeDir, ".relay", "recovery", "daemon.json"), { version: "0.1.600", pid: 4242, at });
+  const identity = `${packageRoot}:4242:pill:d1:p1`;
+  write(path.join(homeDir, ".relay", "recovery", "status.json"), { ok: true, runtimeHealthy: true, runtimeProven: true, status: "current", version: "0.1.600",
+    readyIdentity: identity, heartbeatAt: at - 60_000, progressSequence: 41, checkedAt: at - 60_000 });
+  const seen = [];
+  const result = await recover({ homeDir, env: {}, now: () => at, discoverImpl: async () => "0.1.600", memory: () => ({ pressured: false }),
+    health: () => ({ ok: true, daemon: true, pill: true }), stage: () => assert.fail("healthy runtime must not be replaced"),
+    verifyReady: async (options) => { seen.push(options.continuity); return { ok: true, current, heartbeatAt: at, identity, progressSequence: 42, continued: true }; } });
+  assert.equal(result.status, "current");
+  assert.deepEqual(seen, [{ identity, heartbeatAt: at - 60_000, progressSequence: 41 }]);
+  const status = JSON.parse(fs.readFileSync(path.join(homeDir, ".relay", "recovery", "status.json")));
+  assert.equal(status.readyIdentity, identity); assert.equal(status.heartbeatAt, at);
+  assert.equal(status.progressSequence, 42); assert.equal(status.readyContinued, true);
+});
+
+for (const [name, change] of [
+  ["the previous check was still on probation", { runtimeProven: false, status: "probation" }],
+  ["the previous check found it unhealthy", { ok: false, runtimeHealthy: false, status: "restarting" }],
+  ["a different daemon pid is beating now", { readyIdentity: "PACKAGE_ROOT:9999:pill:d1:p1" }],
+  ["the previous check was too long ago", { checkedAt: "OLD" }],
+  ["the release changed", { version: "0.1.599" }],
+]) test(`continuity is withheld when ${name}`, async t => {
+  const homeDir = fixture(t), at = Date.now();
+  const packageRoot = installed(homeDir, "0.1.600");
+  write(path.join(homeDir, ".relay", "recovery", "daemon.json"), { version: "0.1.600", pid: 4242, at });
+  const previous = { ok: true, runtimeHealthy: true, runtimeProven: true, status: "current", version: "0.1.600",
+    readyIdentity: `${packageRoot}:4242:pill:d1:p1`, heartbeatAt: at - 60_000, progressSequence: 41, checkedAt: at - 60_000, ...change };
+  if (previous.readyIdentity.startsWith("PACKAGE_ROOT")) previous.readyIdentity = previous.readyIdentity.replace("PACKAGE_ROOT", packageRoot);
+  if (previous.checkedAt === "OLD") previous.checkedAt = at - 10 * 60_000;
+  write(path.join(homeDir, ".relay", "recovery", "status.json"), previous);
+  const seen = [];
+  await recover({ homeDir, env: {}, now: () => at, discoverImpl: async () => "0.1.600", memory: () => ({ pressured: false }),
+    health: () => ({ ok: true, daemon: true, pill: true }), stage: () => assert.fail("healthy runtime must not be replaced"),
+    verifyReady: async (options) => { seen.push(options.continuity); return { ok: true, heartbeatAt: at, identity: "x" }; } });
+  assert.deepEqual(seen, [undefined]);
+});

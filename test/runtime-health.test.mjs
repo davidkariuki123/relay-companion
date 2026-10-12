@@ -109,3 +109,20 @@ test("the Windows in-place restart stops only installed services, runs both task
   assert.equal((await health.restartInstalledRuntimeServices(target, { platform: "sunos" })).reason, "activation-platform-unsupported");
   assert.equal((await health.activateWindowsRuntimeServices(target, { platform: "linux" })).reason, "activation-platform-unsupported");
 });
+
+// A sample between two full enumerations checks the watched pids and never
+// lists processes; without watched pids it still enumerates.
+test("a non-full health sample checks the watched pids instead of listing every process", () => {
+  const { exactRuntimeHealth } = require("../bootstrap/runtime-health.cjs");
+  const target = { packageRoot: "C:\\r\\node_modules\\relay-companion", bin: "C:\\r\\node_modules\\relay-companion\\bin\\relay.js" };
+  const alive = new Set([10, 11]);
+  const options = { platform: "win32", full: false, watched: { daemon: 10, pill: 11 }, alive: (pid) => alive.has(pid), run: () => assert.fail("must not enumerate") };
+  const healthy = exactRuntimeHealth(target, options);
+  assert.equal(healthy.ok, true); assert.equal(healthy.cheap, true); assert.equal(healthy.known, true);
+  alive.delete(11);
+  const dead = exactRuntimeHealth(target, options);
+  assert.equal(dead.ok, false); assert.equal(dead.daemon, true); assert.equal(dead.pill, false);
+  let listed = 0;
+  exactRuntimeHealth(target, { platform: "win32", full: false, watched: null, run: () => { listed++; return { status: 0, stdout: "" }; } });
+  assert.equal(listed, 1);
+});

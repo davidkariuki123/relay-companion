@@ -2,7 +2,7 @@
 // under a versioned mandate. These pin the three layers the pill carries
 // (RelayClient → preload bridge → main proxy → renderer) the way the channel
 // pane's test does, plus the rules that make Topics safe: the developer gate,
-// server-truth re-rendering, the human read watermark, the two lanes, and the
+// server-truth re-rendering, the human read watermark, one board for everyone, and the
 // re-approval banner after a mandate edit.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -76,11 +76,11 @@ test("opening a topic is the one human read; agents never move it", () => {
   assert.match(open, /window\.relay\.topicGet, id/);
   assert.match(open, /if \(m\.state !== "active" \|\| m\.mandateCurrent !== true\) return;/);
   assert.match(open, /window\.relay\.topicSeen, id/);
-  // Lanes: people by default, agents one tap away, agent-only posts hidden from the people lane.
-  assert.match(html, /lane:"human"/);
-  assert.match(html, /data-topic-lane="human">People<\/button>[\s\S]*?data-topic-lane="agent">Agents<\/button>/);
-  assert.match(html, /topicsState\.lane === "agent" \? topicsState\.posts : topicsState\.posts\.filter\(\(p\) => String\(p\.forHuman \|\| ""\)\.trim\(\)\)/);
-  assert.match(html, /<div class="tp-post-body agent">\$\{esc\(p\.forAgent \|\| ""\)\}<\/div>/);
+  // One board, no People/Agents selector: every post shows, and an agent-only
+  // post says so and opens to its agent document.
+  assert.doesNotMatch(html, /data-topic-lane|topicsState\.lane|tp-lanes/);
+  assert.match(html, /topicsState\.posts\.length \? topicsState\.posts\.map\(\(p\) => topicPostHtml\(p, d\)\)/);
+  assert.match(html, /<div class="tp-post-body tp-note">Written for agents\. Open it to read\.<\/div>/);
 });
 
 test("invitation and re-approval are one act on the exact mandate version, and mutations re-render from server truth", () => {
@@ -120,7 +120,7 @@ test("the four standing rules are a feature of every topic, rendered from the sh
   assert.match(html, /: `\$\{topicStandingRulesHtml\(\)\}\$\{topicMembersHtml\(d\)\}`;/);
 });
 
-test("an open topic has three faces — Threads, Members, Mandate — and the lanes live only on Messages", () => {
+test("an open topic has three faces — Threads, Members, Mandate", () => {
   assert.match(html, /const tabs = \[\["messages", "Threads"\], \["members", "Members"\], \["mandate", "Mandate"\]\];/);
   assert.match(html, /pane:"messages",/);
   assert.match(html, /on\("\[data-topic-pane\]", \(el\) => \{ topicsState\.pane = el\.getAttribute\("data-topic-pane"\) \|\| "messages"; renderTopics\(\); \}\);/);
@@ -179,8 +179,8 @@ test("new posts reach an open board as an 'N new posts' pill, never by redrawing
   assert.match(check, /paintTopicIncoming\(\);/);
   assert.doesNotMatch(check, /renderTopics\(\)/);
   assert.match(html, /function paintTopicIncoming\(\) \{[\s\S]*?slot\.outerHTML = topicIncomingHtml\(\);/);
-  // The pill counts what the current lane would show.
-  assert.match(html, /function topicIncomingCount\(\) \{[\s\S]*?topicsState\.lane === "agent" \|\| String\(p\.forHuman \|\| ""\)\.trim\(\)/);
+  // The pill counts every post the board would show.
+  assert.match(html, /function topicIncomingCount\(\) \{[\s\S]*?return topicsState\.incoming\.filter\(\(p\) => p\.importance !== "detail"\)\.length;/);
   // Tapping it is the human read: posts go on the board, the board lands at its top, the watermark moves.
   const show = html.slice(html.indexOf("async function showTopicIncoming()"), html.indexOf("function closeTopic()"));
   assert.match(show, /if \(topicsState\.incomingGap\) \{\s*await loadTopicPosts\(\);/);
@@ -196,9 +196,9 @@ test("new posts reach an open board as an 'N new posts' pill, never by redrawing
   assert.match(html, /if \(!append\) Object\.assign\(topicsState, \{ incoming:\[\], incomingGap:false \}\);/);
 });
 
-test("in the people lane a post card opens the full post on its own page, the way a Relay row opens the reader", () => {
+test("a post card opens the full post on its own page, the way a Relay row opens the reader", () => {
   // The card is the door; its buttons and boxes keep their own jobs.
-  assert.match(html, /const card = lane === "human" \? ` tp-post-card" role="button" tabindex="0" data-topic-post-open="\$\{esc\(p\.id\)\}"` : `"`;/);
+  assert.match(html, /<article class="tp-post tp-post-card" role="button" tabindex="0" data-topic-post-open="\$\{esc\(p\.id\)\}"/);
   assert.match(html, /el\.addEventListener\("click", \(e\) => \{ if \(e\.target\.closest\("button, a, form, textarea, input, select"\)\) return; openPost\(postId\); \}\);/);
   // The page is the reader's letter: kicker, headline, rule, the words, then
   // Details folded under them only when the agent document says more.

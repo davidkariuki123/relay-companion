@@ -12,7 +12,6 @@ const https = require("node:https");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { pipeline } = require("node:stream/promises");
 const { activateLinuxRuntimeServices, activateMacRuntimeServices, exactRuntimeHealth } = require("./runtime-health.cjs");
 const { isTemporaryNodePath, relayOwnedNodePath } = require("./owned-node-runtime.cjs");
 const {
@@ -192,7 +191,15 @@ function fetchBuffer(url, redirects = 0, maxBytes = 2 * 1024 * 1024) {
 }
 
 const MAX_ARTIFACT_BYTES = 750 * 1024 * 1024;
+// Consecutive attempts that moved no bytes before a download gives up. An
+// attempt that made progress never counts against this: a 346 MB runtime on a
+// connection that drops every few MB finishes in many short attempts.
 const ARTIFACT_DOWNLOAD_ATTEMPTS = 6;
+// Wall-clock cap on one download, well inside the daemon's 20-minute wait for
+// its update worker and the recovery runner's 25-minute cycle. What was
+// downloaded stays on disk, so the next attempt resumes where this one stopped.
+const ARTIFACT_DOWNLOAD_BUDGET_MS = 15 * 60_000;
+const ARTIFACT_DOWNLOAD_MAX_ATTEMPTS = 500;
 
 class PermanentArtifactDownloadError extends Error {}
 
@@ -252,26 +259,33 @@ function downloadArtifactAttempt({ parsed, file, artifact, offset, get, signal, 
         return finish(error);
       }
       let received = 0;
-      response.on("data", (chunk) => {
-        received += chunk.length;
-        if (received > expectedBytes) {
-          request.destroy(new PermanentArtifactDownloadError("Release artifact exceeded its signed size"));
-        } else onProgress?.({ receivedBytes: offset + received, totalBytes: artifact.bytes });
-      });
+      let fd = null;
       try {
         if (fs.statSync(file).size !== offset) {
           throw new PermanentArtifactDownloadError("Relay artifact staging file changed during download");
         }
-        const output = fs.createWriteStream(file, { flags: "r+", start: offset, mode: 0o600 });
-        await pipeline(response, output);
+        fd = fs.openSync(file, "r+");
+        // Each chunk is on disk before the next is read. A piped write stream
+        // drops what it had buffered when the connection fails, so a dropped
+        // socket could lose the tail of what had arrived; here whatever arrived
+        // is exactly what the next attempt resumes from.
+        for await (const chunk of response) {
+          if (received + chunk.length > expectedBytes) {
+            throw new PermanentArtifactDownloadError("Release artifact exceeded its signed size");
+          }
+          await writeAt(fd, chunk, offset + received);
+          received += chunk.length;
+          onProgress?.({ receivedBytes: offset + received, totalBytes: artifact.bytes });
+        }
         if (received !== expectedBytes) {
           throw new Error(`Relay artifact download ended early (${received} != ${expectedBytes}).`);
         }
-        const fd = fs.openSync(file, "r");
-        try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+        fs.fsyncSync(fd);
         finish();
       } catch (error) {
         finish(error);
+      } finally {
+        if (fd !== null) { try { fs.closeSync(fd); } catch {} }
       }
     });
     // ClientRequest's socket timeout starts only after a socket is assigned.
@@ -285,6 +299,16 @@ function downloadArtifactAttempt({ parsed, file, artifact, offset, get, signal, 
     request.on("error", (error) => {
       if (responseStream) responseStream.destroy(error);
       finish(error);
+    });
+  });
+}
+
+function writeAt(fd, chunk, position) {
+  return new Promise((resolve, reject) => {
+    fs.write(fd, chunk, 0, chunk.length, position, (error, written) => {
+      if (error) reject(error);
+      else if (written !== chunk.length) reject(new Error(`Relay artifact write was short (${written} of ${chunk.length} bytes)`));
+      else resolve();
     });
   });
 }
@@ -311,37 +335,126 @@ async function downloadVerifiedArtifact(url, file, artifact, options = {}) {
   }
   const get = options.get || https.get;
   const sleep = options.sleep || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  const now = options.now || Date.now;
+  // `attempts` is the no-progress budget: consecutive attempts that moved no
+  // bytes. Attempts that made progress only count against the wall-clock budget.
   const attempts = options.attempts || ARTIFACT_DOWNLOAD_ATTEMPTS;
-  fs.closeSync(fs.openSync(file, "wx", 0o600));
+  const budgetMs = options.budgetMs || ARTIFACT_DOWNLOAD_BUDGET_MS;
+  // With `resume`, a file left by an earlier run continues from its last byte.
+  // The complete file is hashed against the signed manifest either way, so a
+  // partial that was tampered with or belongs to another artifact is caught
+  // there and discarded; the next run then starts clean.
+  let resumedFrom = 0;
+  if (options.resume && fs.existsSync(file)) {
+    resumedFrom = fs.statSync(file).size;
+    if (resumedFrom > artifact.bytes) { fs.truncateSync(file, 0); resumedFrom = 0; }
+  } else {
+    fs.closeSync(fs.openSync(file, "wx", 0o600));
+  }
+  const startedAt = now();
   let lastError;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  let total = 0;
+  let withoutProgress = 0;
+  const discardPartial = () => { try { fs.rmSync(file, { force: true }); } catch {} };
+  for (;;) {
     options.signal?.throwIfAborted();
     const offset = fs.statSync(file).size;
-    if (offset > artifact.bytes) fail("Release artifact exceeded its signed size");
+    if (offset > artifact.bytes) { discardPartial(); fail("Release artifact exceeded its signed size"); }
     if (offset === artifact.bytes) break;
+    if (withoutProgress >= attempts) break;
+    if (total >= ARTIFACT_DOWNLOAD_MAX_ATTEMPTS) break;
+    if (total > 0 && now() - startedAt >= budgetMs) { lastError = new Error(`download time budget of ${Math.round(budgetMs / 60_000)} minutes used up`); break; }
+    total += 1;
     try {
-      options.onProgress?.({ receivedBytes: offset, totalBytes: artifact.bytes });
+      options.onProgress?.({ receivedBytes: offset, totalBytes: artifact.bytes, resumedFrom, attempt: total });
       await downloadArtifactAttempt({ parsed, file, artifact, offset, get, signal: options.signal, onProgress: options.onProgress });
     } catch (error) {
       options.signal?.throwIfAborted();
       lastError = error;
-      if (error instanceof PermanentArtifactDownloadError) throw error;
-      if (attempt + 1 >= attempts) break;
-      const backoff = Math.min(4_000, 250 * (2 ** attempt));
+      if (error instanceof PermanentArtifactDownloadError) { discardPartial(); throw error; }
+      const progressed = fs.statSync(file).size > offset;
+      withoutProgress = progressed ? 0 : withoutProgress + 1;
+      if (withoutProgress >= attempts) break;
+      // A connection that keeps delivering bytes is retried almost at once; one
+      // that delivers nothing backs off, up to half a minute between tries.
+      const backoff = progressed ? 1_000 : Math.min(30_000, 500 * (2 ** withoutProgress));
       await sleep(backoff + Math.floor(Math.random() * 250));
     }
   }
   const downloadedBytes = fs.statSync(file).size;
   if (downloadedBytes !== artifact.bytes) {
-    throw new Error(`Relay artifact download failed after ${attempts} attempts (${downloadedBytes}/${artifact.bytes} bytes): ${lastError?.message || lastError || "incomplete response"}`);
+    const elapsed = Math.round((now() - startedAt) / 1000);
+    throw new Error(`Relay artifact download incomplete after ${total} attempts and ${elapsed}s (${downloadedBytes}/${artifact.bytes} bytes; ${downloadedBytes - resumedFrom} new this run): ${lastError?.message || lastError || "incomplete response"}`);
   }
   const actual = await sha512File(file);
   options.signal?.throwIfAborted();
   if (actual.length !== artifact.sha512.length || !crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(artifact.sha512))) {
-    fs.rmSync(file, { force: true });
+    discardPartial();
     fail("Relay artifact checksum is invalid.");
   }
 }
+
+const PARTIAL_ARTIFACT_SUFFIX = ".partial";
+
+/**
+ * Where an interrupted runtime download keeps its bytes between runs, and the
+ * exclusive hold on it. A flaky connection on 2026-10-10 reached 5-125 MB of a
+ * 346 MB runtime on each of several update attempts hours apart, and each
+ * attempt started again from zero because the staging directory was deleted
+ * with the failed transaction. The partial lives outside any staging or
+ * release directory, so nothing sweeps it, and is named by the artifact's
+ * signed digest, so a different build never resumes onto it.
+ */
+function prepareResumableArtifact({ homeDir = os.homedir(), version, artifact, now = Date.now, alive = (pid) => processAlive(pid) } = {}) {
+  const directory = path.join(homeDir, ".relay", "runtime", "downloads");
+  const digest = crypto.createHash("sha256").update(String(artifact?.sha512 || "")).digest("hex").slice(0, 16);
+  const file = path.join(directory, `runtime-${String(version).replace(/[^0-9A-Za-z.-]/g, "_")}-${digest}${PARTIAL_ARTIFACT_SUFFIX}`);
+  const lock = `${file}.lock`;
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  // One target at a time: a partial for another version or build is dead weight.
+  for (const name of fs.readdirSync(directory)) {
+    const candidate = path.join(directory, name);
+    if (candidate === file || candidate === lock) continue;
+    if (!name.endsWith(PARTIAL_ARTIFACT_SUFFIX) && !name.endsWith(`${PARTIAL_ARTIFACT_SUFFIX}.lock`)) continue;
+    if (name.endsWith(".lock")) {
+      let holder = null;
+      try { holder = JSON.parse(fs.readFileSync(candidate, "utf8")); } catch {}
+      if (Number.isInteger(holder?.pid) && alive(holder.pid)) continue;
+    }
+    try { fs.rmSync(candidate, { force: true }); } catch {}
+  }
+  let holder = null;
+  try { holder = JSON.parse(fs.readFileSync(lock, "utf8")); } catch {}
+  if (Number.isInteger(holder?.pid) && holder.pid !== process.pid && alive(holder.pid)) {
+    return { ok: false, reason: "partial-in-use", holderPid: holder.pid, file };
+  }
+  try { fs.rmSync(lock, { force: true }); } catch {}
+  try {
+    fs.writeFileSync(lock, JSON.stringify({ schema: 1, pid: process.pid, at: now() }), { mode: 0o600, flag: "wx" });
+  } catch (error) {
+    return { ok: false, reason: `partial-lock-failed: ${error.code || error.message}`, file };
+  }
+  let resumedFrom = 0;
+  try { resumedFrom = fs.statSync(file).size; } catch {}
+  return {
+    ok: true,
+    file,
+    resumedFrom,
+    release() { try { fs.rmSync(lock, { force: true }); } catch {} },
+    discard() { try { fs.rmSync(file, { force: true }); } catch {} },
+  };
+}
+
+function moveFile(from, to) {
+  try { fs.renameSync(from, to); }
+  catch (error) {
+    if (error.code !== "EXDEV") throw error;
+    fs.copyFileSync(from, to);
+    fs.rmSync(from, { force: true });
+  }
+}
+
+const megabytes = (bytes) => (bytes / (1024 * 1024)).toFixed(1);
 
 function parseSignedManifest(bytes, { version, platformKey, publicKeyPem, trustStore = trust }) {
   let envelope;
@@ -1142,23 +1255,42 @@ async function setup(argv = []) {
   }
 }
 
-async function stageVerifiedRuntime({ version, platformKey = releasePlatform(), destination }) {
+async function stageVerifiedRuntime({ version, platformKey = releasePlatform(), destination, homeDir = os.homedir(), log = console.log,
+  download = downloadVerifiedArtifact, fetchManifest = fetchBuffer, parseManifest = parseSignedManifest }) {
   const manifestUrl = `${RELEASE_ORIGIN}${RELEASE_BASE_PATH}/v${version}/manifest.json`;
   if (!destination) fail("Relay runtime destination is missing.");
   if (fs.existsSync(destination)) {
     fail("Relay refused to reuse a pre-existing runtime destination.");
   }
-  console.log("Checking Relay's signed release...");
-  const { artifact } = parseSignedManifest(await fetchBuffer(manifestUrl), { version, platformKey });
+  log("Checking Relay's signed release...");
+  const { artifact } = parseManifest(await fetchManifest(manifestUrl), { version, platformKey });
   fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
   const staging = fs.mkdtempSync(path.join(path.dirname(destination), `.relay-download-${version}-`));
   const archivePath = path.join(staging, "runtime.tar.gz");
   const extracted = path.join(staging, "root");
+  // The bytes land in a partial file that outlives this staging directory, so
+  // a download that fails part-way is continued by the next attempt instead of
+  // started again. Only one process at a time may hold a given partial.
+  let partial = null;
+  try { partial = prepareResumableArtifact({ homeDir, version, artifact }); } catch (error) { partial = { ok: false, reason: error.message }; }
+  const downloadPath = partial.ok ? partial.file : archivePath;
   try {
     fs.mkdirSync(extracted);
-    console.log("Downloading Relay's signed runtime...");
-    await downloadVerifiedArtifact(artifact.url, archivePath, artifact);
-    console.log("Verifying and installing Relay...");
+    const total = megabytes(artifact.bytes);
+    if (partial.ok && partial.resumedFrom > 0) log(`Downloading Relay's signed runtime, resuming at ${megabytes(partial.resumedFrom)} of ${total} MB...`);
+    else log(`Downloading Relay's signed runtime (${total} MB)${partial.ok ? "" : `; not resumable: ${partial.reason}`}...`);
+    let nextTenth = 1;
+    await download(artifact.url, downloadPath, artifact, {
+      resume: partial.ok,
+      onProgress: ({ receivedBytes, totalBytes }) => {
+        const tenth = Math.floor((receivedBytes * 10) / totalBytes);
+        if (tenth < nextTenth || receivedBytes >= totalBytes) return;
+        nextTenth = tenth + 1;
+        log(`Downloaded ${megabytes(receivedBytes)} of ${total} MB (${tenth * 10}%)`);
+      },
+    });
+    if (downloadPath !== archivePath) moveFile(downloadPath, archivePath);
+    log("Verifying and installing Relay...");
     validateArchiveListing(archivePath);
     const unpackInvocation = tarInvocation({ archivePath, mode: "extract", destination: extracted });
     const unpack = spawnSync(unpackInvocation.command, unpackInvocation.args, {
@@ -1174,6 +1306,7 @@ async function stageVerifiedRuntime({ version, platformKey = releasePlatform(), 
     fs.renameSync(extracted, destination);
     return verifyExtractedRuntime(path.join(destination, "node_modules", PACKAGE_NAME), version, platformKey);
   } finally {
+    partial?.release?.();
     fs.rmSync(staging, { recursive: true, force: true });
   }
 }
@@ -1248,6 +1381,7 @@ module.exports = {
   isCanonicalCliShimSource,
   releasePlatform,
   parseSignedManifest,
+  prepareResumableArtifact,
   processAlive,
   removeAbandonedRuntimeDownloads,
   restoreRuntimeLinks,

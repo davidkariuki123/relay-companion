@@ -39,7 +39,8 @@ try {
     ];
     const sent = [
       { relayId: "relay_t1", threadId: "t1", kind: "message", title: "", forHuman: "Can we ship it this week?", forAgent: "", ...toSven,
-        inReplyToRelayId: "relay_r1", createdAt: ago(50), updatedAt: ago(50), source: pill },
+        inReplyToRelayId: "relay_r1", createdAt: ago(50), updatedAt: ago(50), source: pill,
+        reactions: { aggregates: [{ emoji: "👍", count: 1, reactedByMe: false, actors: [{ name: "Sven Wellmann" }] }] } },
       { relayId: "relay_t4", threadId: "t3", kind: "message", title: "", forHuman: "Yes. Checklist coming.", forAgent: "", ...toSven,
         inReplyToRelayId: "relay_t3", createdAt: ago(20), updatedAt: ago(20), source: pill },
       // A full Relay sent as a reply stays in the room with its quote.
@@ -54,9 +55,11 @@ try {
       features: { replyThreads: true, peopleMentions: true }, relays, sent, requests: [], chats: [], slackChats: [], outbox: [] };
     window.sends = [];
     window.acks = [];
+    window.reacts = [];
     const api = { isTestOverlay: true, refresh: async () => window.fixture, refreshSent: async () => ({ items: window.fixture.sent }),
       contacts: async () => [], groups: async () => ({ ok: true, result: [group] }), accountInfo: async () => window.fixture.account, agentSurfaces: async () => ({}),
       sendReply: async (request) => { window.sends.push(request); return { ok: true }; },
+      react: async (id, emoji, action) => { window.reacts.push({ id, emoji, action }); return { ok: true }; },
       ackMany: async (ids) => { window.acks.push(...ids); return { ok: true }; } };
     window.relay = new Proxy(api, { get: (target, key) => key in target ? target[key] : String(key).startsWith("on") ? () => () => {} : async () => ({ ok: true }) });
   });
@@ -159,7 +162,24 @@ try {
   });
   assert.ok(order, "Replies sit between Details and the Open in bar");
   assert.equal(await page.locator("#qrInput").getAttribute("data-placeholder"), "Reply in thread…");
-  await replies.locator('[data-rd-quote="relay_t2"]').click();
+  // A reply in a Relay's thread has the room's ⋯ menu: react, or quote it.
+  assert.equal(await replies.locator('[data-rd-reply="relay_t1"] .rx-badge').count(), 1, "a reply shows its reactions");
+  const replyMenu = page.locator("#reader-reply-options-relay_t2");
+  const openReplyMenu = async () => {
+    await replies.locator('[data-rd-reply="relay_t2"]').hover();
+    await replies.locator('[data-rd-reply="relay_t2"] .th-message-more').click();
+    assert.ok(await replyMenu.evaluate((el) => el.matches(":popover-open")), "the ⋯ opens the reply's menu");
+  };
+  await openReplyMenu();
+  await replyMenu.locator('[data-rx-pick="relay_t2"]').first().click();
+  await page.waitForFunction(() => window.reacts.length === 1);
+  assert.deepEqual(await page.evaluate(() => window.reacts), [{ id: "relay_t2", emoji: "👍", action: "add" }], "a reply can be reacted to");
+  await replies.locator('[data-rd-reply="relay_t1"] .rx-badge').click();
+  await page.waitForFunction(() => window.reacts.length === 2);
+  assert.deepEqual((await page.evaluate(() => window.reacts))[1], { id: "relay_t1", emoji: "👍", action: "add" }, "a reply's badge adds your reaction");
+  await openReplyMenu();
+  await replyMenu.locator('[data-rd-quote="relay_t2"]').click();
+  assert.equal(await replyMenu.evaluate((el) => el.matches(":popover-open")), false, "choosing reply closes the menu");
   assert.match(await page.locator("#readerComposer .th-reply-target").innerText(), /Replying to Sven/);
   const readerInput = page.locator("#qrInput");
   await readerInput.fill("@sv");
@@ -209,5 +229,5 @@ try {
   await page.locator("#readerBack").waitFor();
   assert.equal(await page.locator("#readerReplies").count(), 0);
   assert.deepEqual(errors, []);
-  console.log("PASS: replies fold under their message; a text's thread is a room subview, a Relay's reads in its reader; quotes inside, no nesting; nothing without the row.");
+  console.log("PASS: replies fold under their message; a text's thread is a room subview, a Relay's reads in its reader; quotes inside, no nesting; a reply in a reader reacts from its ⋯; nothing without the row.");
 } finally { await browser.close(); }

@@ -88,13 +88,13 @@ try {
   }), true, 'the pill is on screen while scrolled');
   await page.locator('[data-topic-incoming]').evaluate(async (el) => { await Promise.all(el.getAnimations().map((a) => a.finished)); el.dataset.fixtureFirst = '1'; });
 
-  // An agent-only post is not counted in the people lane; a second human post is.
+  // An agent-only post counts like any other: the board has no lanes.
   await page.evaluate(() => {
     window.fixturePosts.unshift(window.fixtureMakePost(14, { forHuman:'' }));
     window.fixturePosts.unshift(window.fixtureMakePost(15));
   });
   await wake();
-  await page.waitForFunction(() => document.querySelector('[data-topic-incoming]')?.textContent === '2 new posts');
+  await page.waitForFunction(() => document.querySelector('[data-topic-incoming]')?.textContent === '3 new posts');
   now = await board();
   assert.equal(now.scrollTop, before.scrollTop);
   // Updating the count keeps the same pill: it does not flash in again.
@@ -105,17 +105,15 @@ try {
   // Checking again finds nothing further: no double counting.
   await wake();
   await page.waitForTimeout(150);
-  assert.equal((await board()).pill, '2 new posts');
+  assert.equal((await board()).pill, '3 new posts');
 
   // Tapping it is the read: new posts on top, board at its top, watermark moved, pill gone.
   await page.locator('[data-topic-incoming]').click();
   await page.waitForFunction(() => !document.querySelector('[data-topic-incoming]'));
   now = await board();
-  assert.deepEqual(now.posts.slice(0, 3), ['tpst_15', 'tpst_13', 'tpst_12']);
+  assert.deepEqual(now.posts.slice(0, 3), ['tpst_15', 'tpst_14', 'tpst_13']);
   assert.equal(now.scrollTop, 0);
   assert.equal(await page.evaluate(() => window.fixtureSeen), 1);
-  await page.locator('[data-topic-lane="agent"]').click();
-  assert.deepEqual((await board()).posts.slice(0, 3), ['tpst_15', 'tpst_14', 'tpst_13'], 'the agent lane holds the agent-only post');
 
   assert.deepEqual(errors, []);
   console.log('topic incoming posts: ok');
