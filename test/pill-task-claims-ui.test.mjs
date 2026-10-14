@@ -7,8 +7,9 @@ const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), 
 test("the chat Task bubble carries its card footer inside it (the claim slot is gone)", () => {
   // The Task card (David, 2026-09-17): the ownership, the state and the verbs
   // live in a footer INSIDE the bubble, on its grid — no separate sibling.
-  assert.match(html, /const taskFooter = m\.request \? taskCardFooterHtml\(m\) : "";/);
-  assert.match(html, /\$\{taskFooter\}\s*\n\s*\$\{badges\}/, "the footer is the bubble's last row, before the reaction badges");
+  assert.match(html, /const taskFooter = m\.request \? taskCardFooterHtml\(m, taskWide\) : "";/);
+  assert.match(html, /\$\{taskFooter\}\s*\n\s*\$\{taskWidePickers\}\s*\n\s*\$\{badges\}/,
+    "the footer is the bubble's last row, before the reaction badges (a full-screen card's folder list sits between)");
   assert.doesNotMatch(html, /th-task-stack\$\{mine/, "no stack wrapper around a Task bubble");
   assert.doesNotMatch(html, /taskClaimControlHtml|data-task-claim-action/, "the separate claim control is gone");
   assert.match(html, /\.th-msg \.tk-footer \{ flex:1 0 100%/);

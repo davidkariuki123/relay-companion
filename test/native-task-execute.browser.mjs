@@ -13,7 +13,8 @@ try {
       isTestOverlay: true, refresh: async () => empty, contacts: async () => [], rendererReady: () => { window.ready = true; },
       taskExecute: async (id, choice) => {
         window.executeCalls.push(choice ? { id, choice } : id);
-        if (window.offerWorkspaces && !choice) return { ok: false, cancelled: true, choose: window.offerWorkspaces };
+        // No pick yet, or the folder dialog backed out of: main asks again.
+        if (window.offerWorkspaces && (!choice || choice.browse)) return { ok: false, cancelled: true, choose: window.offerWorkspaces };
         return { ok: true, message: "Launched in native app" };
       },
     }, { get: (target, key) => key in target ? target[key] : String(key).startsWith("on") ? () => {} : async () => ({ ok: true }) });
@@ -51,13 +52,37 @@ try {
   }, fixture);
   await page.locator("[data-native-execute]").click();
   await page.locator("[data-execute-pick][data-cwd]").waitFor();
-  assert.match(await page.locator("#readerActions").textContent(), /Where should the agent work\?.*It will read and change files in this folder\./s);
+  assert.match(await page.locator("#readerActions").textContent(), /Claude Code in which folder\?.*It will read and change files in this folder\./s);
   assert.equal(await page.locator("[data-native-execute]").count(), 0, "the verb steps aside while the question is open");
   await page.locator("[data-execute-pick][data-cwd]").click();
   await page.locator("[data-native-execute]").waitFor();
   const calls = await page.evaluate(() => window.executeCalls);
   assert.deepEqual(calls.at(-1), { id: "task-native", choice: { provider: "claude", cwd: "C:\\w\\relay", browse: false } }, "the pick is the offered pair");
   assert.equal(await page.locator("[data-execute-pick]").count(), 0, "a pick closes the question");
+  // Two apps: the app first, then only that app's folders. Backing out of
+  // the folder dialog comes back to the same app's folders, not the app question.
+  await page.evaluate((input) => {
+    window.offerWorkspaces = { question: "Where should the agent work?", caption: "It will read and change files in this folder.",
+      options: [{ provider: "codex", cwd: "C:\\w\\relay", why: "Recent in Codex" }, { provider: "claude", cwd: "C:\\w\\relay", why: "Recent in Codex" }, { provider: "claude", cwd: "C:\\w\\game", why: "Recent in Claude Code" }],
+      browse: [{ provider: "codex", app: "Codex" }, { provider: "claude", app: "Claude Code" }],
+      remembered: { provider: "codex", reason: "last", why: "Codex is what you used last time." } };
+    onPayload(input); renderReader();
+  }, fixture);
+  await page.locator("[data-native-execute]").click();
+  await page.locator("[data-execute-app]").first().waitFor();
+  assert.match(await page.locator("#readerActions").textContent(), /Run it in which app\?.*Codex.*Codex is what you used last time\..*Claude Code/s);
+  assert.equal(await page.locator("[data-execute-pick]").count(), 0, "no folder before the app");
+  await page.locator('[data-execute-app][data-provider="claude"]').click();
+  await page.locator("[data-execute-pick][data-cwd]").first().waitFor();
+  assert.match(await page.locator("#readerActions").textContent(), /Claude Code in which folder\?/);
+  assert.equal(await page.locator('[data-execute-pick][data-provider="claude"][data-cwd]').count(), 2);
+  assert.equal(await page.locator('[data-execute-pick][data-provider="codex"]').count(), 0);
+  await page.locator('[data-execute-pick][data-browse="1"]').click();
+  await page.locator("[data-execute-pick][data-cwd]").first().waitFor();
+  assert.match(await page.locator("#readerActions").textContent(), /Claude Code in which folder\?/, "backing out of the dialog keeps the app");
+  await page.locator('[data-execute-pick][data-cwd$="game"]').click();
+  await page.locator("[data-native-execute]").waitFor();
+  assert.deepEqual((await page.evaluate(() => window.executeCalls)).at(-1), { id: "task-native", choice: { provider: "claude", cwd: "C:\\w\\game", browse: false } });
   assert.deepEqual(errors, []);
-  console.log("PASS: Execute is hidden in prod; dev launches the exact Task, shows native continuation, and asks its one question in the page.");
+  console.log("PASS: Execute is hidden in prod; dev launches the exact Task, shows native continuation, and asks which app, then which folder, in the page.");
 } finally { await browser.close(); }

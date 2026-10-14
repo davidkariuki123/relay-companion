@@ -121,8 +121,10 @@ export function workspaceChoices({
   const recent = [...index].sort((a, b) => (Number(b.lastUsedAt) || 0) - (Number(a.lastUsedAt) || 0) || (Number(b.uses) || 0) - (Number(a.uses) || 0));
   for (const checkout of recent) {
     if (options.length >= max) break;
-    const why = checkout.source === "codex" ? "Recent in Codex" : checkout.source === "claude" ? "Recent in Claude Code" : "On this device";
-    for (const provider of providerOrder) add(provider, checkout.dir, "recent", why);
+    // The page lists one app's folders at a time, so a folder recent in the
+    // other app is just "Recent" there, not "Recent in Codex" under Claude Code.
+    const known = checkout.source === "codex" || checkout.source === "claude";
+    for (const provider of providerOrder) add(provider, checkout.dir, "recent", !known ? "On this device" : checkout.source === provider ? `Recent in ${providerLabel(provider)}` : "Recent");
   }
   const trimmed = options.slice(0, max);
   // When the Task names exactly one checkout on this machine and we know which

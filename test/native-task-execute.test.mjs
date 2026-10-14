@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { executeNativeTask, executionPrompt, executionRecord, pendingNativeDrafts, nativeExecutionStatus } from "../src/native-task-execute.js";
+import { executeNativeTask, executionPrompt, executionRecord, executionRecordPath, pendingNativeDrafts, nativeExecutionStatus, stopWaitingForNativeApp } from "../src/native-task-execute.js";
 import { prepareClaudeDraft, prepareClaudeTaskLink } from "../src/claude-task-fallback.js";
-import { CLAUDE_DELIVERED_NOT_STARTED, claudeTurnStartedAfter, claudeWorkspaceTrusted, executionEnabled, executionMode, executionPreferences, setExecutionPreferences, nativeProgress, nativeSessionReady, prepareNativeSession, selectCodexModel, submitNativeTurn } from "../src/native-task-launch.js";
+import { CLAUDE_DELIVERED_NOT_STARTED, claudeTurnStartedAfter, claudeWorkspaceTrusted, EXECUTION_MODES, executionEnabled, executionMode, executionPreferences, setExecutionPreferences, nativeConversationUsed, nativeProgress, nativeSessionReady, prepareNativeSession, selectCodexModel, submitNativeTurn } from "../src/native-task-launch.js";
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-native-test-"));
@@ -330,19 +330,18 @@ test("a Claude seed is never reported as actual model completion", (t) => {
   assert.match(nativeProgress({ provider: "claude", transcript }), /finished a turn/);
 });
 
-test("Tasks start in Auto unless the person chose Manual; the mode reaches the conversation Relay prepares", async (t) => {
-  const { args, config } = fixture(t);
-  assert.equal(executionMode(config), "auto");
-  setExecutionPreferences(config, { permissionMode: "default" });
-  assert.equal(executionMode(config), "default");
-  setExecutionPreferences(config, { permissionMode: "bypassPermissions" });
-  assert.equal(executionMode(config), "auto", "only Auto or Manual are ever used");
+test("Tasks start in Claude Code's one permission from Your AIs; the mode reaches the conversation Relay prepares", async (t) => {
+  const { args } = fixture(t);
+  // Every Claude mode the person can choose reaches Execute: the list is the
+  // settings' own, least freedom first.
+  assert.deepEqual(EXECUTION_MODES, ["default", "acceptEdits", "auto", "bypassPermissions"]);
+  assert.ok(EXECUTION_MODES.includes(executionMode()));
   let prepared;
-  args.nativeApi.executionMode = () => "auto";
+  args.nativeApi.executionMode = () => "default";
   const prepare = args.nativeApi.prepareNativeSession;
   args.nativeApi.prepareNativeSession = async (input) => { prepared = input; return prepare(input); };
   await executeNativeTask(args);
-  assert.equal(prepared.permissionMode, "auto");
+  assert.equal(prepared.permissionMode, "default");
 });
 
 test("the conversation Relay creates records the mode on a hidden notice that is never progress", async (t) => {
@@ -467,14 +466,172 @@ test("Remote Control on for all sessions opens one conversation with the Task in
   assert.equal(executionRecord(config, "relay-test-2").phase, "accepted");
 });
 
-test("Settings offers Auto or Manual for Tasks, and main accepts only those two", () => {
+test("Execute has no switch or mode of its own: Claude Code's permission in Your AIs decides", () => {
   const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
   const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
   const preload = fs.readFileSync(new URL("../overlay/preload.cjs", import.meta.url), "utf8");
-  assert.match(html, /Tasks start in \$\{auto \? "Auto mode/);
-  assert.match(html, /id="executionMode" data-mode="\$\{auto \? "default" : "auto"\}"/);
-  assert.match(html, /window\.relay\.executionMode\(mode\)/);
-  assert.match(html, /nativeExecutionMode: next\.nativeExecutionMode === "default" \? "default" : "auto"/);
-  assert.match(preload, /executionMode: \(mode\) => ipcRenderer\.invoke\("relay:executionMode", mode\)/);
-  assert.match(main, /ipcMain\.handle\("relay:executionMode"[\s\S]{0,400}launch\.EXECUTION_MODES\.includes\(mode\)/);
+  const launch = fs.readFileSync(new URL("../src/native-task-launch.js", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /Tasks start in|id="executionMode"|executionDisable|nativeExecutionMode/);
+  assert.doesNotMatch(preload, /relay:executionMode|relay:executionDisable/);
+  assert.doesNotMatch(main, /relay:executionMode|relay:executionDisable|nativeExecutionMode/);
+  assert.match(launch, /export function executionMode\(\) \{\s*try \{ return relaySettings\.taskPermission\("claude"\); \} catch \{ return "auto"; \}/);
+});
+
+// Codex can show a conversation minutes before it can take a Task (over three
+// on a laptop short of memory, 2026-10-13). The click hands the wait to the
+// background watch, which sends late only when nothing else has happened.
+function codexFixture(t) {
+  const f = fixture(t);
+  Object.assign(f.session, { provider: "codex", nativeId: "01a13557-4a93-7e90-9794-6bfb5b565f07", url: "codex://threads/01a13557-4a93-7e90-9794-6bfb5b565f07", model: "test-model" });
+  f.args.choose = async () => ({ provider: "codex", cwd: f.root });
+  f.args.nativeApi.nativeProviders = () => [{ provider: "codex" }];
+  let codexReady = false, used = false;
+  const reserves = [];
+  f.args.nativeApi.nativeSessionReady = async () => {
+    f.calls.push("ready");
+    if (!codexReady) throw Object.assign(new Error("Codex has not finished opening this conversation."), { code: "CODEX_NOT_READY" });
+    return {};
+  };
+  f.args.nativeApi.nativeConversationUsed = () => used;
+  const reserve = f.args.client.taskExecute;
+  f.args.client.taskExecute = async (id, input) => { if (input) reserves.push(input); return reserve(id, input); };
+  return { ...f, reserves, becomeReady: () => { codexReady = true; }, useConversation: () => { used = true; } };
+}
+
+test("a Codex conversation still opening is watched, then sent once with the server told it is late", async (t) => {
+  const f = codexFixture(t), { args, calls, config, reserves } = f;
+  const result = await executeNativeTask(args);
+  assert.equal(result.ok, true);
+  assert.equal(result.waiting, true);
+  assert.match(result.message, /still opening/);
+  const waiting = executionRecord(config, args.id);
+  assert.equal(waiting.phase, "awaiting_app");
+  assert.equal(Date.parse(waiting.waitUntil) - Date.parse(waiting.waitingSince), 10 * 60 * 1000);
+  assert.equal(calls.includes("reserve"), false, "nothing is claimed while Codex is opening");
+  assert.match(nativeExecutionStatus(waiting), /Waiting for Codex/);
+  assert.deepEqual(pendingNativeDrafts(config), [args.id]);
+
+  calls.length = 0;
+  assert.equal((await executeNativeTask({ ...args, observeOnly: true })).waiting, true);
+  assert.deepEqual(calls, ["ready"], "while Codex is opening the watch makes no network calls and opens nothing");
+
+  f.becomeReady();
+  calls.length = 0;
+  await executeNativeTask({ ...args, observeOnly: true });
+  assert.deepEqual(calls, ["ready", "gate", "reserve", "fetch", "submit"]);
+  assert.equal(reserves.at(-1).requireUnstarted, true);
+  assert.equal(executionRecord(config, args.id).phase, "accepted");
+  assert.deepEqual(pendingNativeDrafts(config), []);
+  await executeNativeTask({ ...args, observeOnly: true });
+  assert.equal(calls.filter((c) => c === "submit").length, 1);
+});
+
+test("a click that finds Codex ready sends at once and never marks the launch late", async (t) => {
+  const f = codexFixture(t);
+  f.becomeReady();
+  await executeNativeTask(f.args);
+  assert.equal(executionRecord(f.config, f.args.id).phase, "accepted");
+  assert.equal("requireUnstarted" in f.reserves[0], false);
+});
+
+test("a conversation someone used while it opened is left alone; the Task stays unsent", async (t) => {
+  const f = codexFixture(t), { args, calls, config } = f;
+  await executeNativeTask(args);
+  f.becomeReady();
+  f.useConversation();
+  calls.length = 0;
+  await executeNativeTask({ ...args, observeOnly: true });
+  assert.deepEqual(calls, ["ready"]);
+  const record = executionRecord(config, args.id);
+  assert.equal(record.phase, "prepared");
+  assert.match(nativeExecutionStatus(record), /^Task not sent · The Codex conversation already has a message/);
+  assert.deepEqual(pendingNativeDrafts(config), []);
+});
+
+test("a Task started elsewhere while Codex opened is never sent, and an older server's refusal also stops it", async (t) => {
+  for (const [refusal, expected] of [
+    [Object.assign(new Error("This Task was already started somewhere else."), { status: 409, body: { error: "task_started_elsewhere" } }), /started somewhere else while Codex was opening/],
+    [Object.assign(new Error("invalid_request"), { status: 400, body: { error: "invalid_request" } }), /could not confirm the Task was still waiting/],
+  ]) {
+    const f = codexFixture(t), { args, calls, config } = f;
+    await executeNativeTask(args);
+    f.becomeReady();
+    args.client.taskExecute = async (_id, input) => { calls.push(input ? "reserve" : "gate"); if (input) throw refusal; return {}; };
+    await assert.rejects(executeNativeTask({ ...args, observeOnly: true }));
+    assert.equal(calls.includes("submit"), false);
+    const record = executionRecord(config, args.id);
+    assert.equal(record.phase, "prepared");
+    assert.match(nativeExecutionStatus(record), expected);
+    assert.deepEqual(pendingNativeDrafts(config), []);
+  }
+});
+
+test("Stop waiting leaves the Task unsent; Execute later sends it to the same conversation", async (t) => {
+  const f = codexFixture(t), { args, calls, config, reserves } = f;
+  await executeNativeTask(args);
+  const before = executionRecord(config, args.id);
+  assert.deepEqual(stopWaitingForNativeApp(config, args.id), { ok: true });
+  assert.match(nativeExecutionStatus(executionRecord(config, args.id)), /You stopped waiting/);
+  assert.deepEqual(pendingNativeDrafts(config), []);
+  f.becomeReady();
+  calls.length = 0;
+  await executeNativeTask({ ...args, observeOnly: true });
+  assert.deepEqual(calls, [], "a stopped Task is not watched");
+  assert.equal(stopWaitingForNativeApp(config, args.id).ok, false);
+  await executeNativeTask(args);
+  const after = executionRecord(config, args.id);
+  assert.equal(after.phase, "accepted");
+  assert.equal(after.session.nativeId, before.session.nativeId);
+  assert.equal(calls.filter((c) => c === "prepare").length, 0);
+  assert.equal("requireUnstarted" in reserves.at(-1), false, "Execute after stopping is the person's own choice");
+});
+
+test("Stop waiting landing after the watch's last check is refused, so the Task is never half-stopped", async (t) => {
+  const f = codexFixture(t), { args, config } = f;
+  await executeNativeTask(args);
+  f.becomeReady();
+  let stop;
+  args.client.fetchRelay = async () => { stop = stopWaitingForNativeApp(config, args.id); return { packet: { title: "Test", forHuman: "Do it.", forAgent: "" } }; };
+  await executeNativeTask({ ...args, observeOnly: true });
+  assert.equal(stop.ok, false);
+  assert.match(stop.error, /being sent now/);
+  assert.equal(executionRecord(config, args.id).phase, "accepted");
+});
+
+test("the watch gives up after ten minutes without sending", async (t) => {
+  const f = codexFixture(t), { args, calls, config } = f;
+  await executeNativeTask(args);
+  const file = executionRecordPath(config, args.id);
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  fs.writeFileSync(file, JSON.stringify({ ...record, waitUntil: new Date(Date.now() - 1000).toISOString() }));
+  f.becomeReady();
+  calls.length = 0;
+  await executeNativeTask({ ...args, observeOnly: true });
+  assert.deepEqual(calls, []);
+  assert.match(nativeExecutionStatus(executionRecord(config, args.id)), /did not finish opening the conversation within 10 minutes/);
+});
+
+test("a Codex conversation counts as used only once a turn or message is in it", (t) => {
+  const { root } = fixture(t), transcript = path.join(root, "rollout.jsonl");
+  const session = { provider: "codex", transcript };
+  const opened = [
+    { type: "session_meta", payload: { id: "thread" } },
+    { type: "event_msg", payload: { type: "thread_settings_applied" } },
+  ];
+  fs.writeFileSync(transcript, opened.map((row) => JSON.stringify(row)).join("\n") + "\n");
+  assert.equal(nativeConversationUsed(session), false);
+  fs.appendFileSync(transcript, JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: "hi" } }) + "\n");
+  assert.equal(nativeConversationUsed(session), true);
+  assert.equal(nativeConversationUsed({ provider: "claude", transcript }), false);
+});
+
+test("the Task card offers Stop waiting while a Task waits for Codex", () => {
+  const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+  const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+  const preload = fs.readFileSync(new URL("../overlay/preload.cjs", import.meta.url), "utf8");
+  assert.match(html, /current\?\.phase === "awaiting_app"/);
+  assert.match(html, /data-execute-stop-wait="\$\{esc\(st\.id\)\}">Stop waiting<\/button>/);
+  assert.match(html, /window\.relay\.taskExecuteStopWaiting\(id\)/);
+  assert.match(preload, /taskExecuteStopWaiting: \(id\) => ipcRenderer\.invoke\("relay:taskExecuteStopWaiting"/);
+  assert.match(main, /ipcMain\.handle\("relay:taskExecuteStopWaiting", stopWaitingForNativeApp\)/);
 });

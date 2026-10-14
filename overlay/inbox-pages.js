@@ -1,7 +1,8 @@
 // INBOX PAGES (David, 2026-10-09) — the Inbox is two pages: Chats, and to its
 // right Relays and Tasks (what waits on you first, then what waits on others,
 // then everything earlier). Two fingers move between them; page dots show
-// where you are and click there; ⌘1 / ⌘2 go straight there. Now and then the
+// where you are, and clicking them flips to the other page (Shane,
+// 2026-10-12: one toggle, not a dot to aim at); ⌘1 / ⌘2 go straight there. Now and then the
 // list leans in a quarter of the way, showing the faces waiting on you along
 // its edge, and settles back: the swipe teaches itself.
 //
@@ -150,7 +151,7 @@
       view.append(chatsPane, listPane);
       pager = document.createElement("div");
       pager.className = "ip-pager";
-      pager.innerHTML = `<div class="ip-dots" role="tablist" aria-label="Inbox pages"><button type="button" role="tab" data-ip-to="chats" aria-label="Chats" title="Chats  ⌘1"></button><button type="button" role="tab" data-ip-to="list" aria-label="Relays and Tasks" title="Relays and Tasks  ⌘2"><i class="ip-due"></i></button></div>`;
+      pager.innerHTML = `<button class="ip-dots" type="button" data-ip-flip><span data-ip-to="chats"></span><span data-ip-to="list"><i class="ip-due"></i></span></button>`;
       nameEl = document.createElement("div");
       nameEl.className = "ip-name"; nameEl.setAttribute("aria-live", "polite");
       // The name is said once, as you arrive. A finished animation left on the
@@ -158,7 +159,7 @@
       // whatever page — so it is taken off the moment it ends.
       nameEl.addEventListener("animationend", () => nameEl.classList.remove("show"));
       cardEl.append(pager, nameEl);
-      pager.addEventListener("click", (e) => { const b = e.target.closest("[data-ip-to]"); if (b) goTo(b.dataset.ipTo); });
+      pager.addEventListener("click", (e) => { if (e.target.closest("[data-ip-flip]")) goTo(S.view === "list" ? "chats" : "list"); });
       scrollEl.addEventListener("wheel", onWheel, { passive: false });
       listPane.addEventListener("click", onListClick);
       listPane.addEventListener("click", onHandOff, true);
@@ -294,17 +295,22 @@
     }
 
     // ---------- the dots ----------
+    // The one button names where it goes: the other page.
+    let due = 0;
+    function labelPager() {
+      const b = pager?.querySelector("[data-ip-flip]");
+      if (!b) return;
+      const onList = b.dataset.at === "list";
+      const label = onList ? "Show Chats" : due ? `Show Relays and Tasks, ${due} waiting on you` : "Show Relays and Tasks";
+      b.setAttribute("aria-label", label);
+      b.title = `${onList ? "Chats" : "Relays and Tasks"}  ${onList ? "⌘1" : "⌘2"}`;
+    }
     function syncAt(p) {
       if (!pager) return;
       pager.style.setProperty("--ip-at", String(p));
-      for (const b of pager.querySelectorAll("[data-ip-to]")) { const on = (b.dataset.ipTo === "list") === (p > .5); b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on)); }
-    }
-    function placePager() {
-      if (!pager) return;
-      const side = env.wideLayoutActive() ? document.getElementById("wideSide")?.getBoundingClientRect() : null;
-      const c = cardEl.getBoundingClientRect();
-      pager.style.left = side ? `${side.left - c.left + side.width / 2}px` : "";
-      nameEl.style.left = pager.style.left;
+      for (const d of pager.querySelectorAll("[data-ip-to]")) d.classList.toggle("on", (d.dataset.ipTo === "list") === (p > .5));
+      pager.querySelector("[data-ip-flip]").dataset.at = p > .5 ? "list" : "chats";
+      labelPager();
     }
 
     // ---------- acts in the list ----------
@@ -377,8 +383,8 @@
       if (!pager) return;
       const n = model().you.length;
       pager.querySelector(".ip-due")?.classList.toggle("on", n > 0);
-      const list = pager.querySelector('[data-ip-to="list"]');
-      list?.setAttribute("aria-label", n ? `Relays and Tasks, ${n} waiting on you` : "Relays and Tasks");
+      due = n;
+      labelPager();
       return n;
     }
 
@@ -395,7 +401,6 @@
       const showing = inboxShowing();
       pager.classList.toggle("ip-off", !showing);
       if (!showing) nameEl.classList.remove("show");
-      placePager();
       if (!P.live) { chatsPane.hidden = S.view !== "chats"; listPane.hidden = S.view !== "list"; syncAt(S.view === "list" ? 1 : 0); }
       // Back from a reader opened from the list: the row you read leaves.
       if (S.resume && showing) {

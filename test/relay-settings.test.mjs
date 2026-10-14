@@ -49,23 +49,32 @@ test("list names every setting with its value, where it lives and what an agent 
   const ctx = context(t);
   const rows = await settings.listSettings(ctx);
   const byId = new Map(rows.map((row) => [row.id, row]));
-  for (const id of ["milestone_relays", "show_automatically", "play_sounds", "notification_style", "theme", "open_with_claude", "open_with_chatgpt", "open_with_claude_code", "open_with_codex", "task_permissions_claude_code", "task_permissions_codex", "account", "blocked_contacts"]) {
+  for (const id of ["milestone_relays", "show_automatically", "play_sounds", "notification_style", "theme", "open_with_claude", "open_with_chatgpt", "open_with_claude_code", "open_with_codex", "account", "blocked_contacts"]) {
     assert.ok(byId.has(id), id);
     assert.ok(byId.get(id).where, `${id} says where it lives in the pill`);
   }
-  // Features the account does not have are not mentioned.
-  for (const id of ["open_with_conductor", "device_execution", "slack", "chat_agent_claude_model"]) assert.equal(byId.has(id), false, id);
+  // Features the account does not have are not mentioned: run settings exist
+  // only where Relay starts agents itself, and device execution is gone.
+  for (const id of ["open_with_conductor", "device_execution", "slack", "chat_agent_claude_model", "task_permissions_claude_code", "task_permissions_codex"]) assert.equal(byId.has(id), false, id);
   assert.equal(byId.get("milestone_relays").value, true);
   assert.equal(byId.get("milestone_relays").agent, "restrict_now_raise_with_approval");
   assert.equal(byId.get("play_sounds").agent, "change");
   assert.equal(byId.get("account").agent, "pill_only");
   assert.equal(Object.hasOwn(byId.get("account"), "value"), false);
-  assert.equal(byId.get("task_permissions_codex").value, "full");
   assert.deepEqual(byId.get("theme").options.map((option) => option.value), ["dark", "light"]);
+  assert.equal(byId.get("account").label, "Relay account");
+
+  // A developer account has one permission per coding agent, on its row in Your AIs.
+  const developer = new Map((await settings.listSettings(context(t, { features: { requests: true, taskExecution: true } }))).map((row) => [row.id, row]));
+  assert.equal(developer.get("task_permissions_codex").value, "full");
+  assert.equal(developer.get("task_permissions_claude_code").value, "auto");
+  assert.equal(developer.get("task_permissions_claude_code").where, "You › Your AIs › Claude Code");
+  assert.deepEqual(developer.get("task_permissions_claude_code").options.map((option) => option.value), ["default", "acceptEdits", "auto", "bypassPermissions"]);
+  assert.equal(developer.has("device_execution"), false);
 });
 
 test("an agent makes agents do less at once, and anything that gives them more freedom waits for the person", async (t) => {
-  const ctx = context(t);
+  const ctx = context(t, { features: { requests: true, agentMentions: true } });
   const off = await settings.setSetting(ctx, "milestone_relays", "off");
   assert.equal(off.status, "changed");
   assert.equal(settings.readStore(ctx.options).milestoneRelays, false);
@@ -99,13 +108,13 @@ test("an agent makes agents do less at once, and anything that gives them more f
   assert.equal((await settings.setSetting(ctx, "theme", "light")).status, "unchanged");
 
   // The person's own account stays theirs.
-  assert.deepEqual(await settings.setSetting(ctx, "account", "anything"), { status: "pill_only", setting: "account", where: "You › Account" });
+  assert.deepEqual(await settings.setSetting(ctx, "account", "anything"), { status: "pill_only", setting: "account", where: "You › Relay account" });
   await assert.rejects(settings.setSetting(ctx, "no_such_setting", true), /no Relay setting called/);
   await assert.rejects(settings.setSetting(ctx, "theme", "purple"), /must be one of: dark, light/);
 });
 
 test("the person answers a waiting request in the pill: Allow applies it, Not now drops it", async (t) => {
-  const ctx = context(t);
+  const ctx = context(t, { features: { requests: true, relayWork: true } });
   await settings.setSetting(ctx, "task_permissions_codex", "ask");
   const asked = await settings.setSetting(ctx, "task_permissions_codex", "full");
   assert.equal((await settings.answerPendingRequest(ctx, asked.requestId, false)).status, "declined");
@@ -136,4 +145,19 @@ test("the pill refuses to hide itself where nothing could bring it back", async 
 test("account settings need a signed-in account", async (t) => {
   const ctx = context(t, { accountKey: "" });
   await assert.rejects(settings.setSetting(ctx, "open_with_chatgpt", false), /not signed in/);
+});
+
+test("the coding apps' switches mention running Tasks only to an account that can run them", async (t) => {
+  // Running a Task from its card is gated (features.taskExecution); an agent
+  // on any other account is never told it exists (2026-10-09).
+  const plain = new Map((await settings.listSettings(context(t))).map((row) => [row.id, row]));
+  for (const id of ["open_with_claude_code", "open_with_codex"]) {
+    assert.doesNotMatch(plain.get(id).description, /Task/, id);
+    assert.match(plain.get(id).description, /^Offer (Claude Code|Codex) when the person opens a Relay. Takes effect only where/);
+  }
+  const dev = new Map((await settings.listSettings(context(t, { features: { requests: true, taskExecution: true, conductor: true } }))).map((row) => [row.id, row]));
+  for (const id of ["open_with_claude_code", "open_with_codex", "open_with_conductor"]) {
+    assert.match(dev.get(id).description, /and as a button to run a Task on its card/, id);
+  }
+  assert.doesNotMatch(dev.get("open_with_claude").description, /Task/, "the chat apps never run Tasks");
 });

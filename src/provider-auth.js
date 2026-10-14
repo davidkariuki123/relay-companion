@@ -13,7 +13,6 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { withCodexAppServer } from "./codex-app-server.js";
 import { acpProviderBinary } from "./acp-provider-binary.js";
 
 const execFileDefault = promisify(execFileCallback);
@@ -38,7 +37,6 @@ const activeRemoteLogins = new Map();
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1_000;
 const REMOTE_AUTH_OUTPUT_MAX_BYTES = 128 * 1024;
 const REMOTE_AUTH_CONTEXT = "relay-provider-auth-code-v1";
-const CLAUDE_MCP_BATCH_SIZE = "8";
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const { linuxTerminalEnvironment, linuxTerminalInvocation } = require("../overlay/linux-terminal.cjs");
@@ -47,40 +45,6 @@ const TERMINAL_APP = "Terminal";
 
 function configPath(root = process.env.RELAY_HOME || process.env.RELAY_COMPANION_HOME || path.join(os.homedir(), ".relay-companion")) {
   return path.join(root, "provider-connections.json");
-}
-
-function readPrefs(file = configPath()) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function enabledFromPrefs(provider, prefs) {
-  return prefs?.providers?.[provider]?.enabled !== false;
-}
-
-function writePrefs(provider, enabled, file = configPath()) {
-  const prefs = readPrefs(file);
-  const next = {
-    ...prefs,
-    version: 1,
-    providers: {
-      ...(prefs.providers && typeof prefs.providers === "object" ? prefs.providers : {}),
-      [provider]: {
-        ...(prefs?.providers?.[provider] && typeof prefs.providers[provider] === "object" ? prefs.providers[provider] : {}),
-        enabled: Boolean(enabled),
-      },
-    },
-  };
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
-  fs.renameSync(tmp, file);
-  try { fs.chmodSync(file, 0o600); } catch {}
-  return next;
 }
 
 function normalizedProviderCommand(candidate) {
@@ -189,124 +153,6 @@ function decryptClaudeAuthorizationCode(authId, privateKey, envelope) {
 export function providerAuthenticationFailure(value) {
   return /authentication_failed|login expired|failed to authenticate|oauth access token.*revoked|not logged in|please run \/login/i
     .test(String(value?.message || value || ""));
-}
-
-function safeIntegrationName(value) {
-  return String(value || "").trim().replace(/[^a-zA-Z0-9 ._+-]/g, "").slice(0, 80);
-}
-
-function localIntegrationNames(provider, homedir = os.homedir()) {
-  const names = new Set();
-  if (provider === "claude") {
-    try {
-      const config = JSON.parse(fs.readFileSync(process.env.CLAUDE_CODE_CONFIG || path.join(homedir, ".claude.json"), "utf8"));
-      for (const name of Object.keys(config?.mcpServers || {})) names.add(safeIntegrationName(name));
-    } catch {}
-  } else if (provider === "codex") {
-    try {
-      const source = fs.readFileSync(path.join(process.env.CODEX_HOME || path.join(homedir, ".codex"), "config.toml"), "utf8");
-      for (const match of source.matchAll(/^\s*\[mcp_servers\.([^\].]+)\]\s*$/gm)) names.add(safeIntegrationName(match[1]));
-    } catch {}
-  }
-  return [...names].filter(Boolean).sort((a, b) => a.localeCompare(b));
-}
-
-function integrationRecord(name, status = "Configured", source = "local") {
-  const safeName = safeIntegrationName(name);
-  if (!safeName) return null;
-  return { name: safeName, status: safeMessage(status, 80) || "Configured", source };
-}
-
-export function configuredProviderInventory({ homedir = os.homedir() } = {}) {
-  const providers = {};
-  for (const id of Object.keys(PROVIDERS)) {
-    providers[id] = {
-      integrations: {
-        mcpServers: localIntegrationNames(id, homedir).map((name) => integrationRecord(name)).filter(Boolean),
-        apps: [],
-      },
-    };
-  }
-  return { ok: true, providers };
-}
-
-function parseClaudeMcpList(stdout) {
-  const integrations = [];
-  for (const rawLine of String(stdout || "").split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || /^checking mcp server health/i.test(line) || /^no mcp servers/i.test(line)) continue;
-    const separator = line.lastIndexOf(" - ");
-    if (separator < 0) continue;
-    const left = line.slice(0, separator).trim();
-    const colon = left.indexOf(":");
-    if (colon < 0) continue;
-    let name = left.slice(0, colon).trim();
-    let source = "local";
-    if (name.startsWith("claude.ai ")) {
-      name = name.slice("claude.ai ".length).trim();
-      source = "account";
-    }
-    const rawStatus = line.slice(separator + 3).replace(/^[✔!✘✖]\s*/, "").trim();
-    const record = integrationRecord(name, rawStatus, source);
-    if (record) integrations.push(record);
-  }
-  return integrations.sort((a, b) => a.name.localeCompare(b.name));
-}
-
-async function installedCodexApps() {
-  return withCodexAppServer(async (client) => {
-    const snapshot = await client.request("app/installed", { forceRefresh: false });
-    return (Array.isArray(snapshot?.apps) ? snapshot.apps : [])
-      // These are Codex's own control surfaces, not user-connected apps.
-      .filter((app) => !String(app?.id || "").startsWith("connector_openai_"))
-      .map((app) => ({
-        name: safeIntegrationName(app?.runtimeName),
-        status: app?.callable ? "Connected" : app?.enabled ? "Unavailable" : "Disabled",
-        source: "account",
-      }))
-      .filter((app) => app.name)
-      .sort((a, b) => a.name.localeCompare(b.name));
-  });
-}
-
-async function providerIntegrations(provider, {
-  runtime,
-  execFile = execFileDefault,
-  timeoutMs = 8_000,
-  codexApps = installedCodexApps,
-  homedir = os.homedir(),
-  mcpBatchSize = CLAUDE_MCP_BATCH_SIZE,
-} = {}) {
-  const configured = localIntegrationNames(provider, homedir)
-    .map((name) => integrationRecord(name))
-    .filter(Boolean);
-  if (!runtime) return { mcpServers: configured, apps: [] };
-  if (provider === "claude") {
-    try {
-      const result = await execFile(runtime, ["mcp", "list"], {
-        timeout: Math.max(timeoutMs, 15_000),
-        maxBuffer: 512 * 1024,
-        // Claude Code health-checks MCPs in batches. Its default of three makes
-        // Settings wait through multiple waves on connector-heavy accounts.
-        env: {
-          ...process.env,
-          MCP_SERVER_CONNECTION_BATCH_SIZE: process.env.MCP_SERVER_CONNECTION_BATCH_SIZE || String(mcpBatchSize),
-        },
-      });
-      const discovered = parseClaudeMcpList(result?.stdout);
-      return { mcpServers: discovered.length ? discovered : configured, apps: [] };
-    } catch {
-      return { mcpServers: configured, apps: [] };
-    }
-  }
-  if (provider === "codex") {
-    try {
-      return { mcpServers: configured, apps: await codexApps() };
-    } catch {
-      return { mcpServers: configured, apps: [] };
-    }
-  }
-  return { mcpServers: configured, apps: [] };
 }
 
 function shellQuote(value) {
@@ -453,22 +299,16 @@ function parseCodexStatus(stdout, stderr, exitCode = 0) {
 export async function providerAuthStatus(provider, {
   command = "",
   execFile = execFileDefault,
-  prefsFile = configPath(),
   timeoutMs = 8_000,
-  codexApps = installedCodexApps,
-  homedir = os.homedir(),
-  includeIntegrations = false,
 } = {}) {
   const id = String(provider || "");
   const spec = PROVIDERS[id];
   if (!spec) throw new Error("Unknown provider connection.");
   settleTerminalAttempt(id);
-  const enabled = enabledFromPrefs(id, readPrefs(prefsFile));
   const runtime = resolveProviderCommand(id, { command });
   const base = {
     id,
     label: spec.label,
-    enabled,
     installed: Boolean(runtime),
     connected: false,
     subscription: false,
@@ -479,19 +319,15 @@ export async function providerAuthStatus(provider, {
     busyDetail: activeLogins.get(id)?.busyDetail || "",
     requirement: id === "claude" ? "Claude subscription required" : "ChatGPT subscription required",
     signInAction: id === "claude" ? "Sign in to Claude Code" : "Sign in to Codex",
-    integrations: { mcpServers: [], apps: [] },
   };
   if (!runtime) return base;
-  const integrationsPromise = includeIntegrations
-    ? providerIntegrations(id, { runtime, execFile, timeoutMs, codexApps, homedir })
-    : Promise.resolve(base.integrations);
   try {
     const result = await execFile(runtime, spec.statusArgs, { timeout: timeoutMs, maxBuffer: 256 * 1024 });
     const parsed = id === "claude"
       ? parseClaudeStatus(result?.stdout)
       : parseCodexStatus(result?.stdout, result?.stderr, 0);
     if (parsed.connected && activeLogins.has(id)) finishAttempt(id, activeLogins.get(id), "");
-    return { ...base, ...parsed, integrations: await integrationsPromise, detail: attemptDetail(id, parsed), busy: activeLogins.has(id) };
+    return { ...base, ...parsed, detail: attemptDetail(id, parsed), busy: activeLogins.has(id) };
   } catch (error) {
     if (error?.code === "ENOENT") {
       return { ...base, installed: false, detail: `${spec.label} is not installed.`, busy: false };
@@ -505,7 +341,6 @@ export async function providerAuthStatus(provider, {
       ...base,
       ...parsed,
       busy: activeLogins.has(id),
-      integrations: await integrationsPromise,
       detail: attemptDetail(id, parsed) || safeMessage(stderr || error?.message),
     };
   }
@@ -513,33 +348,10 @@ export async function providerAuthStatus(provider, {
 
 export async function providerAuthStatuses(options = {}) {
   const [claude, codex] = await Promise.all([
-    providerAuthStatus("claude", { ...options, includeIntegrations: false }),
-    providerAuthStatus("codex", { ...options, includeIntegrations: false }),
+    providerAuthStatus("claude", options),
+    providerAuthStatus("codex", options),
   ]);
   return { ok: true, providers: { claude, codex } };
-}
-
-export async function providerInventoryStatuses(options = {}) {
-  const claudeRuntime = resolveProviderCommand("claude", options);
-  const codexRuntime = resolveProviderCommand("codex", options);
-  const [claude, codex] = await Promise.all([
-    providerIntegrations("claude", { ...options, runtime: claudeRuntime }),
-    providerIntegrations("codex", { ...options, runtime: codexRuntime }),
-  ]);
-  return {
-    ok: true,
-    providers: {
-      claude: { integrations: claude },
-      codex: { integrations: codex },
-    },
-  };
-}
-
-export async function setProviderEnabled(provider, enabled, { prefsFile = configPath() } = {}) {
-  const id = String(provider || "");
-  if (!PROVIDERS[id]) throw new Error("Unknown provider connection.");
-  writePrefs(id, Boolean(enabled), prefsFile);
-  return { ok: true, provider: id, enabled: Boolean(enabled) };
 }
 
 export function providerSpawnEnvironment(env = process.env) {
@@ -731,7 +543,6 @@ export async function connectProvider(provider, {
   if (!spec) throw new Error("Unknown provider connection.");
   const runtime = resolveProviderCommand(id, { command, env });
   if (!runtime) throw new Error(`${spec.label} is not installed.`);
-  await setProviderEnabled(id, true, { prefsFile });
   const current = await providerAuthStatus(id, { command: runtime, prefsFile, execFile });
   if (current.connected) {
     return { ok: true, provider: id, started: false, busy: false, alreadyConnected: true };
@@ -798,19 +609,15 @@ export async function connectProvider(provider, {
 
 export async function assertProviderReady(provider, options = {}) {
   const status = await providerAuthStatus(provider, options);
-  if (!status.enabled) {
-    throw new Error(`${status.label} is disabled in Relay. Enable it in Settings before starting this request.`);
-  }
   if (!status.installed) {
-    throw new Error(`${status.label} is not installed. Install it, then open Relay Settings → Agent connections.`);
+    throw new Error(`${status.label} is not installed. Install it, then open Relay › You › Your AIs.`);
   }
   if (!status.connected) {
     const subscription = status.id === "claude" ? "Claude subscription" : "ChatGPT subscription";
-    const action = status.id === "claude" ? "Sign in to Claude Code" : "Sign in to Codex";
     if (status.authState === "api_billing") {
-      throw new Error(`${status.label} is signed in with API billing, but Tasks use your ${subscription}. Open Relay Settings → Agent connections and choose “${action}”.`);
+      throw new Error(`${status.label} is signed in with API billing, but Tasks use your ${subscription}. Open Relay › You › Your AIs and choose Sign in under ${status.label}.`);
     }
-    throw new Error(`${status.label} needs your ${subscription} before this Task can start. Open Relay Settings → Agent connections and choose “${action}”.`);
+    throw new Error(`${status.label} needs your ${subscription} before this Task can start. Open Relay › You › Your AIs and choose Sign in under ${status.label}.`);
   }
   return status;
 }
@@ -818,8 +625,6 @@ export async function assertProviderReady(provider, options = {}) {
 export const _test = {
   parseClaudeStatus,
   parseCodexStatus,
-  readPrefs,
-  writePrefs,
   configPath,
   activeLogins,
   lastAttempts,
@@ -828,9 +633,6 @@ export const _test = {
   terminalAttemptPaths,
   writeTerminalLoginScript,
   settleTerminalAttempt,
-  localIntegrationNames,
-  parseClaudeMcpList,
-  providerIntegrations,
   stripTerminalControl,
   remoteAuthorizeUrl,
   codexDeviceCode,

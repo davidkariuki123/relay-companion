@@ -9,30 +9,59 @@ function section(start, end) {
   assert.ok(i >= 0 && j > i);
   return html.slice(i, j);
 }
-function harness({ saved = {}, surfaces = "both", preference = null } = {}) {
+// What Your AIs sees when every AI here is connected to Relay: the Claude
+// app (its Code tab and its chats), the ChatGPT app's Codex, Codex in a
+// terminal, and both chat AIs' connectors.
+const now = new Date().toISOString();
+const CONNECTED = {
+  hosts: [
+    { id: "claude-app", installed: true, state: "connected" },
+    { id: "claude-code", installed: true, state: "connected", where: "claude-app" },
+    { id: "chatgpt-app", installed: true, state: "connected" },
+    { id: "codex", installed: true, state: "connected", where: "terminal" },
+  ],
+  places: {
+    "claude-chat": { installed: true, connected: true },
+    "claude-code:app": { installed: true, connected: true },
+    "codex:chatgpt-app": { installed: true, connected: true },
+    "codex:terminal": { installed: true, connected: true },
+  },
+  connections: [
+    { id: "conn-claude", surface: "claude", kind: "connector", name: "Relay", createdAt: now, lastUsedAt: now },
+    { id: "conn-chatgpt", surface: "chatgpt", kind: "connector", name: "Relay", createdAt: now, lastUsedAt: now },
+  ],
+};
+function harness({ saved = {}, surfaces = "both", preference = null, features = {} } = {}) {
   const store = new Map(Object.entries(saved));
   let account = "account-a";
   const code = section("  let agentSurfaces = null;", "  function chatOrder()");
-  const ui = section("  function yourAgentHtml()", "  function blockedPeopleHtml()");
+  const ui = section("  function runsAgentsHere()", "  function blockedPeopleHtml()");
   const footer = section("  function relayHostActionsHtml(", "  // The row's click");
-  const api = new Function("protoPref", "setProtoPref", "signupAccountKey", "payload", `
+  const api = new Function("protoPref", "setProtoPref", "signupAccountKey", "payload", "CONNECTED", `
     const sessionPickerState = null;
+    const window = { relay: {} };
+    let providerAuthInfo = null, providerAuthBusy = "", providerAuthNote = "", providerAuthError = "";
+    let chatAgentPreferences = null, chatAgentPreferencesError = "";
+    const PERM_VENDORS = [], permMode = () => "";
+    const timeAgoWords = () => "just now";
     ${section("  function sessionPickerInlineHtml(", "  function wireSessionPickerRows(")}
     const hostKeyFor = app => app === "Codex" ? "codex" : "claude";
     ${section("  function esc(s)", "  function agentMentionSpans(")}
     const readerRow = () => null, relayById = () => null;
+    ${section("  function isTaskRow(r)", "  // ---- Topics")}
     const relaySubject = row => row.title || "Test";
     const relaySender = () => "Taylor";
     ${code}
     ${ui}
     ${footer}
     return { agentAppSelection, requestedAgentApps, setAgentAppEnabled, saveAgentApps,
-      agentAppHosts, agentAppName, agentSurfacePreference, yourAgentHtml, relayHostActionsHtml,
+      agentAppHosts, agentAppName, agentSurfacePreference, relayHostActionsHtml,
+      page: (snapshot = CONNECTED) => { setupSnapshot = snapshot; return setupPageHtml(); },
       chatAppSelection, setChatAppEnabled, saveChatApps,
       enabledAgentApps: () => [...chatAppSelection(), ...agentAppSelection()],
       setSurfaces: value => { agentSurfaces = value; } };
   `)((key, fallback) => store.has(key) ? store.get(key) : fallback,
-    (key, value) => store.set(key, value), () => account, { ui: { openingPreference: preference } });
+    (key, value) => store.set(key, value), () => account, { ui: { openingPreference: preference }, features }, CONNECTED);
   const detected = {
     "Claude Code": { available: true }, Codex: { available: true },
     _claudeDesktop: { available: true }, _codexDesktop: { available: true },
@@ -48,10 +77,10 @@ test("independent switches round trip both, one, none and back on", () => {
   assert.deepEqual(h.agentAppHosts(), ["codex", "claude"]);
   // Four switches, one per tile of the reader's sheet, all on to begin with;
   // no Other row — the copied sentence has nothing to switch (David, 2026-09-17).
-  assert.equal((h.yourAgentHtml().match(/aria-checked="true"/g) || []).length, 4);
-  assert.equal((h.yourAgentHtml().match(/class="sv-switch"/g) || []).length, 4);
-  assert.doesNotMatch(h.yourAgentHtml(), /svOtherAgent|Copy prompts for another agent/);
-  assert.doesNotMatch(h.yourAgentHtml(), /Other<\/span>|Terminal or another agent|sv-open-logo-blank/);
+  assert.equal((h.page().match(/aria-checked="true"/g) || []).length, 4);
+  assert.equal((h.page().match(/class="sv-switch"/g) || []).length, 4);
+  assert.doesNotMatch(h.page(), /svOtherAgent|Copy prompts for another agent/);
+  assert.doesNotMatch(h.page(), /Other<\/span>|Terminal or another agent|sv-open-logo-blank/);
   h.setAgentAppEnabled("Codex", false);
   assert.deepEqual(h.agentAppSelection(), ["Claude Code"]);
   h.setAgentAppEnabled("Claude Code", false);
@@ -95,14 +124,23 @@ test("new choices are account scoped and cannot alter another account's selectio
   assert.deepEqual([...h.store], before);
 });
 
-test("unknown and absent apps stay disabled and do not claim a connection", () => {
+test("an AI that is not connected to Relay offers Connect, never a switch", () => {
   const h = harness({ surfaces: null });
   assert.deepEqual(h.agentAppSelection(), []);
-  assert.equal((h.yourAgentHtml().match(/Checking availability…/g) || []).length, 2);
-  assert.equal((h.yourAgentHtml().match(/ disabled/g) || []).length, 2);
-  h.setSurfaces({ Codex: { available: false, reason: "Install Codex" } });
-  assert.match(h.yourAgentHtml(), /Install Codex/);
-  assert.doesNotMatch(h.yourAgentHtml(), /Connected|svOpeningSurface|<select/);
+  // Nothing known about this computer yet: no coding agent row at all.
+  const unknown = h.page(null);
+  assert.match(unknown, /Couldn’t check this computer\./);
+  assert.doesNotMatch(unknown, /data-agent-app=/);
+  // Codex installed but not connected; no chat AI connected.
+  const notYet = h.page({
+    hosts: [{ id: "codex", installed: true, state: "available", where: "terminal" }],
+    places: { "codex:terminal": { installed: true, connected: false, action: "connect" } },
+    connections: [],
+  });
+  assert.doesNotMatch(notYet, /role="switch"/);
+  assert.equal((notYet.match(/Not connected to Relay/g) || []).length, 3);
+  assert.match(notYet, /data-setup-connect="codex">Connect<\/button>/);
+  assert.equal((notYet.match(/data-setup-web-connect="(claude|chatgpt)">Connect<\/button>/g) || []).length, 2);
 });
 
 test("both enabled desktop providers render separate actions without automatically opening either", () => {
@@ -161,13 +199,18 @@ test("the copied sentence is always offered: beside the app rows, and alone when
   assert.match(reader, /class="th-host-or"/);
   assert.doesNotMatch(reader, /data-host-open=/);
   assert.match(reader, /data-pull-copy="Pull my sent relay/);
+  // A Task asks for work: the agent carries it out, or reports where a sent one stands.
+  const taskCopy = (row) => h.relayHostActionsHtml(row).match(/data-pull-copy="([^"]+)"/)[1];
+  assert.equal(taskCopy({ id:"relay-task", title:"Find the session", kind:"task" }), "Pull Taylor’s Task “Find the session” from Relay and carry it out.");
+  assert.equal(taskCopy({ id:"relay-task", title:"Find the session", relayNotificationKind:"task" }), "Pull Taylor’s Task “Find the session” from Relay and carry it out.");
+  assert.equal(taskCopy({ id:"relay-task", title:"Find the session", kind:"task", direction:"out" }), "Pull my sent Task “Find the session” from Relay and tell me where it stands.");
   // Nothing switches the sentence off: no apps, another account, a legacy "off" — still offered.
   assert.match(h.relayHostActionsHtml({ id:"relay-test" }), /Copy prompt/);
   h.switchAccount("account-b");
   assert.match(h.relayHostActionsHtml({ id:"relay-test" }), /Copy prompt/);
   const legacyOff = harness({ saved: { "proto.otherAgent.v1:account-a": "off", "proto.agentApps.v3:account-a": "__none__" } });
   assert.match(legacyOff.relayHostActionsHtml({ id:"relay-test" }), /Copy prompt/);
-  assert.doesNotMatch(h.yourAgentHtml(), /My own session|Use this one|Chosen/);
+  assert.doesNotMatch(h.page(), /My own session|Use this one|Chosen/);
 });
 
 test("legacy Other and terminal choices migrate to no app / that app, and keep the sentence", () => {
@@ -207,9 +250,9 @@ test("the reader's sheet paints exactly the chips whose switches are on, in its 
   assert.deepEqual(names(bubble()), ["Claude", "ChatGPT", "Claude Code", "Codex"]);
   assert.doesNotMatch(bubble(), /th-host-sheet/);
   // Settings lists the same four, the same way round, each its own switch.
-  const rows = [...h.yourAgentHtml().matchAll(/data-(chat|agent)-app="([^"]+)"/g)].map((m) => m[2]);
+  const rows = [...h.page().matchAll(/data-(chat|agent)-app="([^"]+)"/g)].map((m) => m[2]);
   assert.deepEqual(rows, ["Claude", "ChatGPT", "Claude Code", "Codex"]);
-  assert.match(h.yourAgentHtml(), /src="claudeMark\.svg"[\s\S]*src="chatgptMark\.svg"[\s\S]*src="claudeCodeMark\.svg"[\s\S]*src="codexMark\.svg"/);
+  assert.match(h.page(), /src="claudeMark\.svg"[\s\S]*src="chatgptMark\.svg"[\s\S]*src="claudeCodeMark\.svg"[\s\S]*src="codexMark\.svg"/);
   // Every desktop switch off: the two chat chips remain, nothing else.
   h.saveAgentApps([]);
   assert.deepEqual(labels(reader()), ["Claude", "ChatGPT"]);
@@ -223,7 +266,7 @@ test("the reader's sheet paints exactly the chips whose switches are on, in its 
   assert.deepEqual(h.chatAppSelection(), []);
   assert.deepEqual(labels(reader()), ["Claude Code", "Codex"]);
   assert.deepEqual(names(bubble()), ["Claude Code", "Codex"]);
-  assert.equal((h.yourAgentHtml().match(/data-chat-app="[^"]+" aria-checked="false"/g) || []).length, 2);
+  assert.equal((h.page().match(/data-chat-app="[^"]+" aria-checked="false"/g) || []).length, 2);
   // The chat choice is its own key: it never touches the desktop selection or its legacy mirror.
   assert.equal(h.store.get("proto.chatApps.v1:account-a"), "__none__");
   assert.equal(h.store.get("proto.agentApps.v3:account-a"), "Claude Code|Codex");
@@ -300,7 +343,7 @@ test("all four begin on, and all four can go off; with none on, the sentence sta
   // but every switch starts on and a person turns them off themselves.
   const h = harness();
   assert.deepEqual(h.enabledAgentApps(), ["Claude", "ChatGPT", "Claude Code", "Codex"]);
-  assert.equal((h.yourAgentHtml().match(/aria-checked="true"/g) || []).length, 4);
+  assert.equal((h.page().match(/aria-checked="true"/g) || []).length, 4);
   h.setChatAppEnabled("Claude", false);
   h.setChatAppEnabled("ChatGPT", false);
   h.setAgentAppEnabled("Codex", false);
@@ -309,7 +352,7 @@ test("all four begin on, and all four can go off; with none on, the sentence sta
   h.setAgentAppEnabled("Claude Code", false);
   assert.deepEqual(h.enabledAgentApps(), []);
   assert.equal(h.store.get("proto.agentApps.v3:account-a"), "__none__");
-  const html = h.yourAgentHtml();
+  const html = h.page();
   assert.equal((html.match(/aria-checked="true"/g) || []).length, 0);
   assert.doesNotMatch(html, /aria-disabled|keep at least one on/);
   // With none on, the reader offers the sentence alone and a bubble's bar is the verb alone.
@@ -331,17 +374,12 @@ test("all four begin on, and all four can go off; with none on, the sentence sta
 // The Claude tile opens the Claude app when it is on this Mac and claude.ai
 // otherwise (David got Chrome, 2026-09-17); the row says which. ChatGPT has
 // no scheme on a computer, so its row always names chatgpt.com.
-test("the Claude row says where the tile goes on this Mac", () => {
-  const withApp = harness();
-  assert.match(withApp.yourAgentHtml(), /Claude<\/span><span class="sv-open-why">Claude app · a new chat per relay/);
-  assert.match(withApp.yourAgentHtml(), /ChatGPT<\/span><span class="sv-open-why">chatgpt\.com · a new chat per relay/);
-  const without = harness();
-  without.setSurfaces({ ...without.detected, _claudeDesktop: { available: false, reason: "Claude isn’t installed on this Mac" } });
-  assert.match(without.yourAgentHtml(), /Claude<\/span><span class="sv-open-why">claude\.ai · a new chat per relay/);
-  assert.match(without.yourAgentHtml(), /chatgpt\.com · a new chat per relay/);
-  // Before the capabilities answer arrives, the row promises only the web app.
-  const unknown = harness({ surfaces: null });
-  assert.match(unknown.yourAgentHtml(), /claude\.ai · a new chat per relay/);
+test("each AI's row says it is connected to Relay, and where for a coding agent", () => {
+  const page = harness().page();
+  assert.match(page, /Claude<\/span>\s*<span class="sv-open-why"><span class="setup-dot ok" aria-hidden="true"><\/span><span class="setup-why-text">Connected to Relay<\/span>/);
+  assert.match(page, /Codex<\/span>\s*<span class="sv-open-why"><span class="setup-dot ok" aria-hidden="true"><\/span><span class="setup-why-text">Connected to Relay<span class="setup-where"> · Desktop app, Terminal<\/span>/);
+  assert.match(page, /Claude Code<\/span>\s*<span class="sv-open-why">[\s\S]*?Connected to Relay<span class="setup-where"> · Desktop app<\/span>/);
+  assert.doesNotMatch(page, /a new chat per relay|Claude app ·|claude\.ai ·/);
 });
 test("prompt titles cannot inject markup into the visible text or clipboard attribute", () => {
   const h = harness();
@@ -368,4 +406,14 @@ test("copy binds the exact prompt, reports success, and restores the approved bu
   timers[0]();
   // The label comes back as it was painted — the bubble's two lines, or the reader's one.
   assert.equal(button.innerHTML,'<span>Copy prompt</span><span>for your agent</span>');
+});
+
+test("only an account Relay runs agents for sees a coding agent's run settings", () => {
+  // Model, thinking and permission sit under each coding agent's row
+  // (Shane, 2026-10-13), and only where Relay starts agents itself.
+  const plain = harness().page();
+  assert.doesNotMatch(plain, /setup-kvs|data-agent-permission|data-chat-agent-model/);
+  const dev = harness({ features: { taskExecution: true } }).page();
+  assert.equal((dev.match(/class="setup-kvs"/g) || []).length, 2);
+  assert.doesNotMatch(dev, /@Claude|@Codex|runs Tasks"/);
 });

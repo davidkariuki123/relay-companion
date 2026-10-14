@@ -23,17 +23,19 @@ function codeOnly(source) {
 // once set, nothing in the product may undo them except the user. These pin the
 // pieces that make that true end to end.
 
-test("Settings offers one New messages choice, loudest to quietest, and a sound switch", () => {
+test("Settings offers one Notifications choice, loudest to quietest, and a sound switch", () => {
   // ao1 feedback (2026-10-08): "settings around notification style". One value
   // row, never two switches that can contradict each other.
   // Sven's cut (2026-10-08): rows name themselves, so the card has no
   // "Notifications" heading; the value row is the same species as every row.
-  const quiet = between(html, "function quietPrefsHtml(info)", "function chatAgentDefaultsHtml()");
-  assert.doesNotMatch(quiet, /sv-quiet-title|>Notifications</);
+  const quiet = between(html, "function quietPrefsHtml(info)", "function runsAgentsHere()");
+  assert.doesNotMatch(quiet, /sv-quiet-title|>Notifications<\/div>/, "a row may be called Notifications; the card has no heading");
   assert.match(quiet, /<button class="sv-row sv-notify-row" type="button" id="svNotifyRow" aria-expanded="\$\{notifyTrayOpen \? "true" : "false"\}" aria-controls="svNotifyTray">/);
-  assert.match(quiet, /<span class="sv-row-name">New messages<\/span>/);
+  // The row says what it is and, on a second line, what the current choice does.
+  assert.match(quiet, /<span class="sv-row-name">Notifications<\/span><span class="sv-row-sub">\$\{esc\(currentChoice\.sub\)\}<\/span>/);
+  assert.equal([...between(html, "const NOTIFY_CHOICES = [", "];").matchAll(/ sub:"[^"]+"/g)].length, 4, "every choice has a second line");
   assert.match(quiet, /<span class="sv-row-value">\$\{esc\(currentChoice\.short\)\}<\/span>/);
-  assert.match(quiet, /id="svNotifyTray" role="radiogroup" aria-label="New messages"/);
+  assert.match(quiet, /id="svNotifyTray" role="radiogroup" aria-label="Notifications"/);
   const choices = between(html, "const NOTIFY_CHOICES = [", "];");
   assert.deepEqual([...choices.matchAll(/value:"([a-z]+)"/g)].map((m) => m[1]), ["all", "direct", "count", "hidden"]);
   assert.match(choices, /name:"Every message"/);
@@ -41,8 +43,8 @@ test("Settings offers one New messages choice, loudest to quietest, and a sound 
   assert.match(choices, /name:"Just the count"/);
   assert.match(html, /role="radio"[\s\S]{0,120}data-notify-choice="\$\{choice\.value\}"/);
   // The sound switch is one word, with a second line only when it is off
-  // for a reason: sounds play only with banners.
-  assert.match(quiet, /<div class="sv-row\$\{banners \? "" : " off"\}">\s*<span class="sv-row-copy"><span class="sv-row-name">Sounds<\/span>\$\{banners \? "" : `<span class="sv-row-sub">Only with banners<\/span>`\}<\/span>/);
+  // for a reason: sounds play only when Relay pops up.
+  assert.match(quiet, /<div class="sv-row\$\{banners \? "" : " off"\}">\s*<span class="sv-row-copy"><span class="sv-row-name">Sounds<\/span>\$\{banners \? "" : `<span class="sv-row-sub">Only when Relay pops up<\/span>`\}<\/span>/);
   assert.match(quiet, /svSwitchHtml\("soundsMuted", !muted, \{ label: "Play sounds", inverted: true, disabled: !banners \}\)/);
   assert.doesNotMatch(html, />Quiet<\/div>|Relay keeps running and collecting your messages/);
   assert.match(html, /role="switch" data-quiet="\$\{esc\(key\)\}"/);
@@ -84,7 +86,7 @@ test("only arrivals the style lets through are queued; the rest are presented by
 });
 
 test("the notification section stops clicks, so flipping a switch never folds the card", () => {
-  // The preferences card is one .sv-group wrapping the New messages row, the
+  // The preferences card is one .sv-group wrapping the Notifications row, the
   // sound switch and the draft-a-Relay switch; the wrapper itself stops clicks.
   const settings = between(html, "function renderSettings()", "function wireSettings()");
   assert.match(settings, /html \+= `<div class="sv-group" id="quietPrefs" data-stop="1"><div class="sv-open-list">\$\{quietPrefsHtml\(info\)\}\$\{milestoneRelaysHtml\(info\)\}<\/div><\/div>`;/);

@@ -714,47 +714,26 @@ test("a completion send failure cannot withhold local native Done", () => {
 
 
 
-test("Settings exposes complete subscription connection management for Claude Code and Codex", () => {
-  assert.match(inbox, />Connections</);
-  assert.doesNotMatch(inbox, /Relay uses each app's local profile\. Your credentials stay with the app\./);
-  assert.doesNotMatch(inbox, /This Mac's existing local profile/);
-  assert.match(inbox, /data-provider-connect="\$\{id\}"/);
-  assert.match(inbox, /item\.connected\s*\? "Connected"/);
-  assert.match(inbox, /"Sign in to Claude Code" : "Sign in to Codex"/);
-  assert.match(inbox, /"Use Claude subscription" : "Use ChatGPT subscription"/);
-  assert.doesNotMatch(inbox, /Connect local profile/);
-  assert.doesNotMatch(inbox, /data-provider-refresh|Refresh status/);
-  assert.doesNotMatch(inbox, /data-provider-open|Open \$\{esc\(item\.label\)\}/);
-  assert.match(inbox, /Local MCPs/);
-  assert.match(inbox, /Connected apps/);
-  assert.match(inbox, /MCPs and account connectors/);
-  assert.match(inbox, /const list = values\.map\(\(entry\) =>/);
-  assert.match(inbox, /sv-provider-list sv-agent-provider-list/);
-  assert.match(inbox, /data-provider-details="\$\{esc\(id\)\}"/);
-  assert.match(inbox, /aria-controls="svProviderDetail-\$\{esc\(id\)\}"/);
-  assert.match(inbox, /claudeCodeMark\.svg/);
-  assert.match(inbox, /codexMark\.svg/);
-  assert.match(inbox, /healthy \? countLabel : status/);
-  assert.doesNotMatch(inbox, /<span class="sv-provider-status">\$\{esc\(requirement\)\}<\/span>/);
-  assert.doesNotMatch(inbox, /data-provider-integrations|providerIntegrationsDialogHtml|sv-integration-more/);
-  assert.match(inbox, /data-provider-enable="\$\{id\}"/);
-  assert.match(inbox, /Disabled for Tasks/);
+test("Settings asks for a coding agent's plan sign-in only where Relay runs agents, on that agent's row", () => {
+  // The Connections section and its MCP lists are gone (Shane, 2026-10-13):
+  // nothing in Relay used them. What remains is the one fact Relay needs to
+  // start an agent itself, said under that agent's row in Your AIs.
+  assert.doesNotMatch(inbox, />Connections<|Local MCPs|MCPs and account connectors|Connected apps|data-provider-details|data-provider-enable|Disabled for Tasks/);
+  const run = between(inbox, "function setupAgentSettingsHtml(", "function setupPageHtml()");
+  assert.match(run, /if \(!runsAgentsHere\(\)\) return "";/);
+  assert.match(run, /data-provider-connect="\$\{provider\}"/);
+  assert.match(run, /`Sign in to \$\{plan\} to run Tasks`/);
   assert.match(inbox, /window\.addEventListener\("focus", \(\) => \{[\s\S]*activeView === "settings"[\s\S]*loadSettings\(\)/);
   assert.match(inbox, /document\.addEventListener\("visibilitychange"[\s\S]*document\.visibilityState === "visible"[\s\S]*loadSettings\(\)/);
   assert.match(pillPreload, /providerAuthStatus: \(\) => ipcRenderer\.invoke\("relay:providerAuthStatus"\)/);
-  assert.match(pillPreload, /providerInventory:[\s\S]*relay:providerInventory/);
   assert.match(pillPreload, /providerAuthConnect/);
-  assert.doesNotMatch(pillPreload, /providerAuthOpen/);
-  assert.match(pillPreload, /providerAuthSetEnabled/);
+  assert.doesNotMatch(pillPreload, /providerAuthOpen|providerInventory|providerAuthSetEnabled/);
   assert.match(main, /ipcMain\.handle\("relay:providerAuthStatus"/);
-  assert.match(main, /ipcMain\.handle\("relay:providerInventory"/);
   assert.match(main, /ipcMain\.handle\("relay:providerAuthConnect"/);
-  assert.doesNotMatch(main, /ipcMain\.handle\("relay:providerAuthOpen"/);
-  assert.match(main, /ipcMain\.handle\("relay:providerAuthSetEnabled"/);
+  assert.doesNotMatch(main, /relay:providerAuthOpen|relay:providerInventory|relay:providerAuthSetEnabled/);
   const settingsLoad = between(inbox, "async function loadSettings", "// Provider state is live product state");
   assert.match(settingsLoad, /const accountTask/);
-  assert.match(settingsLoad, /providerInventory\(\{ refresh:false \}\)/);
-  assert.match(settingsLoad, /refreshProviderInventory\(\{ seq \}\)/);
+  assert.doesNotMatch(settingsLoad, /providerInventory/);
   assert.doesNotMatch(settingsLoad, /Promise\.all\(\[\s*window\.relay\.accountInfo[\s\S]*providerAuthStatus/);
 });
 

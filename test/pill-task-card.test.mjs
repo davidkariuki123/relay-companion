@@ -374,14 +374,15 @@ test("the room renders the card and the event bubble in place of the claim slot 
   assert.match(inbox, /\$\{taskEvent \? taskEventRefHtml\(taskEvent\) : messageReplyReferenceHtml\(m\)\}/);
   const receiptExpression = inbox.match(/const receipt = ([^;]+receiptFor\(m, msgs\));/);
   assert.ok(receiptExpression, "the room chooses a receipt beneath each message");
-  const receiptForMessage = new Function("m", "attachments", "msgs", "receiptFor", `return ${receiptExpression[1]};`);
+  const receiptForMessage = new Function("m", "attachments", "msgs", "receiptFor", "relayWide", `return ${receiptExpression[1]};`);
   const receipt = { label: "Read" };
-  const renderReceipt = (message, attachments) => receiptForMessage(message, attachments, [], () => receipt);
+  const renderReceipt = (message, attachments, wide = false) => receiptForMessage(message, attachments, [], () => receipt, wide);
   assert.equal(renderReceipt({ request: {} }, []), null, "a task without attachments uses its card footer");
   assert.equal(renderReceipt({ request: {} }, [{}]), receipt, "a task with attachments repeats the receipt beneath them");
   assert.equal(renderReceipt({}, []), receipt, "an ordinary message keeps its receipt");
   assert.equal(renderReceipt({ deletedAt: "today" }, [{}]), null, "a deleted message has no receipt");
   assert.equal(renderReceipt({ request: {}, deletedAt: "today" }, [{}]), null, "a deleted task has no receipt");
+  assert.equal(renderReceipt({}, [], true), null, "a full-screen Relay card shows its steps in the rail instead");
   assert.match(inbox, /tk-event \$\{taskEvent\.tone\}\$\{taskEvent\.bare \? " bare" : ""\}/);
   // The projections carry the closed-Task fields and the type on both sides.
   for (const prefix of ["r", "s"]) {
@@ -612,12 +613,12 @@ test("the list line: a member reads their own state first, the sender reads the 
 
 test("the card, the reader and the lists all fork on the assignment", () => {
   // The renderer must never fall through to the one-ladder card for an Everyone Task.
-  const footer = inbox.slice(inbox.indexOf("function taskCardFooterHtml(row)"), inbox.indexOf("// The expanded Task's module"));
+  const footer = inbox.slice(inbox.indexOf("function taskCardFooterHtml(row, wide = null)"), inbox.indexOf("// The expanded Task's module"));
   // Every Everyone verb rides the viewer's own roster row, so a card whose
   // roster never arrived falls back to the ordinary state row that carries them.
   assert.match(footer, /const roster = taskIsEveryone\(row\) \? taskRosterCardHtml\(row\) : "";/);
   assert.match(footer, /if \(taskIsEveryone\(row\) && roster\) \{/);
-  assert.match(footer, /\$\{live \? taskAgentAreaHtml\(row\) : ""\}/, "a member may still run their own copy or hand it to an agent");
+  assert.match(footer, /\$\{live \? taskAgentAreaHtml\(row, wide\) : ""\}/, "a member may still run their own copy or hand it to an agent");
   const module = inbox.slice(inbox.indexOf("function taskStatusModuleHtml(row)"), inbox.indexOf("function taskRowLineHtml(row)"));
   assert.match(module, /const grouped = taskIsEveryone\(row\) \? taskRosterGroupedHtml\(row\) : "";/);
   assert.match(module, /if \(taskIsEveryone\(row\) && grouped\) \{/);
@@ -724,7 +725,9 @@ test("the app chosen before wears its colour and says why; an Everyone copy says
   t.taskRunPlans.set("t1", PLAN({ remembered: { provider: "claude", reason: "sender", why: "Claude Code is where you ran Sven's last Task." } }));
   const footer = t.taskCardFooterHtml(inboundTask());
   assert.match(footer, /class="th-host-mark tk-run-mark last" data-host="claude"/);
-  assert.match(footer, /tk-run-caption">Claude Code is where you ran Sven&#39;s last Task\.</);
+  assert.match(footer, /tk-run-caption remembered">Claude Code is where you ran Sven&#39;s last Task\.</);
+  assert.match(footer, /tk-run-mark last"[^>]*><img[^>]*><span class="tk-run-name" aria-hidden="true">Claude Code<\/span><span class="tk-run-last" aria-hidden="true">Last used<\/span><\/button>/,
+    "the full-screen rail names the app and says Last used on it");
   const one = boot({ features: { taskExecution: true }, apps: ["claude"] });
   one.taskRunPlans.set("t1", PLAN({ remembered: { provider: "claude", reason: "last", why: "Claude Code is what you used last time." } }));
   assert.doesNotMatch(one.taskCardFooterHtml(inboundTask()), /tk-run-mark last|tk-run-caption/, "with one app there is nothing to single out");
@@ -786,6 +789,18 @@ test("once it is launched the block is one line saying where it runs, with the a
   assert.doesNotMatch(boot({ features: { taskExecution: true }, relays: [startedTwin] }).taskCardFooterHtml(bubble), /data-native-execute|data-task-run/, "started without a native record: nothing to launch");
 });
 
+test("while Codex is still opening the conversation the card says it is waiting and offers Stop waiting", () => {
+  const received = inboundTask({ id: "w1" });
+  const waiting = boot({ features: { taskExecution: true }, relays: [received], nativeExecutions: { w1: { phase: "awaiting_app", provider: "codex", status: "Waiting for Codex · the Task starts when it's ready" } } });
+  const footer = waiting.taskCardFooterHtml(received);
+  assert.match(footer, /<span class="tk-run-state">Waiting for Codex · the Task starts when it&#39;s ready<\/span><button type="button" class="tk-btn ghost tk-run-stop" data-execute-stop-wait="w1">Stop waiting<\/button><button type="button" class="th-host-mark tk-run-mark sm" data-host="codex" data-native-execute="w1" title="Show the conversation in Codex"/);
+  // Stopped, or sent: no Stop waiting.
+  const stopped = boot({ features: { taskExecution: true }, relays: [received], nativeExecutions: { w1: { phase: "prepared", provider: "codex", status: "Task not sent · You stopped waiting for Codex." } } });
+  assert.doesNotMatch(stopped.taskCardFooterHtml(received), /data-execute-stop-wait/);
+  const sent = boot({ features: { taskExecution: true }, relays: [received], nativeExecutions: { w1: { phase: "accepted", provider: "codex", status: "Working in Codex" } } });
+  assert.doesNotMatch(sent.taskCardFooterHtml(received), /data-execute-stop-wait/);
+});
+
 test("main's own question still opens in the card and the reader when a pick was no longer offered", () => {
   const t = boot({ features: { taskExecution: true } });
   t.taskRunPlans.set("t1", PLAN());
@@ -795,14 +810,36 @@ test("main's own question still opens in the card and the reader when a pick was
   t.nativeExecuteChoice.set("t1", offer);
   const footer = t.taskCardFooterHtml(inboundTask());
   assert.doesNotMatch(footer, /data-task-run=/, "the Run block steps aside while the question is open");
-  assert.match(footer, /tk-execute-title">Where should the agent work\?<\/span><span class="tk-execute-caption">It will read and change files in this folder\.</, "the question says what the folder is for");
-  assert.match(footer, /data-execute-pick="t1" data-provider="claude" data-cwd="C:\\w\\relay"[^>]*><img class="xp-mark" src="claudeCodeMark.svg" alt=""><span class="xp-name">relay<span class="xp-app">Claude Code<\/span><\/span><span class="xp-why">This Task is about relay</, "the best pair first: the app's mark, the folder, the app, its reason");
-  assert.match(footer, /xp-browse-label">Another folder…<\/span><button class="xp-chip" type="button" data-execute-pick="t1" data-provider="claude" data-browse="1"[^>]*><img class="xp-mark" src="claudeCodeMark.svg" alt="">Claude Code</, "the OS dialog is the last rung, one chip per app");
+  assert.match(footer, /tk-execute-title">Claude Code in which folder\?<\/span><span class="tk-execute-caption">It will read and change files in this folder\.</, "one app: straight to its folders, saying what the folder is for");
+  assert.match(footer, /data-execute-pick="t1" data-provider="claude" data-cwd="C:\\w\\relay"[^>]*><span class="xp-mark tk-run-folder-mark">.*?<\/span><span class="xp-name">relay<\/span><span class="xp-why">This Task is about relay</, "the best folder first, with its reason");
+  assert.doesNotMatch(footer, /data-provider="codex" data-cwd=/, "only the chosen app's folders");
+  assert.match(footer, /data-execute-pick="t1" data-provider="claude" data-browse="1"[^>]*>Another folder…</, "the OS dialog is the last rung");
   assert.match(footer, /data-execute-cancel="t1"[^>]*>Cancel</);
   const reader = t.nativeExecuteHtml(inboundTask());
   assert.match(reader, /rd-host-actions[^>]*><div class="tk-execute-pick"/, "the reader shows the same question in place of its button");
   t.nativeExecuteChoice.delete("t1");
   assert.match(t.taskCardFooterHtml(inboundTask()), /data-task-run="t1"/, "Cancel brings the Run block back");
+});
+
+test("with several apps main's question asks the app first, then that app's folders", () => {
+  const t = boot({ features: { taskExecution: true } });
+  const offer = { question: "Where should the agent work?", caption: "It will read and change files in this folder.",
+    options: [{ provider: "codex", cwd: "C:\\w\\relay", why: "Recent in Codex" }, { provider: "claude", cwd: "C:\\w\\relay", why: "Recent in Codex" }, { provider: "claude", cwd: "C:\\w\\game", why: "Recent in Claude Code" }],
+    browse: [{ provider: "codex", app: "Codex" }, { provider: "claude", app: "Claude Code" }],
+    remembered: { provider: "codex", reason: "last", why: "Codex is what you used last time." } };
+  t.nativeExecuteChoice.set("t1", offer);
+  const ask = t.taskCardFooterHtml(inboundTask());
+  assert.match(ask, /tk-execute-title">Run it in which app\?</, "the app comes first");
+  assert.match(ask, /data-execute-app="t1" data-provider="codex"[^>]*><img class="xp-mark" src="codexMark.svg" alt=""><span class="xp-name">Codex<\/span><span class="xp-why">Codex is what you used last time\.</, "the app used last says so");
+  assert.match(ask, /data-execute-app="t1" data-provider="claude"/);
+  assert.doesNotMatch(ask, /data-execute-pick=/, "no folder is asked before the app");
+  t.nativeExecuteChoice.set("t1", { ...offer, provider: "claude" });
+  const folders = t.taskCardFooterHtml(inboundTask());
+  assert.match(folders, /tk-execute-title">Claude Code in which folder\?</);
+  assert.equal((folders.match(/data-execute-pick="t1" data-provider="claude" data-cwd=/g) || []).length, 2, "both of Claude Code's folders");
+  assert.doesNotMatch(folders, /data-provider="codex"/, "nothing of the other app");
+  assert.match(inbox, /nativeExecuteChoice\.set\(id, choice\?\.provider \? \{ \.\.\.result\.choose, provider: choice\.provider \} : result\.choose\)/, "backing out of the folder dialog returns to the same app's folders");
+  assert.match(main, /browse: offered\.browse, remembered: offered\.remembered \}/, "main says which app was used last");
 });
 
 test("main works the Run plan out once, and its pairs are the offers Execute honours", () => {
@@ -814,4 +851,41 @@ test("main works the Run plan out once, and its pairs are the offers Execute hon
   assert.match(plan, /executeOffers\.set\(key, plan\.options\);/, "a tap is honoured only if main offered that pair");
   assert.match(preload, /taskRunPlan: \(id\) => ipcRenderer\.invoke\("relay:taskRunPlan", String\(id \|\| ""\)\)/);
   assert.match(inbox, /for \(const marker of scope\.querySelectorAll\("\[data-task-run-plan\]"\)\) loadTaskRunPlan\(/);
+});
+
+test("a full-screen card draws its folder list across the card, not inside the rail", () => {
+  const t = boot({ features: { taskExecution: true } });
+  t.taskRunPlans.set("t1", PLAN({ folder: null, options: [{ provider: "claude", cwd: "C:\w\relay", name: "relay", why: "Recent in Claude Code" }] }));
+  t.taskRunTap("t1", "claude", () => {});
+  assert.match(t.taskCardFooterHtml(inboundTask()), /tk-execute-title">Claude Code in which folder\?/, "the pill's own window keeps the list in the Run block");
+  const wide = { pickers: [] };
+  const rail = t.taskCardFooterHtml(inboundTask(), wide);
+  assert.match(rail, /class="tk-run picking"/, "the rail still shows which app is open");
+  assert.doesNotMatch(rail, /tk-execute-pick/, "the rail does not hold the list");
+  assert.equal(wide.pickers.length, 1);
+  assert.match(wide.pickers[0], /data-execute-pick="t1" data-provider="claude" data-cwd="C:\w\relay"/);
+  assert.match(inbox, /<div class="tk-wide-pick" data-stop="1" data-task-card="\$\{esc\(taskIdOf\(m\)\)\}">\$\{taskWide\.pickers\.join\(""\)\}<\/div>/,
+    "the card draws the list inside a Task zone");
+  assert.match(inbox, /\$\{taskFooter\}\s*\$\{taskWidePickers\}\s*\$\{badges\}/, "under the rail, above the badges");
+  assert.match(inbox, /\.tk-main \{ display:contents; \}/, "outside full screen the wrapper is no box");
+  assert.match(inbox, /const CARDS_WIDE_MIN = 960;/, "only wider than the pill's own window");
+});
+
+test("a full-screen Relay card keeps its files inside and its steps and Open with in a rail", () => {
+  // The layout is decided only when the conversation is full-screen wide.
+  assert.match(inbox, /const relayWide = cardsWide && !textLike && !m\.request && !taskEvent && !m\.deletedAt && !attachmentOnly;/);
+  assert.match(inbox, /\$\{m\.request \? '<div class="tk-main">' : relayWide \? '<div class="rl-main">' : ""\}/);
+  assert.match(inbox, /\$\{hasHostActions && !relayWide \? relayHostActionsHtml\(m, \{ persistent:hostActionsPersistent \}\) : ""\}\s*\$\{relayWide \? cargoHtml : ""\}/,
+    "the files go inside under the words, and Open with leaves the words");
+  assert.match(inbox, /\$\{relayWide \? "" : cargoHtml\}/, "and they are not drawn again under the card");
+  assert.match(inbox, /\$\{mine \? relayRailStepsHtml\(m\) : ""\}\$\{hasHostActions \? `<div class="rl-rail-h">Open with<\/div>\$\{relayHostActionsHtml\(m, \{ persistent:true \}\)\}` : ""\}/,
+    "your Relay's rail has its steps, and every rail has Open with, always open");
+  assert.match(inbox, /\|\| relayWide \? null : receiptFor\(m, msgs\)/, "the steps replace the receipt under the card");
+  const steps = Function("esc", "formatChatTime", `${inbox.slice(inbox.indexOf("function relayRailStepsHtml("), inbox.indexOf("// The sender's tracker in the card"))}; return relayRailStepsHtml;`)(
+    (s) => String(s), (iso) => iso.slice(11, 16));
+  const seen = steps({ at: "2026-10-13T10:02:00.000Z", delivered: true, seen: true, seenAt: "2026-10-13T10:15:00.000Z", agentOpened: false });
+  assert.match(seen, /tk-step past"><span class="tk-node"><\/span><span class="tk-label">Sent<\/span><span class="tk-when">10:02<\/span>/);
+  assert.match(seen, /tk-step past"><span class="tk-node"><\/span><span class="tk-label">Seen<\/span><span class="tk-when">10:15<\/span>/);
+  assert.match(seen, /tk-step todo"><span class="tk-node"><\/span><span class="tk-label">Agent opened<\/span><span class="tk-when"><\/span>/);
+  assert.match(steps({ pending: true, at: "2026-10-13T10:02:00.000Z" }), /tk-step todo"><span class="tk-node"><\/span><span class="tk-label">Sending<\/span>/);
 });

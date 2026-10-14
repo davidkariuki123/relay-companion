@@ -46,9 +46,9 @@ contextBridge.exposeInMainWorld("relay", {
   taskExecute: (id, choice) => ipcRenderer.invoke("relay:taskExecute", String(id || ""), choice && typeof choice === "object"
     ? { provider: String(choice.provider || ""), cwd: String(choice.cwd || ""), browse: choice.browse === true } : undefined),
   taskRunPlan: (id) => ipcRenderer.invoke("relay:taskRunPlan", String(id || "")),
-  executionDisable: () => ipcRenderer.invoke("relay:executionDisable"),
+  // A Task waiting for Codex to finish opening: stop waiting, leave it unsent.
+  taskExecuteStopWaiting: (id) => ipcRenderer.invoke("relay:taskExecuteStopWaiting", String(id || "")),
   executionEnable: () => ipcRenderer.invoke("relay:executionEnable"),
-  executionMode: (mode) => ipcRenderer.invoke("relay:executionMode", mode),
   taskUnclaim: (id, expectedVersion) => ipcRenderer.invoke("relay:taskUnclaim", String(id || ""), expectedVersion),
   taskStop: (id) => ipcRenderer.invoke("relay:taskStop", String(id || "")),
   // A person's close, from the card or the expanded Task; the note is optional.
@@ -295,15 +295,7 @@ contextBridge.exposeInMainWorld("relay", {
   pairWithCode: (input) => ipcRenderer.invoke("relay:pairWithCode", input),
   signOut: () => ipcRenderer.invoke("relay:signOut"),
   providerAuthStatus: () => ipcRenderer.invoke("relay:providerAuthStatus"),
-  providerInventory: (input = {}) => ipcRenderer.invoke("relay:providerInventory", {
-    refresh: input?.refresh === true,
-    force: input?.force === true,
-  }),
   providerAuthConnect: (provider) => ipcRenderer.invoke("relay:providerAuthConnect", String(provider || "")),
-  providerAuthSetEnabled: (provider, enabled) => ipcRenderer.invoke("relay:providerAuthSetEnabled", {
-    provider: String(provider || ""),
-    enabled: Boolean(enabled),
-  }),
   // Manual update backstop, when the auto-updater has not refreshed this machine.
   updateNow: () => ipcRenderer.invoke("relay:updateNow"),
   // Quiet mode (Settings). Durable per-device preferences, not snoozes: current

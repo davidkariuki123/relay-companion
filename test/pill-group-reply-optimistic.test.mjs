@@ -41,6 +41,7 @@ function runThreadMessages(payload, optimisticChatReplies, { realDelivery = fals
     realDelivery ? pillFunction("sentIsDelivered") : "",
     realDelivery ? pillFunction("sentIsAcknowledged") : "",
     realClassifier ? pillFunction("relayTextLike") : "",
+    pillFunction("selfRelayDirection"),
     selfAuthored,
     pillFunction("threadMessages"),
     "return threadMessages();",
@@ -262,6 +263,27 @@ test("a self-send is outbound on first paint before sent history hydrates", () =
   assert.equal(msgs[0].direction, "out", "the signed-in sender address establishes authorship immediately");
   assert.equal(msgs[0].unread, false);
   assert.deepEqual(msgs[0].readReceipts, [], "receipts can hydrate later without changing ownership");
+});
+
+test("a Relay sent to yourself is drawn as received, so it carries the card you act on", () => {
+  const msgs = runThreadMessages({
+    account: { email: "shane@example.com" },
+    relays: [{
+      id: "relay_self_card", threadId: "thread_self", title: "Check the patch", forHuman: "Check the patch before Friday.",
+      forAgent: "The patch is on main; run the companion tests.", senderName: "Shane Acton", senderEmail: "shane@example.com",
+      unread: true, createdAt: "2026-08-25T10:00:00.000Z",
+    }],
+    sent: [{
+      relayId: "relay_self_card", threadId: "thread_self", title: "Check the patch", forHuman: "Check the patch before Friday.",
+      forAgent: "The patch is on main; run the companion tests.", state: "read", createdAt: "2026-08-25T10:00:00.000Z",
+      recipient: { name: "Shane Acton", email: "shane@example.com" },
+    }],
+  }, new Map(), { realClassifier: true });
+
+  assert.equal(msgs.length, 1, "still one card for the two copies");
+  assert.equal(msgs[0].textLike, false);
+  assert.equal(msgs[0].direction, "in", "the received card, not the sender's tracker");
+  assert.equal(msgs[0].unread, false, "only the side changes; my own Relay still never makes my room unread");
 });
 
 test("the groupSendId that retires a bubble is stamped by the device's queue, not by a send response", () => {

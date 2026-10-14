@@ -155,12 +155,15 @@ const AGENT_APPS = ["Claude Code", "Codex"];
 const FIRST_RELAY_TUTORIAL_RESULTS = ["done", "skipped"];
 const CHAT_APPS = ["Claude", "ChatGPT"];
 // Each vendor's own modes, least freedom first. The order decides which
-// direction a change goes.
+// direction a change goes. One permission per agent for the runs Relay starts
+// on this computer: Execute's Claude conversations, the composer under a
+// Relay, and an @-mention in a chat (Shane, 2026-10-13).
 const TASK_MODES = {
   claude: [
-    { value: "acceptEdits", label: "Accept Edits" },
+    { value: "default", label: "Ask before each step" },
+    { value: "acceptEdits", label: "Accept edits" },
     { value: "auto", label: "Auto" },
-    { value: "bypassPermissions", label: "Bypass Permissions" },
+    { value: "bypassPermissions", label: "Bypass permissions" },
   ],
   codex: [
     { value: "ask", label: "Ask for approval" },
@@ -169,14 +172,32 @@ const TASK_MODES = {
   ],
 };
 const TASK_DEFAULTS = { claude: "auto", codex: "full" };
+// "Latest" is each CLI's own alias for its newest model, so the list never
+// needs a version bump; Codex's "auto" leaves the choice to Codex.
 const CHAT_AGENT_MODELS = {
-  claude: [["opus", "Opus 5.5"], ["fable", "Fable 5.1"], ["sonnet", "Sonnet 5.5"], ["haiku", "Haiku 4.5"]],
-  codex: [["gpt-6.1-sol", "6.1 Sol"], ["gpt-6-astra", "6 Astra"], ["gpt-6-sol", "6 Sol"], ["gpt-6-luna", "6 Luna"], ["gpt-5.6-sol", "5.6 Sol"], ["gpt-5.6-terra", "5.6 Terra"], ["gpt-5.6-luna", "5.6 Luna"]],
+  claude: [["opus", "Latest Opus"], ["fable", "Latest Fable"], ["sonnet", "Latest Sonnet"], ["haiku", "Latest Haiku"]],
+  codex: [["auto", "Latest"], ["gpt-6.1-sol", "6.1 Sol"], ["gpt-6-astra", "6 Astra"], ["gpt-6-sol", "6 Sol"], ["gpt-6-luna", "6 Luna"], ["gpt-5.6-sol", "5.6 Sol"], ["gpt-5.6-terra", "5.6 Terra"], ["gpt-5.6-luna", "5.6 Luna"]],
 };
 const CHAT_AGENT_EFFORTS = {
   claude: ["low", "medium", "high", "xhigh", "max"],
   codex: ["auto", "low", "medium", "high", "xhigh", "max"],
 };
+
+// Running a Task from its card is for accounts with taskExecution (developer
+// accounts today). An agent on any other account is never told it exists, so
+// the coding apps' switches mention it only there.
+const runsTasks = (ctx) => ctx?.features?.taskExecution === true;
+// Relay starting an agent itself in any way (Execute, the composer, a
+// mention) is a developer-account capability; so are its run settings.
+const runsAgents = (ctx) => ["taskExecution", "agentMentions", "relayWork"].some((key) => ctx?.features?.[key] === true);
+/** The permission Relay starts this vendor's agent in, on this computer. */
+function taskPermission(vendor, options = {}) {
+  const saved = readStore(options).taskPermissions?.[vendor];
+  return rank(TASK_MODES[vendor] || [], saved) >= 0 ? saved : TASK_DEFAULTS[vendor];
+}
+function codingAppDescription(app, opens) {
+  return (ctx) => `Offer ${app} when the person ${opens}${runsTasks(ctx) ? ", and as a button to run a Task on its card" : ""}. Takes effect only where ${app} is installed.`;
+}
 
 function rank(options, value) {
   return options.findIndex((option) => option.value === value);
@@ -207,17 +228,14 @@ function appSwitch({ id, app, list, key, label, where, description, available })
 function taskMode(vendor, label) {
   return {
     id: `task_permissions_${vendor === "claude" ? "claude_code" : "codex"}`,
-    label: `What Tasks may do: ${label}`,
-    where: "You › Your AIs › What Tasks may do",
-    description: `The ${label} permission mode for Tasks the person starts from Relay.`,
+    label: `${label} permission`,
+    where: `You › Your AIs › ${label}`,
+    description: `The permission mode ${label} starts in when Relay starts it on this computer: a Task run from its card, the composer under a Relay, or an @-mention.`,
     type: "choice",
     scope: "device",
     options: TASK_MODES[vendor],
-    available: (ctx) => ctx.features?.requests !== false,
-    read: (ctx) => {
-      const saved = readStore(ctx.options).taskPermissions?.[vendor];
-      return rank(TASK_MODES[vendor], saved) >= 0 ? saved : TASK_DEFAULTS[vendor];
-    },
+    available: runsAgents,
+    read: (ctx) => taskPermission(vendor, ctx.options),
     write: (ctx, value) => updateStore((store) => {
       store.taskPermissions = { ...(store.taskPermissions || {}), [vendor]: value };
     }, ctx.options),
@@ -227,19 +245,19 @@ function taskMode(vendor, label) {
 }
 
 function chatAgentField(provider, field) {
-  const label = provider === "claude" ? "@Claude" : "@Codex";
+  const label = provider === "claude" ? "Claude Code" : "Codex";
   const options = field === "model"
     ? CHAT_AGENT_MODELS[provider].map(([value, name]) => ({ value, label: name }))
     : CHAT_AGENT_EFFORTS[provider].map((value) => ({ value, label: value }));
   return {
     id: `chat_agent_${provider}_${field === "model" ? "model" : "thinking"}`,
     label: `${label} ${field === "model" ? "model" : "thinking"}`,
-    where: "You › Chat agents",
-    description: `The default ${field === "model" ? "model" : "thinking effort"} for ${label} work sessions on this account, on every computer.`,
+    where: `You › Your AIs › ${label}`,
+    description: `The ${field === "model" ? "model" : "thinking effort"} ${label} runs on when an @-mention starts it, on every computer of this account.`,
     type: "choice",
     scope: "account",
     options,
-    available: (ctx) => ctx.features?.agentMentions === true && Boolean(ctx.client?.chatAgentPreferences),
+    available: (ctx) => runsAgents(ctx) && Boolean(ctx.client?.chatAgentPreferences),
     read: async (ctx) => (await ctx.client.chatAgentPreferences())?.[provider]?.[field] ?? null,
     write: async (ctx, value) => {
       const current = (await ctx.client.chatAgentPreferences())?.[provider] || {};
@@ -271,7 +289,7 @@ const SETTINGS = [
   {
     id: "show_automatically",
     label: "Show Relay automatically",
-    where: "You › New messages (Menu bar only turns it off)",
+    where: "You › Notifications (Menu bar only turns it off)",
     description: "Whether the Relay pill comes forward when new messages arrive. Off keeps it in the status area until the person opens it.",
     type: "boolean",
     scope: "device",
@@ -295,8 +313,8 @@ const SETTINGS = [
   },
   {
     id: "notification_style",
-    label: "New messages",
-    where: "You › New messages",
+    label: "Notifications",
+    where: "You › Notifications",
     description: "Which new messages make the Relay pill show a banner: every message, only direct messages and mentions (busy groups just count), or none (only the count changes). Hiding the pill entirely is show_automatically.",
     type: "choice",
     scope: "device",
@@ -319,15 +337,15 @@ const SETTINGS = [
     read: (ctx) => readStore(ctx.options).theme === "light" ? "light" : "dark",
     write: (ctx, value) => patchDevice({ theme: value }, ctx.options),
   },
-  appSwitch({ id: "open_with_claude", app: "Claude", list: CHAT_APPS, key: "chatApps", label: "Open Relays with Claude", where: "You › Your AIs › Open Relays in", description: "Offer Claude (the Claude app or claude.ai) when the person opens a Relay." }),
-  appSwitch({ id: "open_with_chatgpt", app: "ChatGPT", list: CHAT_APPS, key: "chatApps", label: "Open Relays with ChatGPT", where: "You › Your AIs › Open Relays in", description: "Offer ChatGPT when the person opens a Relay." }),
-  appSwitch({ id: "open_with_claude_code", app: "Claude Code", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Claude Code", where: "You › Your AIs › Open Relays in", description: "Offer Claude Code when the person opens a Relay, and as a button to run a Task on its card. Takes effect only where Claude Code is installed." }),
-  appSwitch({ id: "open_with_codex", app: "Codex", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Codex", where: "You › Your AIs › Open Relays in", description: "Offer Codex when the person opens a Relay, and as a button to run a Task on its card. Takes effect only where Codex is installed." }),
+  appSwitch({ id: "open_with_claude", app: "Claude", list: CHAT_APPS, key: "chatApps", label: "Open Relays with Claude", where: "You › Your AIs", description: "Offer Claude (the Claude app or claude.ai) when the person opens a Relay." }),
+  appSwitch({ id: "open_with_chatgpt", app: "ChatGPT", list: CHAT_APPS, key: "chatApps", label: "Open Relays with ChatGPT", where: "You › Your AIs", description: "Offer ChatGPT when the person opens a Relay." }),
+  appSwitch({ id: "open_with_claude_code", app: "Claude Code", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Claude Code", where: "You › Your AIs", description: codingAppDescription("Claude Code", "opens a Relay") }),
+  appSwitch({ id: "open_with_codex", app: "Codex", list: AGENT_APPS, key: "agentApps", label: "Open Relays with Codex", where: "You › Your AIs", description: codingAppDescription("Codex", "opens a Relay") }),
   {
     id: "open_with_conductor",
     label: "Open Relays with Conductor",
-    where: "You › Your AIs › Open Relays in",
-    description: "Offer Conductor, which opens a new workspace per Relay. Shown in the pill only where Conductor is installed.",
+    where: "You › Your AIs",
+    description: (ctx) => `Offer Conductor, which opens a new workspace per Relay${runsTasks(ctx) ? ", and as a button to run a Task on its card" : ""}. Shown in the pill only where Conductor is installed.`,
     type: "boolean",
     scope: "account",
     available: (ctx) => ctx.features?.conductor === true,
@@ -336,23 +354,11 @@ const SETTINGS = [
   },
   taskMode("claude", "Claude Code"),
   taskMode("codex", "Codex"),
-  {
-    id: "device_execution",
-    label: "Device execution",
-    where: "You (shown while it is on)",
-    description: "Whether Execute may launch Tasks in the agent apps on this computer. It is switched on by the person's first Execute, which asks them.",
-    type: "boolean",
-    scope: "device",
-    available: (ctx) => ctx.features?.taskExecution === true,
-    read: async (ctx) => (await ctx.executionModule()).executionEnabled(ctx.config) === true,
-    write: async (ctx, value) => (await ctx.executionModule()).setExecutionPreferences(ctx.config, { enabled: value === true }),
-    raises: (_current, next) => next === true,
-  },
   chatAgentField("claude", "model"),
   chatAgentField("claude", "effort"),
   chatAgentField("codex", "model"),
   chatAgentField("codex", "effort"),
-  pillOnly({ id: "account", label: "Account", where: "You › Account", description: "Sign out, switch account, or open account settings on the web." }),
+  pillOnly({ id: "account", label: "Relay account", where: "You › Relay account", description: "Sign out, switch account, or open account settings on the web." }),
   pillOnly({ id: "slack", label: "Slack", where: "You › Slack", description: "Connect or disconnect Slack.", available: (ctx) => ctx.features?.slack === true }),
   pillOnly({ id: "blocked_contacts", label: "Blocked people", where: "You › Blocked people", description: "Block or unblock people." }),
 ];
@@ -393,7 +399,8 @@ function describeAgentAccess(setting) {
 async function listSettings(ctx) {
   const rows = [];
   for (const setting of availableSettings(ctx)) {
-    const row = { id: setting.id, label: setting.label, where: setting.where, description: setting.description, scope: setting.scope, agent: describeAgentAccess(setting) };
+    const description = typeof setting.description === "function" ? setting.description(ctx) : setting.description;
+    const row = { id: setting.id, label: setting.label, where: setting.where, description, scope: setting.scope, agent: describeAgentAccess(setting) };
     if (!setting.pillOnly) {
       try { row.value = await setting.read(ctx); } catch (error) { row.value = null; row.unavailable = error?.message || String(error); }
       if (setting.options) row.options = setting.options;
@@ -485,6 +492,7 @@ module.exports = {
   SETTINGS,
   TASK_DEFAULTS,
   TASK_MODES,
+  taskPermission,
   accountKeyFor,
   adoptLegacy,
   agentMode,

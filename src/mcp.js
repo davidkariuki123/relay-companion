@@ -173,7 +173,6 @@ async function relaySettingsCall(client, args, { features, sessionContext }) {
     client,
     config,
     trayAvailable: settingsTrayAvailable(),
-    executionModule: () => import("./native-task-launch.js"),
   };
   const action = String(args.action || "").trim().toLowerCase();
   if (action === "list") {

@@ -12,6 +12,7 @@ import installedApps from "./installed-apps.cjs";
 import { claudeHome, codexHome } from "./host-paths.js";
 import { configDir } from "./config.js";
 import atomicJson from "./atomic-json.cjs";
+import relaySettings from "./relay-settings.cjs";
 export { claudeLaunchPreflight, prepareClaudeDraft, findClaudeDraftSession, prepareClaudeTaskLink } from "./claude-task-fallback.js";
 
 const { atomicWriteJsonSync } = atomicJson;
@@ -31,15 +32,12 @@ export function setExecutionPreferences(config, patch) {
   const { file, ...current } = executionPreferences(config);
   atomicWriteJsonSync(file, { ...current, ...patch }, { mode: 0o600 });
 }
-// How a Task's conversation starts: "auto" (the default) or "default", which
-// is Claude's ask-before-acting mode. A Relay setting; the app's own rules
-// still apply (it refuses Auto where Auto is unavailable).
-export const EXECUTION_MODES = ["auto", "default"];
-export function executionMode(config) {
-  try {
-    const mode = executionPreferences(config).permissionMode;
-    return EXECUTION_MODES.includes(mode) ? mode : "auto";
-  } catch { return "auto"; }
+// How a Task's Claude conversation starts: Claude Code's one permission in
+// Your AIs, the mode every run Relay starts here uses (Shane, 2026-10-13).
+// The app's own rules still apply (it refuses Auto where Auto is unavailable).
+export const EXECUTION_MODES = relaySettings.TASK_MODES.claude.map((mode) => mode.value);
+export function executionMode() {
+  try { return relaySettings.taskPermission("claude"); } catch { return "auto"; }
 }
 export function executionEnabled(config) {
   try { return executionPreferences(config).enabled === true; } catch { return false; }
@@ -130,7 +128,7 @@ export async function prepareNativeSession({ provider, binary, cwd, title, permi
       ...(notice ? [notice] : []),
       { type: "assistant", parentUuid: notice?.uuid ?? null, isSidechain: false, uuid: randomUUID(), timestamp: new Date().toISOString(), sessionId: nativeId, cwd,
         userType: "external", entrypoint: "relay-execute", message: { id: `relay-seed-${randomUUID()}`, type: "message", role: "assistant",
-          content: [{ type: "text", text: "[Relay created this empty conversation. This notice is from Relay, not a model response. No task has run yet.]" }], stop_reason: "end_turn", usage: {} } },
+          content: [{ type: "text", text: "[Relay created this conversation. Your Task will start here in a few seconds. This notice is from Relay, not a model response.]" }], stop_reason: "end_turn", usage: {} } },
     ];
     fs.mkdirSync(path.dirname(transcript), { recursive: true });
     fs.writeFileSync(transcript, rows.map((r) => JSON.stringify(r)).join("\n") + "\n", { flag: "wx", mode: 0o600 });
@@ -206,7 +204,8 @@ function codexConnection(socketPath) {
 }
 
 export async function nativeSessionReady(session, { timeoutMs = 45000 } = {}) {
-  const deadline = Date.now() + timeoutMs;
+  let deadline = Date.now() + timeoutMs;
+  let codexUp = false;
   do {
     if (session.provider === "claude") {
       const registry = path.join(claudeHome(), "sessions");
@@ -225,6 +224,10 @@ export async function nativeSessionReady(session, { timeoutMs = 45000 } = {}) {
       const connection = codexConnection(socketPath);
       try {
         await connection.initialize();
+        // A link can launch a closed Codex, and a starved machine spends most
+        // of the wait just starting it. The wait for the conversation runs
+        // from when Codex answers, not from when the link was opened.
+        if (!codexUp) { codexUp = true; deadline = Math.max(deadline, Date.now() + timeoutMs); }
         const owner = await connection.request("thread-owner-discovery", { hostId: "local", conversationId: session.nativeId }, 1);
         if (owner.resultType === "success" && owner.handledByClientId && owner.result?.supportsUntrustedAppInput === true) return { connection };
       } catch { /* Cold app or an unowned thread: no prompt has been sent. */ }
@@ -235,7 +238,20 @@ export async function nativeSessionReady(session, { timeoutMs = 45000 } = {}) {
   if (session.provider === "claude") {
     throw Object.assign(new Error("Claude has not made this conversation ready to receive the task. It may have reached its session or memory limit, including older background sessions. Check Claude for any sign-in or trust prompt. No task prompt was sent; retrying will reuse this conversation. You can also use Copy for your agent and paste the task into Claude yourself."), { code: "CLAUDE_NOT_READY" });
   }
-  throw new Error("The native app is not ready. Open it, finish any sign-in or trust prompts, then retry. No task prompt was sent.");
+  // Codex can show the conversation minutes before it can take a Task: on a
+  // machine short of memory, loading it took over three minutes (Shane's
+  // laptop, 2026-10-13). Nothing was sent; the caller keeps watching.
+  throw Object.assign(new Error("Codex has not finished opening this conversation. No task prompt was sent; Execute again reuses this conversation."), { code: "CODEX_NOT_READY" });
+}
+
+// Whether anyone has used a Codex conversation Relay prepared: a turn, a
+// message or model output. Opening it adds only settings records. A Task that
+// was waiting for Codex is never added after someone else's message.
+const CODEX_TURN_EVENTS = new Set(["user_message", "task_started", "agent_message", "turn_aborted", "task_complete"]);
+export function nativeConversationUsed(session) {
+  if (session?.provider !== "codex") return false;
+  return nativeTranscriptRows(session).some((row) => row.type === "turn_context" || row.type === "response_item"
+    || (row.type === "event_msg" && CODEX_TURN_EVENTS.has(row.payload?.type)));
 }
 
 export async function submitNativeTurn(session, ready, prompt, messageId) {

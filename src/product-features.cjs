@@ -105,12 +105,6 @@ function productFeatures(options = {}) {
     // Work face: a private local run of your own agent — the requests layer
     // wearing a composer.
     relayWork: developer,
-    // Settings → Agent connections: provider subscription profiles and the
-    // MCP / connected-apps inventory. Substrate for runs, not for reading —
-    // so it rides the Tasks switch: the day Tasks turns on in an
-    // environment, its Settings surfaces (permission modes + connections)
-    // turn on with it (David, 2026-08-18). That day is 2026-09-17.
-    agentConnections: true,
     // relay_ai_sessions / relay_ai_session and the daemon's session controller
     // (the observations upload + remote session operations they run on).
     aiSessions: developer,

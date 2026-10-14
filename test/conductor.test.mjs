@@ -246,9 +246,13 @@ test("the pill paints no Conductor tile, switch or word without both the row and
   assert.match(gate, /return typeof stored === "boolean" \? stored : protoPref\(conductorPreferenceKey\(\), "on"\) !== "off";/);
   const options = inbox.slice(inbox.indexOf("  function hostOptions("), inbox.indexOf("  function hostSheetHtml("));
   assert.match(options, /\.\.\.\(conductorEnabled\(\) \? \[app\("conductor", "conductorMark\.svg", "Conductor", "conductor"\)\] : \[\]\),/);
-  const settings = inbox.slice(inbox.indexOf("  function yourAgentHtml()"), inbox.indexOf("  function blockedPeopleHtml()"));
-  assert.match(settings, /\$\{conductorAvailable\(\) \? `<div class="sv-open-row">/);
-  assert.match(settings, /data-conductor-app="1" aria-checked="\$\{conductorEnabled\(\) \? "true" : "false"\}"/);
+  // Your AIs has a Conductor row only where the account is offered it and the
+  // app is installed (setupHosts); its switch follows conductorEnabled().
+  assert.match(inbox, /function setupHosts\(\) \{ return \(setupSnapshot\?\.hosts \|\| \[\]\)\.filter\(\(host\) => host\.id !== SETUP_RIDER \|\| setupRiderOffered\(\)\); \}/);
+  const settings = inbox.slice(inbox.indexOf("  function setupAgentRowHtml(row)"), inbox.indexOf("  function setupAgentSettingsHtml("));
+  assert.match(settings, /const on = rider \? conductorEnabled\(\) : agentAppSelection\(\)\.includes\(row\.app\);/);
+  assert.match(settings, /const available = rider \? conductorAvailable\(\) : appAvailable\(row\.app\);/);
+  assert.match(settings, /data-conductor-app="1"/);
   // Every other mention sits behind one of those gates, inside the opener, or
   // names the app of an option main already decided to offer.
   const mentions = inbox.split("\n").filter((line) => /conductor/i.test(line) && !/^\s*\/\//.test(line));

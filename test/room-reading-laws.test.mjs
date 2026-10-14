@@ -289,7 +289,9 @@ test("only two-document Relays carry provider actions, and the newest Relay stay
   assert.match(detail, /find\(\(message\) => !message\.textLike && !message\.request\)/,
     "a newer quick text cannot steal resident-footer ownership from the latest Relay");
   assert.match(detail, /const hasHostActions = !textLike && !m\.request/);
-  assert.match(detail, /hasHostActions \? relayHostActionsHtml/);
+  // Full screen moves the actions into the card's right-hand rail; either way only a two-document Relay has them.
+  assert.match(detail, /hasHostActions && !relayWide \? relayHostActionsHtml/);
+  assert.match(detail, /hasHostActions \? `<div class="rl-rail-h">Open with<\/div>\$\{relayHostActionsHtml/);
   assert.doesNotMatch(html, /\.th-msg:hover \.th-host-actions/,
     "raw hover cannot open provider actions while the pointer is merely passing through");
   assert.match(html, /\.th-msg\.host-intent-open \.th-host-actions/);

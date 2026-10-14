@@ -643,7 +643,7 @@ test("chat composers offer owned laptop agents while human mentions stay group-o
 test("agent settings offer a credential-safe CLI setup prompt when installation is missing", () => {
   assert.match(html, /function providerSetupPrompt\(provider\)/);
   assert.match(html, /Do not paste credentials or access tokens into chat/);
-  assert.match(html, /data-provider-setup-prompt="\$\{id\}"/);
+  assert.match(html, /data-provider-setup-prompt="\$\{provider\}"/);
   assert.match(html, /navigator\.clipboard\.writeText\(providerSetupPrompt\(provider\)\)/);
 });
 
@@ -720,11 +720,13 @@ test("owned-agent faces remain inside the human room", () => {
 
 test("canonical chat hydration preserves the immediate owned-agent card species", () => {
   const source = html.slice(html.indexOf("function directContactRoomAnchor("), html.indexOf("function mergeDirectContactAnchor("));
+  const helper = html.slice(html.indexOf("function selfRelayDirection("), html.indexOf("function relayIsSelfAuthored("));
   const directContactRoomAnchor = Function(
     "relayTextLike",
     "bodyPreview",
-    `"use strict"; ${source}; return directContactRoomAnchor;`,
-  )(() => false, () => "");
+    "payload",
+    `"use strict"; ${helper}; ${source}; return directContactRoomAnchor;`,
+  )(() => false, () => "", { account:{ email:"shane@example.com" } });
   const item = {
     relayId:"agent-response",
     direction:"outbound",
@@ -1047,4 +1049,20 @@ test("the reply chip preserves explicit adjacent replies and quiets only legacy 
   // than stamp a placeholder on old messages.
   assert.doesNotMatch(html, /Original Relay unavailable/);
   assert.doesNotMatch(html, /th-reply-ref missing/);
+});
+
+test("a clipped untitled title never leaves its mid-word tail as the card preview", () => {
+  const source = html.slice(html.indexOf("function clippedTitleBody("), html.indexOf("// Topic rows have one compact message-gist line"));
+  const { clippedTitleBody, bodyPreview } = Function(`"use strict"; ${source}; return { clippedTitleBody, bodyPreview };`)();
+  const body = "Find my 3rd most recent Claude Code chat session that wasn't active today, and tell me which one it is.";
+  const title = "Find my 3rd most recent Claude Code chat session that wasn't active today, and tell me wh…";
+
+  assert.equal(bodyPreview(body, title, 72), "", "the tail \"ich one it is.\" is not a preview");
+  assert.equal(clippedTitleBody(title, body), body, "the card shows the short body whole as its title");
+  assert.equal(clippedTitleBody(title, `${body} ${"More words. ".repeat(30)}`), "", "a long body keeps the clipped title");
+  assert.equal(clippedTitleBody("Pricing sheet", "Pricing sheet is ready."), "", "a real title is never replaced");
+  assert.equal(bodyPreview("Pricing sheet. It is ready for Thursday.", "Pricing sheet", 72), "It is ready for Thursday.",
+    "an unclipped title still skips its own words in the preview");
+  assert.match(html, /esc\(\(!open && !inlineBody && clippedTitleBody\(m\.title, m\.body\)\) \|\| m\.title\)/,
+    "the collapsed thread card uses the whole short body as its title");
 });

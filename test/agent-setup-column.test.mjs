@@ -276,8 +276,9 @@ test("the pill draws Your AIs from that evidence, first on the You page, with th
   for (const gone of [/Relay stopped in Claude’s chats/, /Restart Claude/, /data-setup-restart/, /setupRestart/, /Quits and reopens/, /"not_loaded"/, /state === "restart"/]) {
     assert.doesNotMatch(inbox, gone);
   }
-  // Connect all never opens Claude's connector screen behind the person's back.
-  assert.match(inbox, /host\.installed && host\.id !== "claude-app" && \["available", "broken"\]\.includes\(host\.state\)/);
+  // There is no Connect all: each row has its own verb, and the Claude
+  // connector screen opens only from Claude's own Connect.
+  assert.doesNotMatch(inbox, /setupConnectAll|Connect all/);
   // Conductor exists here only for accounts offered it.
   assert.match(inbox, /const SETUP_RIDER = "conductor"; const setupRiderOffered = \(\) => payload\.features\?\.conductor === true;/);
 });

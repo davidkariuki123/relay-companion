@@ -12,9 +12,7 @@ import {
   connectProvider,
   providerAuthStatus,
   providerAuthStatuses,
-  providerInventoryStatuses,
   providerSpawnEnvironment,
-  setProviderEnabled,
   _test,
 } from "../src/provider-auth.js";
 
@@ -185,24 +183,16 @@ test("Codex status accepts ChatGPT subscription login and rejects API-key billin
   assert.match(apiBilled.detail, /API billing/);
 });
 
-test("Relay enablement is local, durable, and does not log the provider out", async () => {
+test("a signed-in provider is ready: there is no Relay-side switch to turn it off", async () => {
   const prefsFile = tempPrefs();
-  await setProviderEnabled("claude", false, { prefsFile });
-  const status = await providerAuthStatus("claude", {
+  const status = await assertProviderReady("claude", {
     command: "/opt/homebrew/bin/claude",
     prefsFile,
     execFile: async () => ({ stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }) }),
   });
-  assert.equal(status.connected, true, "provider authentication remains intact");
-  assert.equal(status.enabled, false, "only Relay use is disabled");
-  if (process.platform !== "win32") assert.equal(fs.statSync(prefsFile).mode & 0o777, 0o600);
-  await assert.rejects(assertProviderReady("claude", {
-    command: "/opt/homebrew/bin/claude",
-    prefsFile,
-    execFile: async () => ({ stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }) }),
-  }), /disabled in Relay/);
+  assert.equal(status.connected, true);
+  assert.equal(Object.hasOwn(status, "enabled"), false);
 });
-
 test("non-desktop fallback launches each official subscription login inside a macOS PTY and stores no token", async () => {
   const prefsFile = tempPrefs();
   const expectCommand = "/bin/sh";
@@ -229,7 +219,8 @@ test("non-desktop fallback launches each official subscription login inside a ma
   ]);
   assert.equal(calls.every((call) => call.args[1].endsWith("provider-auth-runner.exp")), true);
   assert.equal(calls.every((call) => call.options.stdio[0] === "pipe"), true);
-  assert.doesNotMatch(fs.readFileSync(prefsFile, "utf8"), /token|credential|secret/i);
+  // Relay keeps no provider state of its own: no switch, and never a token.
+  assert.equal(fs.existsSync(prefsFile), false);
   for (const state of _test.activeLogins.values()) {
     clearTimeout(state.timer);
     state.child.emit("close", 1);
@@ -451,13 +442,13 @@ test("the Task gate names the exact subscription recovery for signed-out and API
     command: "/opt/homebrew/bin/claude",
     prefsFile,
     execFile: disconnectedExec,
-  }), /needs your Claude subscription[\s\S]*Agent connections[\s\S]*Sign in to Claude Code/);
+  }), /needs your Claude subscription[\s\S]*You › Your AIs[\s\S]*Sign in under Claude Code/);
 
   await assert.rejects(assertProviderReady("codex", {
     command: "/opt/homebrew/bin/codex",
     prefsFile,
     execFile: async () => ({ stdout: "Logged in using an API key" }),
-  }), /API billing[\s\S]*ChatGPT subscription[\s\S]*Sign in to Codex/);
+  }), /API billing[\s\S]*ChatGPT subscription[\s\S]*Sign in under Codex/);
 });
 
 test("Settings auth status is cheap and does not inventory integrations", async () => {
@@ -476,40 +467,6 @@ test("Settings auth status is cheap and does not inventory integrations", async 
   assert.deepEqual(Object.keys(result.providers).sort(), ["claude", "codex"]);
   assert.equal(result.providers.claude.connected, false);
   assert.equal(result.providers.codex.connected, true);
-  assert.deepEqual(result.providers.claude.integrations.mcpServers, []);
+  assert.equal(Object.hasOwn(result.providers.claude, "integrations"), false);
   assert.equal(calls.some((args) => args[0] === "mcp"), false);
-});
-
-test("Settings inventory preserves exact safe provider integration status", async () => {
-  let claudeOptions = null;
-  const result = await providerInventoryStatuses({
-    command: "/opt/homebrew/bin/ignored",
-    execFile: async (command, args, options) => {
-      if (args[0] === "mcp") claudeOptions = options;
-      return { stdout: "claude.ai Gmail: https://gmail.example/mcp - ✔ Connected\nrelay: node relay.js - ✔ Connected" };
-    },
-    codexApps: async () => [
-      { name: "Gmail", status: "Connected", source: "account" },
-      { name: "GitHub", status: "Connected", source: "account" },
-    ],
-  });
-  assert.deepEqual(result.providers.claude.integrations.mcpServers, [
-    { name: "Gmail", status: "Connected", source: "account" },
-    { name: "relay", status: "Connected", source: "local" },
-  ]);
-  assert.deepEqual(result.providers.codex.integrations.apps.map((app) => app.name), ["Gmail", "GitHub"]);
-  assert.equal(claudeOptions.env.MCP_SERVER_CONNECTION_BATCH_SIZE, process.env.MCP_SERVER_CONNECTION_BATCH_SIZE || "8");
-  assert.equal(JSON.stringify(result).includes("accessToken"), false);
-});
-
-test("Claude's provider-owned MCP inventory preserves account scope and authentication status", () => {
-  assert.deepEqual(_test.parseClaudeMcpList(`Checking MCP server health…
-claude.ai Gmail: https://gmailmcp.googleapis.com/mcp/v1 - ✔ Connected
-claude.ai Snitch: https://mcp.snitch.blog/mcp - ! Needs authentication
-relay: /opt/homebrew/bin/node relay.js mcp - ✔ Connected
-`), [
-    { name: "Gmail", status: "Connected", source: "account" },
-    { name: "relay", status: "Connected", source: "local" },
-    { name: "Snitch", status: "Needs authentication", source: "account" },
-  ]);
 });

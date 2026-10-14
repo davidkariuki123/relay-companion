@@ -91,7 +91,7 @@ test("the renderer hands the tile to main and never builds the https link itself
   // still opens something.
   assert.match(opener, /claude\.ai\/new\?q=/);
   assert.equal(inbox.includes("chatAppUrlFor"), false);
-  // Settings says which it is on this Mac.
-  const settings = inbox.slice(inbox.indexOf("  function yourAgentHtml()"), inbox.indexOf("  function blockedPeopleHtml()"));
-  assert.match(settings, /desktopEntry\("Claude Code"\)\?\.available === true \? "Claude app" : "claude\.ai"/);
+  // Your AIs names the chat AI, not where its tile lands: one switch per AI.
+  const settings = inbox.slice(inbox.indexOf("  function setupWebRowHtml(surface)"), inbox.indexOf("  function setupAgentRows("));
+  assert.match(settings, /data-chat-app="\$\{meta\.name\}"/);
 });

@@ -12,18 +12,12 @@ test("the pill carries no chat-connector rows and no connector hand-off", () => 
   // skill for everyone, and the You page says what is connected. The
   // connector hand-off left main and the preload with them.
   assert.doesNotMatch(html, /Chat connections/);
-  assert.equal((html.match(/<div class="sv-open-title">Connections<\/div>/g) || []).length, 1);
-  assert.match(html, /function connectionsHtml\(info, includeAgentProviders\)/);
-  assert.match(html, /const rows = includeAgentProviders \? providerConnectionRowsHtml\(\) : "";/);
-  assert.doesNotMatch(html, /chatConnectionRowsHtml|id:"chatgpt-chat"|id:"claude-chat"|id="svConnectClaude"|connectClaudeFromSettings/);
-  // The one Connections section is drawn on Your AIs (2026-10-08), with the
-  // same agentConnections gate; You no longer draws it.
-  const runtime = html.slice(html.indexOf("function taskRuntimeHtml()"), html.indexOf("function setupPageHtml()"));
-  assert.match(runtime, /connectionsHtml\(settingsInfo, payload\.features\?\.agentConnections === true\)/);
-  assert.equal((html.match(/connectionsHtml\(/g) || []).length, 2, "one definition and one call, on Your AIs");
+  // Claude and ChatGPT are Your AIs' Chat AIs rows now (2026-10-13), and the
+  // Connections section (subscriptions and MCPs) is gone.
+  assert.doesNotMatch(html, /<div class="sv-open-title">Connections<\/div>|function connectionsHtml|providerConnectionRowsHtml/);
+  assert.doesNotMatch(html, /chatConnectionRowsHtml|id:"chatgpt-chat"|id="svConnectClaude"|connectClaudeFromSettings/);
   const render = html.slice(html.indexOf("function renderSettings()"), html.indexOf("function wireSettings()"));
   assert.doesNotMatch(render, /chatConnectionsHtml|providerConnectionHtml/);
-  assert.doesNotMatch(runtime, /chatConnectionsHtml|providerConnectionHtml/);
   assert.doesNotMatch(main, /relay:connectClaude|relay:connectChatGPT/);
   assert.doesNotMatch(preload, /connectClaude|connectChatGPT/);
 });

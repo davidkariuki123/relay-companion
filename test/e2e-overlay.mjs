@@ -1663,8 +1663,8 @@ try {
       "requests: an unusable provider fails before work starts and names the exact Settings action",
       requestGate?.ok === false &&
         /Claude subscription/.test(requestGate.error || "") &&
-        /Agent connections/.test(requestGate.error || "") &&
-        /Sign in to Claude Code/.test(requestGate.error || ""),
+        /You › Your AIs/.test(requestGate.error || "") &&
+        /Sign in under Claude Code/.test(requestGate.error || ""),
       JSON.stringify(requestGate),
     );
   }

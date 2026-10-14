@@ -33,7 +33,7 @@ test("the account is a row you tap; its actions unfold beneath it", () => {
   assert.doesNotMatch(settings, /sv-device">This device/, "the device line is gone");
   // The account is the last row of the page's last card, after Blocked people.
   const account = slice("function accountRowHtml()", "function yourLinkHtml()");
-  assert.match(account, /<button class="sv-row\$\{svAccountOpen \? " open" : ""\}" type="button" id="svAccountRow" aria-expanded="\$\{svAccountOpen \? "true" : "false"\}" aria-controls="svAccountActions">\s*<span class="sv-row-copy"><span class="sv-row-name">Account<\/span><\/span>/);
+  assert.match(account, /<button class="sv-row\$\{svAccountOpen \? " open" : ""\}" type="button" id="svAccountRow" aria-expanded="\$\{svAccountOpen \? "true" : "false"\}" aria-controls="svAccountActions">\s*<span class="sv-row-copy"><span class="sv-row-name">Relay account<\/span><\/span>/);
   assert.match(account, /\$\{svAccountOpen \? `<div class="sv-row-actions" id="svAccountActions" aria-label="Account actions">/);
   assert.match(account, /id="svAccount" [^>]*><span class="sv-row-copy"><span class="sv-row-name">Account settings<\/span>/);
   assert.match(account, /id="svSwitch" [^>]*><span class="sv-row-copy"><span class="sv-row-name">Switch account<\/span>/);
@@ -53,31 +53,18 @@ test("the account is a row you tap; its actions unfold beneath it", () => {
   assert.match(html, /resetSignOutArm\(\); \/\/ leaving the view disarms the confirm state\s*svAccountOpen = false;/);
 });
 
-test("Your agent restores independent switches and a same-list own-session choice", () => {
-  const agent = slice("function yourAgentHtml()", "// YOUR AIS (Setup");
-  // Sven's cut (2026-10-08): the section names what the switches decide, with
-  // no intro sentence, and it lives on Your AIs beside each app, not on You.
-  assert.match(agent, /<div class="sv-open-title">Open Relays in<\/div>/);
-  assert.doesNotMatch(agent, /Your agent<\/div>|Choose which agents you use|sv-open-intro/);
-  assert.match(slice("function setupPageHtml()", "function setupAgentGap("), /\$\{yourAgentHtml\(\)\}/);
-  assert.doesNotMatch(slice("function renderSettings()", "function wireSettings()"), /yourAgentHtml\(\)/);
-  // A gap Your AIs knows about is said plainly: you are already on that page.
-  assert.match(agent, /: gap \? gap\s*:/);
-  assert.doesNotMatch(agent, /see Your AIs/);
-  assert.match(agent, /role="switch" data-agent-app="\$\{app\}" aria-checked=/);
-  // The chat apps have their own switches, before the desktop ones, the way
-  // the reader's sheet is ordered (David, 2026-09-17).
-  assert.match(agent, /\$\{CHAT_APP_OPTIONS\.map\(\(app\) => \{[\s\S]*\$\{AGENT_APP_OPTIONS\.map\(\(app\) => \{/);
-  assert.match(agent, /role="switch" data-chat-app="\$\{app\}" aria-checked=/);
-  assert.match(agent, /const logo = app === "ChatGPT" \? "chatgptMark\.svg" : "claudeMark\.svg";/);
-  // No Other row: the copied sentence is always offered, so there is nothing
-  // to switch and nothing to state (David, 2026-09-16 and 2026-09-17).
-  assert.doesNotMatch(agent, /svOtherAgent|Copy prompts for another agent|Other<\/span>|Relay always copies the sentence for you|sv-open-logo-blank/);
-  assert.doesNotMatch(agent, /svOpeningSurface|<select|Opening an app does not|Available ·/);
-  assert.match(agent, /Connected · opens relays in a new chat/);
-  // All four begin on and all four can go off (Sven then David, 2026-09-17):
-  // no switch is ever held, and no row wears a "keep at least one on" whisper.
-  assert.doesNotMatch(agent, /KEEP_ONE|keep at least one on|aria-disabled|isLastAgentAppOn/);
+test("the opens-Relays switches live on Your AIs, one per AI, never on You", () => {
+  // Shane's compact Your AIs (2026-10-13): each AI's switch sits on its own
+  // row, and only once that AI is connected to Relay; the chat AIs first, then
+  // the coding agents on this computer, the way the reader's sheet is ordered.
+  const setup = slice("function setupPageHtml()", "/** The You page's door");
+  const template = setup.slice(setup.indexOf("return `<section"));
+  assert.ok(template.indexOf('setupWebRowHtml("claude")') < template.indexOf("${agents}"));
+  assert.match(slice("function setupWebRowHtml(surface)", "function setupAgentRows("), /role="switch" data-chat-app="\$\{meta\.name\}"/);
+  assert.match(slice("function setupAgentRowHtml(row)", "function setupAgentSettingsHtml("), /data-agent-app="\$\{row\.app\}"/);
+  assert.doesNotMatch(slice("function renderSettings()", "function wireSettings()"), /data-agent-app|data-chat-app/);
+  // No Other row, and no switch held on (David, 2026-09-16 and 2026-09-17).
+  assert.doesNotMatch(html, /svOtherAgent|Copy prompts for another agent|KEEP_ONE|keep at least one on|isLastAgentAppOn/);
 });
 
 test("Your invite link is on the page with Copy, and nothing more to read", () => {
@@ -107,21 +94,16 @@ test("the You page reads: you, what Relay connects to, your link, preferences, t
   // connects to come first, then the link, the preferences card, and the
   // Blocked people + Account card (Sven's cut, 2026-10-08). The gated
   // extras keep their place after it.
-  const order = ['<div class="sv-profile">', "setupEntryHtml()", "slackSettingsHtml(info)", "yourLinkHtml()", "quietPrefsHtml(info)", "milestoneRelaysHtml(info)", "blockedPeopleHtml()", "accountRowHtml()", "chatAgentDefaultsHtml()", "sv-colophon"]
+  const order = ['<div class="sv-profile">', "setupEntryHtml()", "slackSettingsHtml(info)", "yourLinkHtml()", "quietPrefsHtml(info)", "milestoneRelaysHtml(info)", "blockedPeopleHtml()", "accountRowHtml()", "sv-colophon"]
     .map((marker) => settings.indexOf(marker));
   assert.ok(order.every((index) => index >= 0), order);
   assert.deepEqual([...order].sort((a, b) => a - b), order);
-  // Your agent and What Tasks may do left this page for Your AIs, and so did
-  // the subscription rows and device execution (expanded-mode review,
-  // 2026-10-08): they are about the same apps.
-  assert.doesNotMatch(settings, /yourAgentHtml\(\)|permPrefs|What Tasks may do/);
+  // Everything about the AIs lives on Your AIs; the Chat agents card left
+  // You too (Shane, 2026-10-13): a mention runs with its agent's settings.
+  assert.doesNotMatch(settings, /chatAgentDefaultsHtml|Chat agents|data-chat-agent-|setupAgentSettingsHtml/);
   const youPage = slice("function renderSettings()", "function wireTaskRuntimeControls(");
-  assert.doesNotMatch(youPage, /connectionsHtml\(|executionDisable|executionMode|Device execution|data-provider-/);
+  assert.doesNotMatch(youPage, /executionDisable|executionMode|Device execution|data-provider-/);
   assert.doesNotMatch(slice("function wireSettings()", "\n  function "), /data-provider-|executionDisable|executionMode/);
   // Their handlers went with them: Your AIs wires them within its own page.
   assert.match(slice("function wireSetupPage()", "\n  function "), /wireTaskRuntimeControls\(page\);/);
-  const setupPage = slice("function setupPageHtml()", "function setupAgentGap(");
-  const aiOrder = ["${yourAgentHtml()}", "${permPrefsHtml()}", "${taskRuntimeHtml()}"].map((marker) => setupPage.indexOf(marker));
-  assert.ok(aiOrder.every((index) => index >= 0), aiOrder);
-  assert.deepEqual([...aiOrder].sort((a, b) => a - b), aiOrder);
 });

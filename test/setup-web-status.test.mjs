@@ -11,10 +11,10 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const inbox = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
-const row = inbox.slice(inbox.indexOf("function setupWebRowHtml(surface)"), inbox.indexOf("function permPrefsHtml()"));
+const row = inbox.slice(inbox.indexOf("function setupWebRowHtml(surface)"), inbox.indexOf("function setupAgentRows("));
 
-test("the web rows say only Connected or Not connected, counting only connections still in use", () => {
-  assert.match(row, /: live\.length \? \{ dot:"ok", text:"Connected" \}\s*: \{ dot:"", text:"Not connected" \};/);
+test("the web rows say only Connected to Relay or Not connected to Relay, counting only connections still in use", () => {
+  assert.match(row, /: live\.length \? \{ dot:"ok", text:"Connected to Relay" \}\s*: \{ dot:"", text:"Not connected to Relay" \};/);
   assert.doesNotMatch(row, /chats connected/, "no count of connections a person cannot verify");
   assert.doesNotMatch(row, /setupUsedWords\(newest\)/, 'no "used X ago" headline: a session starting is not using Relay');
   assert.match(inbox, /const SETUP_WEB_LIVE_MS = 30 \* 24 \* 60 \* 60 \* 1000;/);

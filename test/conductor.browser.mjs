@@ -108,11 +108,17 @@ try {
     onPayload(input); openReader("task-conductor", "relays"); renderReader();
   }, fixture);
   await page.locator("[data-native-execute]").click();
+  // The app first, with its own mark; then that app's folders.
+  const app = page.locator('[data-execute-app][data-provider="conductor"]');
+  await app.waitFor();
+  assert.equal(await app.locator("img").getAttribute("src"), "conductorMark.svg");
+  await app.click();
   const pick = page.locator('[data-execute-pick][data-provider="conductor"][data-cwd]');
   await pick.waitFor();
-  assert.equal(await pick.locator("img").getAttribute("src"), "conductorMark.svg");
-  assert.match(await pick.textContent(), /relay\s*Conductor/);
-  assert.equal(await page.locator('[data-execute-pick][data-provider="conductor"][data-browse="1"] img').getAttribute("src"), "conductorMark.svg");
+  assert.match(await page.locator("#readerActions").textContent(), /Conductor in which folder\?/);
+  assert.match(await pick.textContent(), /relay/);
+  assert.equal(await page.locator('[data-execute-pick][data-provider="claude"]').count(), 0, "only Conductor's folders");
+  assert.equal(await page.locator('[data-execute-pick][data-provider="conductor"][data-browse="1"]').count(), 1);
   await pick.click();
   await page.locator("[data-native-execute]").waitFor();
   assert.deepEqual((await page.evaluate(() => window.executeCalls)).at(-1), { id: "task-conductor", choice: { provider: "conductor", cwd: "/w/relay", browse: false } });

@@ -49,12 +49,17 @@
 
 /* ---- the dots: a little page each, moving with the fingers ---- */
 .ip-pager { position:absolute; z-index:45; left:50%; bottom:11px; transform:translateX(-50%); }
+/* The expanded app: centred under the sidebar, from the sidebar's own width.
+   Measured once per render it could read a sidebar not yet laid out and land
+   on the card's left edge, half off the window (Shane, 2026-10-12). */
+.card.wide .ip-pager, .card.wide .ip-name { left:calc(var(--wide-side, 320px) / 2); }
 .ip-pager.ip-off, .card.collapsed .ip-pager, .card.peek .ip-pager, .card.collapsed .ip-name, .card.peek .ip-name { display:none !important; }
-.ip-dots { display:flex; align-items:center; gap:5px; padding:7px 9px; border-radius:var(--r-pill); background:color-mix(in srgb, var(--bg) 72%, transparent); -webkit-backdrop-filter:blur(14px) saturate(1.4); backdrop-filter:blur(14px) saturate(1.4); box-shadow:0 0 0 1px var(--hair), 0 6px 16px -10px rgba(31,26,23,.35); }
-.ip-dots button { position:relative; appearance:none; border:0; padding:0; cursor:pointer; height:6px; border-radius:var(--r-pill); }
-.ip-dots button::after { content:""; position:absolute; inset:-9px -5px; }
-.ip-dots button[data-ip-to="chats"] { width:calc(6px + (1 - var(--ip-at, 0)) * 14px); background:color-mix(in srgb, var(--ink) calc((1 - var(--ip-at, 0)) * 100%), var(--muted-3)); }
-.ip-dots button[data-ip-to="list"] { width:calc(6px + var(--ip-at, 0) * 14px); background:color-mix(in srgb, var(--ink) calc(var(--ip-at, 0) * 100%), var(--muted-3)); }
+.ip-dots { appearance:none; border:0; margin:0; cursor:pointer; font:inherit; color:inherit; display:flex; align-items:center; gap:5px; padding:7px 9px; border-radius:var(--r-pill); background:color-mix(in srgb, var(--bg) 72%, transparent); -webkit-backdrop-filter:blur(14px) saturate(1.4); backdrop-filter:blur(14px) saturate(1.4); box-shadow:0 0 0 1px var(--hair), 0 6px 16px -10px rgba(31,26,23,.35); }
+.ip-dots:hover { background:color-mix(in srgb, var(--bg) 88%, transparent); }
+.ip-dots:focus-visible { outline:none; box-shadow:var(--focus-ring), 0 0 0 1px var(--hair); }
+.ip-dots [data-ip-to] { position:relative; display:block; height:6px; border-radius:var(--r-pill); }
+.ip-dots [data-ip-to="chats"] { width:calc(6px + (1 - var(--ip-at, 0)) * 14px); background:color-mix(in srgb, var(--ink) calc((1 - var(--ip-at, 0)) * 100%), var(--muted-3)); }
+.ip-dots [data-ip-to="list"] { width:calc(6px + var(--ip-at, 0) * 14px); background:color-mix(in srgb, var(--ink) calc(var(--ip-at, 0) * 100%), var(--muted-3)); }
 .ip-due { position:absolute; top:-4px; right:-4px; width:6px; height:6px; border-radius:50%; background:var(--warn); box-shadow:0 0 0 1.5px var(--bg); opacity:0; transform:scale(.3); transition:opacity .2s var(--settle), transform .35s var(--soft); }
 .ip-due.on { opacity:1; transform:none; }
 .ip-name { position:absolute; z-index:46; left:50%; bottom:42px; transform:translate(-50%, 4px); opacity:0; pointer-events:none; font:600 11px var(--sans); color:var(--ink); padding:4px 10px; border-radius:var(--r-pill); background:color-mix(in srgb, var(--bg) 80%, transparent); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); box-shadow:0 0 0 1px var(--hair); white-space:nowrap; }

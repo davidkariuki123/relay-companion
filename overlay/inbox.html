@@ -2415,20 +2415,7 @@
   :is(.rd-body,.rd-agentcopy) .md-table th, :is(.rd-body,.rd-agentcopy) .md-table td { text-align:left; padding:7px 12px 7px 0; border-bottom:1px solid var(--edge); vertical-align:top; }
   :is(.rd-body,.rd-agentcopy) .md-table th { font-weight:650; color:var(--muted-2); font-size:10px; letter-spacing:.06em; text-transform:uppercase; }
   :is(.rd-body,.rd-agentcopy) .md-img { max-width:100%; border-radius:6px; margin:8px 0; }
-  /* Settings: what Tasks may do. One value row per app — the "Open Relays
-     with" species (logo, name, current mode) — that unfolds the standard
-     open-actions tray inline. The tray is the explanation surface: modes are
-     each vendor's own names, read at the moment of choosing. */
-  .perm-vrow { appearance:none; border:0; background:transparent; width:100%; cursor:pointer;
-    font:inherit; color:inherit; text-align:left; transition:background-color var(--t-fast) var(--settle); }
-  .perm-vrow:hover { background:var(--wash); }
-  .perm-app.open > .perm-vrow { background:var(--wash-2); }
-  .perm-app + .perm-app { border-top:1px solid var(--edge); }
-  .perm-value { display:flex; align-items:center; gap:7px; font-family:var(--sans); font-size:13px; color:var(--muted); }
   .perm-chev { flex:none; color:var(--muted-2); transition:transform var(--t-base) var(--settle); }
-  .perm-app.open .perm-chev { transform:rotate(90deg); }
-  .perm-tray { margin:0; border-radius:0; padding:4px 6px 6px; border-top:1px solid var(--hair); }
-  .perm-tray .ap-row { padding-left:45px; }
   /* The read receipt: a whisper under your own message, never a badge. */
   .th-msg .th-seen { display:block; margin-top:3px; font-family:var(--sans); font-size:10px;
     letter-spacing:.01em; color:var(--muted-2); opacity:.7; }
@@ -3197,17 +3184,6 @@
   .th-mention-copy { display:flex; flex-direction:column; min-width:0; }
   .th-mention-name { font-weight:650; }
   .th-mention-note { color:var(--muted); font-size:10.5px; }
-  /* Chat-agent defaults stay compact without forcing four controls onto one
-     line. Identity owns the first line; model and thinking share a labelled,
-     responsive grid below it. */
-  .sv-agent-defaults .sv-open-row { display:block; min-height:0; padding:11px 12px 12px; }
-  .sv-agent-identity { display:flex; align-items:center; gap:11px; min-width:0; }
-  .sv-agent-fields { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:8px; margin:10px 0 0 39px; }
-  .sv-agent-field { display:block; min-width:0; }
-  .sv-agent-field-label { display:block; margin:0 0 4px 1px; color:var(--muted-2); font:10px/1.25 var(--sans); }
-  .sv-agent-select { width:100%; min-width:0; height:34px; padding:0 8px; border:1px solid var(--edge); border-radius:9px;
-    background:var(--bg); color:var(--ink); font:11.5px var(--sans); cursor:pointer; }
-  .sv-agent-select:focus-visible { outline:none; box-shadow:var(--focus-ring); }
   /* The chosen Relay is attached to the existing composer as its top face.
      This is one composer with context, not a Slack-style child conversation. */
   .qr.th-qr.replying { gap:0; }
@@ -3446,53 +3422,11 @@
   .sv-update { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
   .sv-setup-link { appearance:none; border:0; padding:0; background:transparent; color:var(--ink); font:inherit; cursor:pointer; text-decoration:underline; text-decoration-color:color-mix(in srgb, var(--ink) 38%, transparent); text-underline-offset:2px; }
   .sv-update-btn { width:auto; padding:7px 12px; border-radius:var(--r-2); font-family:var(--sans); font-size:12px; }
-  .sv-provider-section { margin:24px 12px 0; }
-  .sv-provider-list { overflow:hidden; border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); }
-  .sv-provider { padding:12px; }
-  .sv-provider + .sv-provider { border-top:1px solid var(--edge); }
-  .sv-provider-list.sv-agent-provider-list { background:var(--raised); }
-  .sv-agent-provider-list .sv-provider { padding:0; }
-  .sv-agent-provider-list .sv-provider + .sv-provider { border-top:1px solid var(--edge); }
-  .sv-agent-provider-toggle {
-    appearance:none; width:100%; min-height:64px; padding:12px; border:0; background:transparent; color:inherit;
-    display:grid; grid-template-columns:28px minmax(0,1fr) auto 14px; align-items:center; gap:10px;
-    font-family:var(--sans); text-align:left; cursor:pointer; transition:background-color var(--t-fast) var(--settle);
-  }
-  .sv-agent-provider-toggle:hover { background:var(--wash); }
-  .sv-agent-provider-logo { width:28px; height:28px; border-radius:7px; object-fit:contain; }
-  .sv-agent-provider-summary { min-width:0; display:flex; flex-direction:column; }
-  .sv-agent-provider-count { margin-top:3px; color:var(--muted-2); font-size:11px; line-height:1.2; }
-  .sv-agent-provider-ready { display:inline-flex; align-items:center; gap:5px; color:var(--ok); font:600 10px/1 var(--sans); white-space:nowrap; }
-  .sv-agent-provider-ready::before { content:""; width:5px; height:5px; border-radius:50%; background:currentColor; }
-  .sv-agent-provider-state { color:var(--muted-2); font:600 10px/1 var(--sans); white-space:nowrap; }
-  .sv-agent-provider-state.available { color:var(--accent); }
-  .sv-agent-provider-state.busy { color:var(--accent); }
-  .sv-agent-provider-chev { color:var(--muted-3); transition:transform var(--t-base) var(--settle); }
-  .sv-agent-provider-toggle[aria-expanded="true"] .sv-agent-provider-chev { transform:rotate(180deg); }
-  .sv-agent-provider-detail { display:grid; grid-template-rows:0fr; transition:grid-template-rows var(--t-base) var(--soft); }
-  .sv-agent-provider-detail.open { grid-template-rows:1fr; }
-  .sv-agent-provider-detail-inner { min-height:0; overflow:hidden; }
-  .sv-agent-provider-detail-body { margin:0 12px 13px 50px; padding-top:11px; border-top:1px solid var(--hair); }
-  .sv-agent-provider-note { margin-bottom:11px; color:var(--muted-2); font-size:10.5px; line-height:1.4; }
-  .sv-agent-provider-note.success { color:var(--ok); }
-  .sv-agent-provider-note.error { color:var(--danger); }
-  .sv-agent-provider-group + .sv-agent-provider-group { margin-top:12px; }
-  .sv-agent-provider-group-head { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:7px; color:var(--muted-2); font:600 10px/1.25 var(--sans); }
-  .sv-agent-provider-integrations { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px 12px; margin:0; padding:0; list-style:none; }
-  .sv-agent-provider-integrations li { min-width:0; overflow:hidden; color:var(--muted); font:500 10px/1.25 var(--sans); text-overflow:ellipsis; white-space:nowrap; }
-  .sv-agent-provider-integrations li::before { content:"·"; margin-right:5px; color:var(--muted-3); }
-  .sv-agent-provider-actions { display:flex; gap:7px; justify-content:flex-end; margin-top:12px; }
-  .sv-provider-name { font-size:13px; font-weight:600; color:var(--ink); }
-  .sv-provider-btn { appearance:none; border:1px solid var(--edge); background:transparent; color:var(--muted); border-radius:999px; padding:5px 10px; font:600 11px/1 var(--sans); cursor:pointer; }
-  .sv-provider-btn.primary { border-color:color-mix(in srgb, var(--accent) 35%, var(--edge)); background:var(--accent-soft); color:var(--accent); }
-  .sv-provider-btn:hover { color:var(--ink); border-color:var(--edge-strong); }
-  .sv-provider-btn:disabled { opacity:.4; cursor:default; }
-  @media (prefers-reduced-motion:reduce) { .sv-agent-provider-detail, .sv-agent-provider-chev { transition:none; } }
 
   /* ---- Quiet mode: the two durable on/off preferences ----
-     A real switch, not the Enable/Disable label-flip the provider rows use: these
+     A real switch, not an Enable/Disable label-flip: these
      are settings someone leaves ON for weeks, and a switch reads its own state at a
-     glance. Same enclosure as .sv-provider-list so the pane stays one material. */
+     glance. Same enclosure as .sv-open-list so the pane stays one material. */
   .sv-quiet-section { margin:24px 12px 0; }
   .sv-quiet-title { margin-bottom:10px; }
   .sv-quiet-list { overflow:hidden; border-radius:var(--r-3); background:var(--raised); box-shadow:inset 0 0 0 1px var(--edge); }
@@ -3887,7 +3821,6 @@
   .setup-page .sv-open-title { padding:0 12px; margin-bottom:8px; font-size:12px; line-height:1.3; color:var(--muted); letter-spacing:.005em; }
   .setup-page .sv-open-intro { padding:0 12px; }
   .setup-page .sv-open-title + .sv-open-intro { margin-top:-3px; }
-  .setup-page .setup-all { font-size:12px; }
   .setup-row .sv-choose { min-width:76px; }
   /* One row per app a person opens; its modes (Chat, Code…) underneath. */
   .setup-app { align-items:flex-start; }
@@ -3912,10 +3845,31 @@
   .setup-row .sv-choose.warn { background:color-mix(in srgb, var(--warn) 13%, transparent); color:var(--warn); }
   .setup-web { border-top:1px solid var(--edge); }
   .setup-web:first-child { border-top:0; }
-  .setup-web > .setup-row { appearance:none; border:0; background:transparent; width:100%; text-align:left; font:inherit; color:inherit; }
-  .setup-web > button.setup-row { cursor:pointer; transition:background-color var(--t-fast) var(--settle); }
-  .setup-web > button.setup-row:hover { background:var(--wash); }
   .setup-web.open > .setup-row { background:var(--wash-2); }
+  .setup-row-open { appearance:none; border:0; background:transparent; padding:0; margin:0; flex:1 1 auto; min-width:0;
+    display:flex; align-items:center; gap:11px; text-align:left; font:inherit; color:inherit; }
+  button.setup-row-open { cursor:pointer; }
+  button.setup-row-open:hover .sv-open-name { color:var(--accent); }
+  button.setup-row-open:focus-visible { outline:none; box-shadow:var(--focus-ring); border-radius:var(--r-1); }
+  /* A coding agent: its row, then (where Relay runs agents) its run settings
+     as quiet label and value lines under the name, never a second card. */
+  .setup-agent + .setup-agent { border-top:1px solid var(--edge); }
+  .setup-where { color:var(--muted-3); }
+  .setup-gap { display:flex; align-items:center; gap:8px; margin-top:6px; font:11.5px/1.35 var(--sans); color:var(--muted); }
+  .setup-gap .sv-choose, .setup-kv-note .sv-choose { min-width:0; padding:4px 10px; font-size:11.5px; }
+  .setup-kvs { margin:-4px 12px 10px 51px; border-top:1px solid var(--hair); }
+  .setup-kv { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:32px; font:12px/1.3 var(--sans); color:var(--muted); }
+  .setup-kv + .setup-kv, .setup-kv-note + .setup-kv { border-top:1px solid var(--hair); }
+  .setup-kv-pick { position:relative; display:inline-flex; align-items:center; min-width:0; }
+  .setup-kv-pick::after { content:"›"; position:absolute; right:3px; pointer-events:none; color:var(--muted-3); font-size:13px; }
+  .setup-kv-select { appearance:none; -webkit-appearance:none; border:0; background:transparent; max-width:100%; padding:4px 15px 4px 6px;
+    border-radius:var(--r-1); font:500 12px/1.3 var(--sans); color:var(--ink); text-align:right; text-align-last:right; cursor:pointer; }
+  .setup-kv-select:hover { background:var(--wash); }
+  .setup-kv-select:focus-visible { outline:none; box-shadow:var(--focus-ring); }
+  .setup-kv-select:disabled { color:var(--muted-2); cursor:default; background:transparent; }
+  .setup-kv-select option { background:var(--bg); color:var(--ink); }
+  .setup-kv-note { display:flex; align-items:center; gap:7px; min-height:36px; font:12px/1.35 var(--sans); color:var(--warn); }
+  .setup-kv-note .setup-why-text { flex:1 1 auto; }
   .setup-tray { margin:0; border-radius:0; padding:8px 12px 12px; border-top:1px solid var(--hair); gap:8px; }
   .setup-tray-copy { font:12px/1.5 var(--sans); color:var(--muted); }
   /* The tray is tighter than the onboarding screen. */
@@ -3939,11 +3893,6 @@
   .setup-foot button { appearance:none; border:0; background:none; padding:0; font:inherit; color:var(--accent); cursor:pointer; }
   .setup-foot button:hover { text-decoration:underline; }
   .setup-err { margin:10px 16px 0; }
-  .setup-title { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
-  .setup-all { appearance:none; border:0; background:transparent; padding:2px 4px; margin-right:-4px; border-radius:var(--r-1);
-    font:600 12px/1.3 var(--sans); color:var(--accent); cursor:pointer; }
-  .setup-all:hover { background:var(--accent-soft); }
-  .setup-all:disabled { opacity:.5; cursor:default; }
   /* The You page's door to it: one row, the marks of what is here. */
   .setup-entry { appearance:none; border:0; background:transparent; width:100%; text-align:left; font:inherit; color:inherit; cursor:pointer;
     transition:background-color var(--t-fast) var(--settle); }
@@ -4089,6 +4038,7 @@
   .tk-run.status { display:flex; align-items:center; gap:8px; min-height:28px; font:500 12px/1.3 var(--sans); color:var(--ink); }
   .tk-run-dot { width:8px; height:8px; flex:none; border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
   .tk-run-state { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tk-run-stop { flex:0 0 auto; height:24px; padding:0 9px; font-size:11px; border-radius:7px; }
   /* A group Task's kind beside its chip, and a member's own position above their row. */
   .tk-kind-line { display:flex; align-items:center; gap:8px; margin:0 0 5px; }
   .th-msg-title .tk-kind-line .kchip { margin-right:0; vertical-align:0; }
@@ -4260,6 +4210,65 @@
   .tk-ladder .tk-step.now .tk-node::after { inset:1.75px; }
   .tk-ladder .tk-label { font-size:10px; }
   .tk-ladder .tk-line { margin-top:3.5px; }
+  /* A Task card in full screen (CARDS_WIDE_MIN, Shane 2026-10-13): two
+     columns, the ask on the left and the footer as a rail on the right. In
+     the pill's own window .tk-main is no box at all and the card is as before. */
+  .tk-main { display:contents; }
+  .tk-ladder .tk-when, .tk-run-name, .tk-run-last { display:none; }
+  .wide-cards .th-msg.tk-card { display:grid; grid-template-columns:minmax(0,1fr) 236px; gap:0 22px; align-items:start;
+    width:min(88%, 940px); max-width:none; padding:14px 16px 12px; }
+  .wide-cards .th-msg.tk-card > * { grid-column:1 / -1; min-width:0; }
+  .wide-cards .th-msg.tk-card > .tk-main { grid-column:1; grid-row:1; display:flex; flex-wrap:wrap; align-items:flex-end; gap:2px 10px; }
+  .wide-cards .th-msg.tk-card > .tk-footer { grid-column:2; grid-row:1; margin:0; padding:2px 0 2px 16px; border-top:0; border-left:1px solid var(--hair); }
+  .wide-cards .th-msg.tk-card .th-msg-title { font-size:16.5px; line-height:1.45; }
+  .wide-cards .th-msg.tk-card .th-preview { font-size:12.5px; }
+  .wide-cards .th-msg.tk-card > .tk-main > .th-blk-time { text-align:left; margin-top:6px; }
+  .wide-cards :is(.tk-card, .rl-card) .tk-ladder { margin:0 0 12px; }
+  .wide-cards :is(.tk-card, .rl-card) .tk-ladder .tk-steps { flex-direction:column; align-items:stretch; }
+  .wide-cards :is(.tk-card, .rl-card) .tk-ladder .tk-step { flex-direction:row; align-items:center; gap:9px; width:auto; }
+  .wide-cards :is(.tk-card, .rl-card) .tk-ladder .tk-label { font-size:11.5px; }
+  .wide-cards :is(.tk-card, .rl-card) .tk-ladder .tk-when { display:block; margin-left:auto; min-height:0; }
+  .wide-cards :is(.tk-card, .rl-card) .tk-ladder .tk-line { flex:none; width:1px; height:9px; margin:2px 0 2px 3.5px; }
+  /* A Relay card in full screen: the words and its files on the left, a rail
+     with its steps (yours) and Open with on the right. A short text stays a
+     bubble. Outside full screen none of these classes is drawn. */
+  .th-host-name { display:none; }
+  .wide-cards .th-msg.rl-card { display:grid; grid-template-columns:minmax(0,1fr) 236px; gap:0 22px; align-items:start;
+    width:min(88%, 940px); max-width:none; padding:14px 16px 12px; }
+  .wide-cards .th-msg.rl-card > * { grid-column:1 / -1; min-width:0; }
+  .wide-cards .th-msg.rl-card > .rl-main { grid-column:1; grid-row:1; display:flex; flex-wrap:wrap; align-items:flex-end; gap:2px 10px; }
+  .wide-cards .th-msg.rl-card > .rl-rail { grid-column:2; grid-row:1; padding:2px 0 2px 16px; border-left:1px solid var(--hair); cursor:default; }
+  .wide-cards .th-msg.rl-card .th-msg-title { font-size:16.5px; line-height:1.45; }
+  .wide-cards .th-msg.rl-card .th-preview { font-size:12.5px; }
+  .wide-cards .th-msg.rl-card .th-body { flex:1 0 100%; }
+  .wide-cards .th-msg.rl-card > .rl-main > .th-blk-time { text-align:left; margin-top:6px; }
+  .wide-cards .rl-card .th-cargo { flex:1 0 100%; width:auto; max-width:none; margin:10px 0 0; align-items:flex-start; }
+  .wide-cards .rl-card .th-cargo .ca-row { justify-content:flex-start; }
+  .wide-cards .rl-card .th-cargo:has(.ca-file-shelf) { width:min(100%, 340px); max-width:none; }
+  .wide-cards .rl-rail-h { margin:0 0 6px; font:600 11px/1.3 var(--sans); color:var(--muted-2); }
+  .wide-cards .rl-rail .th-host-actions { flex:none; width:auto; margin:0; display:block; }
+  .wide-cards .rl-rail .th-host-actions-inner { border-top:0; overflow:visible; }
+  .wide-cards .rl-rail .th-host-bar { flex-direction:column; align-items:stretch; gap:6px; padding:0; min-height:0; }
+  .wide-cards .rl-rail .th-host-marks { flex-direction:column; align-items:stretch; gap:5px; }
+  .wide-cards .rl-rail .th-host-mark { width:auto; height:34px; display:flex; align-items:center; gap:9px; padding:0 10px 0 7px; border-radius:9px; }
+  .wide-cards .rl-rail .th-host-mark .th-host-logo { width:20px; height:20px; border-radius:5px; flex:none; }
+  .wide-cards .rl-rail .th-host-name { display:inline; font:600 12.5px/1 var(--sans); color:var(--ink); }
+  .wide-cards .rl-rail .th-host-copy { flex-direction:row; justify-content:flex-start; gap:4px; height:auto; margin:2px 0 0; padding:5px 2px; background:none; font-weight:600; }
+  .wide-cards .rl-rail .th-host-copy:hover { background:none; text-decoration:underline; }
+  .wide-cards .tk-card .tk-run-where { margin-bottom:8px; }
+  .wide-cards .tk-card .tk-run-apps { flex-direction:column; align-items:stretch; gap:6px; }
+  .wide-cards .tk-card .tk-run-marks { flex-direction:column; gap:5px; }
+  .wide-cards .tk-card .tk-run-mark:not(.sm) { width:auto; height:34px; display:flex; align-items:center; gap:9px; padding:0 10px 0 7px; border-radius:9px; }
+  .wide-cards .tk-card .tk-run-mark:not(.sm) .th-host-logo { width:20px; height:20px; border-radius:5px; flex:none; }
+  .wide-cards .tk-card .tk-run-name { display:inline; font:600 12.5px/1 var(--sans); color:var(--ink); }
+  .wide-cards .tk-card .tk-run-last { display:inline; margin-left:auto; font:500 11px/1 var(--sans); color:var(--muted-2); }
+  .wide-cards .tk-card .tk-run-caption.remembered { display:none; }
+  .wide-cards .tk-card .tk-run-copy { flex-direction:row; justify-content:flex-start; gap:4px; height:auto; margin:2px 0 0; padding:5px 2px; background:none; font-weight:600; }
+  .wide-cards .tk-card .tk-run-copy:hover { background:none; text-decoration:underline; }
+  .wide-cards .tk-card .tk-agents { flex-wrap:wrap; }
+  .wide-cards .th-msg.tk-card > .tk-wide-pick { margin-top:12px; padding-top:10px; border-top:1px solid var(--hair); cursor:default; }
+  .wide-cards .tk-wide-pick .tk-run-pop { margin:0; }
+  .wide-cards .tk-wide-pick .xp-rows { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:6px; }
   /* the rungs in a list row's line under the title */
   .tk-rungs { display:inline-flex; align-items:center; flex:none; }
   .tk-rung { display:inline-block; width:6px; height:6px; border-radius:50%; box-sizing:border-box; border:1px solid currentColor; opacity:.45; }
@@ -6050,6 +6059,18 @@
     }
     return "";
   }
+  // An untitled Relay's title is the start of its body, clipped with "…".
+  // When the whole body is short, the card shows it as the title instead,
+  // wrapping onto as many lines as it needs. "" when the title is not such a
+  // clip or the body is too long to stand as a title.
+  function clippedTitleBody(title, body, max) {
+    const raw = String(title || "").trim();
+    if (!/(…|\.\.\.)$/.test(raw)) return "";
+    const head = raw.replace(/(…|\.\.\.)$/, "").trim().toLowerCase();
+    const flat = String(body || "").replace(/\s+/g, " ").trim();
+    if (!head || flat.length > (max || 280) || !flat.toLowerCase().startsWith(head)) return "";
+    return flat;
+  }
   // A short body preview for the line beneath the subject — the next meaningful slice of
   // the body, skipping whatever already became the subject.
   function bodyPreview(body, subject, max) {
@@ -6062,9 +6083,14 @@
       .replace(/\s+/g, " ")
       .trim();
     if (!flat) return "";
-    const sub = String(subject || "").replace(/…$/, "").trim();
+    const clipped = /(…|\.\.\.)$/.test(String(subject || "").trim());
+    const sub = String(subject || "").trim().replace(/(…|\.\.\.)$/, "").trim();
     let rest = flat;
     if (sub && flat.toLowerCase().startsWith(sub.toLowerCase())) {
+      // A clipped subject is the body's own start, cut mid-sentence or
+      // mid-word: its tail ("ich one it is.") is not a preview. The card
+      // shows such a body whole as its title (clippedTitleBody).
+      if (clipped) return "";
       rest = flat.slice(sub.length).replace(/^[\s.:;,—-]+/, "").trim();
     }
     if (!rest) return "";
@@ -7074,7 +7100,7 @@
     if (node.nodeType === Node.TEXT_NODE) return node.data || "";
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
     if (node.hasAttribute("data-mention-token")) return `@${node.getAttribute("data-mention-token") || ""}`;
-    if (node.tagName === "BR") return "\n";
+    if (node.tagName === "BR") return node.hasAttribute("data-composer-tail") ? "" : "\n";
     let value = "";
     for (const child of node.childNodes) value += composerNodeValue(child);
     return value;
@@ -7087,6 +7113,18 @@
   }
 
   function composerNodeLength(node) { return composerNodeValue(node).length; }
+
+  // pre-wrap draws no line for a newline at the very end of the content, so
+  // the first Shift+Enter looked ignored. A trailing <br> that the value skips
+  // gives that last empty line a box for the caret to sit on.
+  function syncComposerTail(field) {
+    const tail = field.querySelector(":scope > br[data-composer-tail]");
+    if (!composerValue(field).endsWith("\n")) { tail?.remove(); return; }
+    if (tail && tail === field.lastChild) return;
+    const br = tail || document.createElement("br");
+    br.setAttribute("data-composer-tail", "");
+    field.appendChild(br);
+  }
 
   function composerCaretOffset(field) {
     const selection = window.getSelection?.();
@@ -7167,6 +7205,7 @@
       }
     }
     field.replaceChildren(fragment);
+    syncComposerTail(field);
   }
 
   function insertComposerText(field, text) {
@@ -7176,6 +7215,7 @@
     range.deleteContents();
     const node = document.createTextNode(String(text || ""));
     range.insertNode(node);
+    syncComposerTail(field);
     range.setStartAfter(node);
     range.collapse(true);
     selection.removeAllRanges();
@@ -7201,6 +7241,7 @@
     });
     field.addEventListener("input", () => {
       if (field.childNodes.length === 1 && field.firstChild?.nodeName === "BR") field.replaceChildren();
+      else syncComposerTail(field);
     });
     field.addEventListener("paste", (event) => {
       if (clipboardFiles(event).length) return;
@@ -11225,23 +11266,31 @@
     const busy = nativeExecuteBusy.has(id);
     const submitted = current && ["accepted", "submitting", "uncertain"].includes(current.phase);
     const draft = ["awaiting_send", "draft_opening"].includes(current?.phase);
+    // Codex is still opening the conversation; main sends the Task when it can.
+    const waiting = current?.phase === "awaiting_app";
     // The card's button sits beside Reject and Done, so it wears the short word.
-    return { id, busy, label: busy ? "Opening…" : submitted ? "Continue in native app" : draft ? "Open Claude draft…" : "Execute",
-      short: busy ? "Opening…" : submitted ? "Continue" : draft ? "Open draft" : "Execute", status: current?.status || "" };
+    return { id, busy, waiting, label: busy ? "Opening…" : submitted ? "Continue in native app" : draft ? "Open Claude draft…" : waiting ? "Show the conversation in Codex" : "Execute",
+      short: busy ? "Opening…" : submitted ? "Continue" : draft ? "Open draft" : waiting ? "Show" : "Execute", status: current?.status || "" };
+  }
+  // Stop waiting for Codex: the Task stays unsent until Execute is pressed again.
+  function nativeStopWaitingHtml(st) {
+    return st && st.waiting && !st.busy ? `<button type="button" class="tk-btn ghost tk-run-stop" data-execute-stop-wait="${esc(st.id)}">Stop waiting</button>` : "";
   }
   // The reader: the full action under the ladder, with its caption.
   function nativeExecuteHtml(row) {
     const st = nativeExecuteState(row);
     if (!st) return "";
     if (nativeExecuteChoice.has(st.id)) return `<div class="rd-host-actions" data-stop="1">${nativeExecutePickerHtml(row)}</div>`;
-    return `<div class="rd-host-actions" data-stop="1"><button class="oa-item oa-primary" type="button" data-native-execute="${esc(st.id)}" ${st.busy ? "disabled" : ""}>${st.label}</button><div class="sv-copy">${esc(st.status || "Run this Task in your native app · developer preview")}</div></div>`;
+    return `<div class="rd-host-actions" data-stop="1"><button class="oa-item oa-primary" type="button" data-native-execute="${esc(st.id)}" ${st.busy ? "disabled" : ""}>${st.label}</button>${nativeStopWaitingHtml(st)}<div class="sv-copy">${esc(st.status || "Run this Task in your native app · developer preview")}</div></div>`;
   }
-  // The picker, on either surface: the question in plain words with Cancel
-  // beside it, then one row per pair: the app's mark, the folder's name with
-  // the app after it, and the reason underneath in the muted voice. The pill
-  // is narrow, so nothing sits in a right-hand column that could wrap. The
-  // OS dialog is the last rung: one line, "Another folder…", with a chip per
-  // installed app.
+  // The picker, on either surface, asks the app first and the folder second
+  // (Shane, 2026-10-13), the order the card's Run row already asks in. With
+  // several apps it lists them, the one used last first; with one app, or once
+  // an app is chosen, it asks "<App> in which folder?": that app's folders,
+  // best first, each with its reason underneath in the muted voice, then
+  // "Another folder…", which is the OS dialog. Backing out of the dialog comes
+  // back to the same app's folders. The pill is narrow, so nothing sits in a
+  // right-hand column that could wrap.
   function nativeExecutePickerHtml(row) {
     const st = nativeExecuteState(row);
     const pick = st && nativeExecuteChoice.get(st.id);
@@ -11250,9 +11299,17 @@
     const nameOf = (option) => option.name || String(option.cwd || "").split(/[\\/]/).filter(Boolean).pop() || option.label || "";
     const appOf = (option) => option.app || (option.provider === "codex" ? "Codex" : option.provider === "conductor" ? "Conductor" : "Claude Code");
     const markOf = (option) => option.provider === "codex" ? "codexMark.svg" : option.provider === "conductor" ? "conductorMark.svg" : "claudeCodeMark.svg";
-    const rows = (pick.options || []).map((option) => `<button class="xp-row" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-cwd="${esc(option.cwd)}" title="${esc(option.cwd)}"${disabled}><img class="xp-mark" src="${markOf(option)}" alt=""><span class="xp-name">${esc(nameOf(option))}<span class="xp-app">${esc(appOf(option))}</span></span>${option.why ? `<span class="xp-why">${esc(option.why)}</span>` : ""}</button>`).join("");
-    const browse = (pick.browse || []).map((option) => `<button class="xp-chip" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-browse="1" title="${esc(option.label || "")}"${disabled}><img class="xp-mark" src="${markOf(option)}" alt="">${esc(appOf(option))}</button>`).join("");
-    return `<div class="tk-execute-pick" data-stop="1"><div class="tk-execute-ask"><span class="tk-execute-title">${esc(pick.question || "Where should the agent work?")}</span><span class="tk-execute-caption">${esc(pick.caption || "It will read and change files in this folder.")}</span><button type="button" class="act-btn decline tk-execute-cancel" data-execute-cancel="${esc(st.id)}">Cancel</button></div><div class="xp-rows">${rows}</div>${browse ? `<div class="xp-browse"><span class="xp-browse-label">Another folder…</span>${browse}</div>` : ""}</div>`;
+    const cancel = `<button type="button" class="act-btn decline tk-execute-cancel" data-execute-cancel="${esc(st.id)}">Cancel</button>`;
+    const apps = (pick.browse || []).filter((option) => option && option.provider);
+    const app = apps.find((option) => option.provider === pick.provider) || (apps.length === 1 ? apps[0] : null);
+    if (!app) {
+      const why = (option) => pick.remembered && pick.remembered.provider === option.provider ? pick.remembered.why : "";
+      const rows = apps.map((option) => `<button class="xp-row" type="button" data-execute-app="${esc(st.id)}" data-provider="${esc(option.provider)}"${disabled}><img class="xp-mark" src="${markOf(option)}" alt=""><span class="xp-name">${esc(appOf(option))}</span>${why(option) ? `<span class="xp-why">${esc(why(option))}</span>` : ""}</button>`).join("");
+      return `<div class="tk-execute-pick" data-stop="1"><div class="tk-execute-ask"><span class="tk-execute-title">Run it in which app?</span><span class="tk-execute-caption">Then choose the folder it works in.</span>${cancel}</div><div class="xp-rows">${rows}</div></div>`;
+    }
+    const rows = (pick.options || []).filter((option) => option.provider === app.provider).map((option) => `<button class="xp-row" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(option.provider)}" data-cwd="${esc(option.cwd)}" title="${esc(option.cwd)}"${disabled}><span class="xp-mark tk-run-folder-mark">${TASK_RUN_FOLDER_SVG}</span><span class="xp-name">${esc(nameOf(option))}</span>${option.why ? `<span class="xp-why">${esc(option.why)}</span>` : ""}</button>`).join("");
+    const browse = `<button class="xp-row tk-run-browse" type="button" data-execute-pick="${esc(st.id)}" data-provider="${esc(app.provider)}" data-browse="1"${disabled}>Another folder…</button>`;
+    return `<div class="tk-execute-pick" data-stop="1"><div class="tk-execute-ask"><span class="tk-execute-title">${esc(appOf(app))} in which folder?</span><span class="tk-execute-caption">${esc(pick.caption || "It will read and change files in this folder.")}</span>${cancel}</div><div class="xp-rows">${rows}${browse}</div></div>`;
   }
   // ---------- RUN FROM THE CARD (Shane, 2026-10-08) ----------
   // The card runs the Task itself, in place of an Execute verb: one icon per
@@ -11264,6 +11321,37 @@
   // honours. No coding app: the agent row, Copy for your agent, as before.
   // The reader keeps Execute and the full question.
   const taskRunPlans = new Map(); // received id -> plan from main, or null when there is none
+  // Full screen (Shane, 2026-10-13): once the conversation is this wide a
+  // card lays out in two columns, the words on the left and a rail on the
+  // right. A Task's rail has the steps and their times, each app as a named
+  // button, and Copy prompt; a folder list opens across the whole card
+  // instead of inside the rail. A Relay's rail has Open with, and on one you
+  // sent its steps with their times; its files sit inside the card under the
+  // words. renderThreadDetail sets cardsWide from the conversation's width
+  // and draws again when it crosses the line.
+  // The pill's own window is at most 940 wide (WIN in main.cjs), so only a
+  // maximised or full-screen window reaches this.
+  const CARDS_WIDE_MIN = 960;
+  let cardsWide = false;
+  let cardsWidthObserver = null;
+  function syncCardsWide() {
+    cardsWide = Boolean(thHistoryEl) && thHistoryEl.clientWidth >= CARDS_WIDE_MIN;
+    thHistoryEl?.classList.toggle("wide-cards", cardsWide);
+    if (cardsWidthObserver || !thHistoryEl || typeof ResizeObserver !== "function") return;
+    let queued = false;
+    cardsWidthObserver = new ResizeObserver(() => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        const wide = thHistoryEl.clientWidth >= CARDS_WIDE_MIN;
+        if (wide === cardsWide) return;
+        if (threadDetailId) renderThreadDetail();
+        else syncCardsWide();
+      });
+    });
+    cardsWidthObserver.observe(thHistoryEl);
+  }
   const taskRunPicking = new Map(); // received id -> the app whose folder list is open
   const TASK_RUN_APPS = {
     claude: { app: "Claude Code", mark: "claudeCodeMark.svg" },
@@ -11290,7 +11378,7 @@
     const back = app
       ? `<button type="button" class="th-host-mark tk-run-mark sm" data-host="${provider}" data-native-execute="${esc(st.id)}" title="${esc(st.label)}" aria-label="${esc(st.label)}"${st.busy ? " disabled" : ""}><img class="th-host-logo" src="${app.mark}" alt=""></button>`
       : `<button type="button" class="tk-btn execute" data-native-execute="${esc(st.id)}" title="${esc(st.label)}"${st.busy ? " disabled" : ""}>${esc(st.short)}</button>`;
-    return `<div class="tk-run status"><span class="tk-run-dot" aria-hidden="true"></span><span class="tk-run-state">${esc(text)}</span>${back}</div>`;
+    return `<div class="tk-run status"><span class="tk-run-dot" aria-hidden="true"></span><span class="tk-run-state">${esc(text)}</span>${nativeStopWaitingHtml(st)}${back}</div>`;
   }
   // The folder list one app's tap opens when the Task names no folder here:
   // the reader's pairs for that app, best first, then the OS dialog.
@@ -11302,8 +11390,11 @@
     return `<div class="tk-execute-pick tk-run-pop" data-stop="1"><div class="tk-execute-ask"><span class="tk-execute-title">${esc(app)} in which folder?</span><span class="tk-execute-caption">It will read and change files there.</span><button type="button" class="act-btn decline tk-execute-cancel" data-task-run-cancel="${esc(id)}">Cancel</button></div><div class="xp-rows">${rows}${browse}</div></div>`;
   }
   // The Run block, or "" when this Task has nothing to run here. A plan not
-  // yet read leaves a marker that wireTaskCards fills.
-  function taskRunBlockHtml(row) {
+  // yet read leaves a marker that wireTaskCards fills. On a wide card (see
+  // CARDS_WIDE_MIN) the block sits in the card's rail, and an open
+  // folder list goes to wide.pickers so the card can draw it across its
+  // whole width.
+  function taskRunBlockHtml(row, wide = null) {
     const st = nativeExecuteState(row);
     if (!st) return "";
     const current = payload.nativeExecutions && payload.nativeExecutions[st.id];
@@ -11325,16 +11416,21 @@
     const marks = providers.map((p) => {
       const app = TASK_RUN_APPS[p.provider];
       const verb = `${lead} ${app.app}`;
-      return `<button type="button" class="th-host-mark tk-run-mark${remembered && remembered.provider === p.provider ? " last" : ""}${pick === p.provider ? " pressed" : ""}" data-host="${p.provider}" data-task-run="${esc(st.id)}" data-provider="${p.provider}" title="${esc(verb)}" aria-label="${esc(verb)}"${pick === p.provider ? ' aria-expanded="true"' : ""}${st.busy ? " disabled" : ""}><img class="th-host-logo" src="${app.mark}" alt=""></button>`;
+      const last = remembered && remembered.provider === p.provider;
+      return `<button type="button" class="th-host-mark tk-run-mark${last ? " last" : ""}${pick === p.provider ? " pressed" : ""}" data-host="${p.provider}" data-task-run="${esc(st.id)}" data-provider="${p.provider}" title="${esc(verb)}" aria-label="${esc(verb)}"${pick === p.provider ? ' aria-expanded="true"' : ""}${st.busy ? " disabled" : ""}><img class="th-host-logo" src="${app.mark}" alt=""><span class="tk-run-name" aria-hidden="true">${esc(app.app)}</span>${last ? '<span class="tk-run-last" aria-hidden="true">Last used</span>' : ""}</button>`;
     }).join("");
     const claim = taskChannelClaim(row);
     const caption = (current && current.status)
       || (remembered && !pick ? remembered.why : "")
       || (claim && (claim.state === "unclaimed" || !claim.claimant) ? "Running it claims it for you, so nobody else starts it too." : "");
+    // The rail says "Last used" on the app itself, so it drops the sentence that says the same.
+    const rememberedCaption = Boolean(caption) && !(current && current.status) && remembered && !pick && caption === remembered.why;
+    const folders = pick ? taskRunFoldersHtml(st.id, plan, pick) : "";
+    if (folders && wide) wide.pickers.push(folders);
     return `<div class="tk-run${pick ? " picking" : ""}">${where}`
       + `<div class="tk-run-apps"><span class="tk-run-marks" role="group" aria-label="${lead}">${marks}</span>`
       + `<button type="button" class="th-host-copy tk-run-copy" data-tk-copy="${esc(taskIdOf(row))}"><span>Copy prompt</span><span>for your agent</span></button></div>`
-      + `${caption ? `<div class="tk-run-caption">${esc(caption)}</div>` : ""}${pick ? taskRunFoldersHtml(st.id, plan, pick) : ""}</div>`;
+      + `${caption ? `<div class="tk-run-caption${rememberedCaption ? " remembered" : ""}">${esc(caption)}</div>` : ""}${wide ? "" : folders}</div>`;
   }
   // The reader runs a Task the way its card does (Shane, 2026-10-08): one
   // icon per coding app, the folder when the Task names one here, the folder
@@ -11349,8 +11445,8 @@
   // The card's agent area: the Run block where this Task can run here,
   // otherwise the agent row. While the plan is being read the agent row
   // stands in, so the card never jumps empty.
-  function taskAgentAreaHtml(row) {
-    const run = taskRunBlockHtml(row);
+  function taskAgentAreaHtml(row, wide = null) {
+    const run = taskRunBlockHtml(row, wide);
     if (run && !run.startsWith('<div class="tk-run-plan"')) return run;
     return `${run}${taskAgentRowHtml(row)}`;
   }
@@ -11387,7 +11483,9 @@
     rerender();
     try {
       const result = await window.relay.taskExecute(id, choice);
-      if (result?.choose) nativeExecuteChoice.set(id, result.choose);
+      // Asked again after an app was already chosen (the folder dialog backed
+      // out of): that app's folders, not the app question.
+      if (result?.choose) nativeExecuteChoice.set(id, choice?.provider ? { ...result.choose, provider: choice.provider } : result.choose);
       else if (!result?.cancelled) {
         const text = result?.message || result?.error || "Could not launch the Task.";
         setRowNote(id, text, result?.ok ? "ok" : "err");
@@ -11640,10 +11738,21 @@
     const text = asking && !taskIsMine(row) ? ({ cancel: "Cancelling", reject: "Rejecting", done: "Marking done" }[asking.kind] || st.text) : st.text;
     return `<div class="tk-foot ${st.tone}${asking ? " asking" : ""}"><span class="tk-state">${taskMarkHtml(st.tone)}<span class="tk-text">${esc(text)}</span></span>${taskVerbsHtml(row, st, { surface })}${taskResultLinkHtml(row, st)}${taskAskRowHtml(row)}</div>`;
   }
+  // A Relay you sent, in a full-screen card's rail: where it has got to, with
+  // the times Relay knows. The Task ladder's markup, so it reads the same.
+  function relayRailStepsHtml(m) {
+    const steps = [
+      { label: m.pending ? "Sending" : "Sent", on: !m.pending, at: m.pending ? "" : m.at },
+      { label: "Delivered", on: Boolean(m.delivered || m.seen) },
+      { label: "Seen", on: Boolean(m.seen), at: m.seenAt },
+      { label: "Agent opened", on: Boolean(m.agentOpened) },
+    ];
+    return `<div class="tk-ladder rl-steps"><div class="tk-steps">${steps.map((step, index) => `${index ? `<span class="tk-line${step.on ? " on" : ""}" aria-hidden="true"></span>` : ""}<div class="tk-step ${step.on ? "past" : "todo"}"><span class="tk-node"></span><span class="tk-label">${esc(step.label)}</span><span class="tk-when">${step.on && step.at ? esc(formatChatTime(step.at)) : ""}</span></div>`).join("")}</div></div>`;
+  }
   // The sender's tracker in the card: the reader's ladder at the chat's scale.
   function taskLadderRowHtml(row) {
     const steps = taskLadder(row);
-    return `<div class="tk-ladder"><div class="tk-steps">${steps.map((step, index) => `${index ? `<span class="tk-line${step.state !== "todo" ? " on" : ""}" aria-hidden="true"></span>` : ""}<div class="tk-step ${step.state}"><span class="tk-node">${step.state === "done" ? TASK_CHECK_SVG : ""}</span><span class="tk-label">${esc(step.label)}</span></div>`).join("")}</div></div>`;
+    return `<div class="tk-ladder"><div class="tk-steps">${steps.map((step, index) => `${index ? `<span class="tk-line${step.state !== "todo" ? " on" : ""}" aria-hidden="true"></span>` : ""}<div class="tk-step ${step.state}"><span class="tk-node">${step.state === "done" ? TASK_CHECK_SVG : ""}</span><span class="tk-label">${esc(step.label)}</span><span class="tk-when">${step.when ? esc(formatChatTime(step.when)) : ""}</span></div>`).join("")}</div></div>`;
   }
   function taskNoteHtml(row) {
     const note = taskCardNotes.get(taskIdOf(row));
@@ -11874,9 +11983,18 @@
     if (counts.rejected) parts.push(`${counts.rejected} ${counts.rejected === 1 ? "person" : "people"} rejected it`);
     return parts.join(" · ");
   }
+  // Main's own folder question, in the footer; on a wide card it goes to
+  // wide.pickers and is drawn across the card under the rail.
+  function taskFooterPickerHtml(row, wide) {
+    const picker = nativeExecutePickerHtml(row);
+    if (!wide) return picker;
+    if (picker) wide.pickers.push(picker);
+    return "";
+  }
   // The card footer: the hairline, the sender's ladder, the agent row while the
-  // Task is live, and the state row with the decision.
-  function taskCardFooterHtml(row) {
+  // Task is live, and the state row with the decision. On a wide card it is
+  // the rail beside the ask.
+  function taskCardFooterHtml(row, wide = null) {
     if (!row || !row.request) return "";
     const st = taskStateFor(row);
     const mine = taskIsMine(row);
@@ -11899,18 +12017,18 @@
       // their copy, then everyone in one line that opens the roster.
       const position = taskEveryonePositionHtml(row);
       if (!mine && position) {
-        return `${open}${position}${roster}${asking ? `<div class="tk-foot asking">${taskAskRowHtml(row)}</div>` : ""}${live ? taskAgentAreaHtml(row) : ""}${live ? nativeExecutePickerHtml(row) : ""}<button type="button" class="tk-tally ${tone}" data-task-roster-open="${esc(taskIdOf(row))}">${sum}<span class="tk-tally-chev" aria-hidden="true">›</span></button>${taskNoteHtml(row)}</div>`;
+        return `${open}${position}${roster}${asking ? `<div class="tk-foot asking">${taskAskRowHtml(row)}</div>` : ""}${live ? taskAgentAreaHtml(row, wide) : ""}${live ? taskFooterPickerHtml(row, wide) : ""}<button type="button" class="tk-tally ${tone}" data-task-roster-open="${esc(taskIdOf(row))}">${sum}<span class="tk-tally-chev" aria-hidden="true">›</span></button>${taskNoteHtml(row)}</div>`;
       }
-      return `${open}${roster}${live && !mine ? taskAgentAreaHtml(row) : ""}${live && !mine ? nativeExecutePickerHtml(row) : ""}<div class="tk-foot ${tone}${asking ? " asking" : ""}">${sum}${taskAskRowHtml(row)}</div>${taskNoteHtml(row)}</div>`;
+      return `${open}${roster}${live && !mine ? taskAgentAreaHtml(row, wide) : ""}${live && !mine ? taskFooterPickerHtml(row, wide) : ""}<div class="tk-foot ${tone}${asking ? " asking" : ""}">${sum}${taskAskRowHtml(row)}</div>${taskNoteHtml(row)}</div>`;
     }
     // An Anyone Task, to a member: who has it first, with the verbs; the Run
     // block only while it could still be theirs; then who it went to.
     const claim = taskChannelClaim(row);
     if (claim && !mine) {
       const people = Number(claim.memberCount || 0);
-      return `${open}${taskStateRowHtml(row, st)}${live && st.claim !== "other" ? taskAgentAreaHtml(row) : ""}${live ? nativeExecutePickerHtml(row) : ""}${people ? `<div class="tk-tally quiet"><span class="tk-state">${taskMarkHtml("open")}<span class="tk-text">Sent to ${esc(taskRosterPeopleText(people))}</span></span></div>` : ""}${taskNoteHtml(row)}</div>`;
+      return `${open}${taskStateRowHtml(row, st)}${live && st.claim !== "other" ? taskAgentAreaHtml(row, wide) : ""}${live ? taskFooterPickerHtml(row, wide) : ""}${people ? `<div class="tk-tally quiet"><span class="tk-state">${taskMarkHtml("open")}<span class="tk-text">Sent to ${esc(taskRosterPeopleText(people))}</span></span></div>` : ""}${taskNoteHtml(row)}</div>`;
     }
-    return `${open}${mine ? taskLadderRowHtml(row) : ""}${live ? taskAgentAreaHtml(row) : ""}${live ? nativeExecutePickerHtml(row) : ""}${taskStateRowHtml(row, st)}${taskNoteHtml(row)}</div>`;
+    return `${open}${mine ? taskLadderRowHtml(row) : ""}${live ? taskAgentAreaHtml(row, wide) : ""}${live ? taskFooterPickerHtml(row, wide) : ""}${taskStateRowHtml(row, st)}${taskNoteHtml(row)}</div>`;
   }
   // The settled line (Sven, 2026-10-08): once the receiver's own copy is over,
   // the card and the reader both say it once, in a sentence about them.
@@ -12097,6 +12215,27 @@
         runNativeExecute(String(button.getAttribute("data-execute-pick") || ""), rerender, choice);
       });
     }
+    for (const button of scope.querySelectorAll("[data-execute-app]")) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const id = String(button.getAttribute("data-execute-app") || "");
+        const pick = nativeExecuteChoice.get(id);
+        if (pick) nativeExecuteChoice.set(id, { ...pick, provider: String(button.getAttribute("data-provider") || "") });
+        rerender();
+      });
+    }
+    for (const button of scope.querySelectorAll("[data-execute-stop-wait]")) {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const id = String(button.getAttribute("data-execute-stop-wait") || "");
+        button.disabled = true;
+        try {
+          const result = await window.relay.taskExecuteStopWaiting(id);
+          if (!result?.ok) setRowNote(id, result?.error || "Could not stop waiting.", "err");
+        } catch (error) { setRowNote(id, error.message || "Could not stop waiting.", "err"); }
+        rerender();
+      });
+    }
     for (const button of scope.querySelectorAll("[data-execute-cancel]")) {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -12210,10 +12349,13 @@
       key: "claude",
       label: "Claude Code",
       sample: "Claude Code",
+      // One list for every run Relay starts (Execute, the composer, mentions):
+      // "Ask before each step" is Claude's default mode, Execute's old Manual.
       modes: [
         { id: "auto", name: "Auto" },
-        { id: "acceptEdits", name: "Accept Edits" },
-        { id: "bypassPermissions", name: "Bypass Permissions" },
+        { id: "default", name: "Ask before each step" },
+        { id: "acceptEdits", name: "Accept edits" },
+        { id: "bypassPermissions", name: "Bypass permissions" },
         // Plan is NOT offered: it stops the agent from executing at all, and a
         // request is a job someone sent to be DONE. A run that only plans has
         // not done it (David).
@@ -12256,11 +12398,13 @@
   // The vendor square (David's law): Claude-family apps wear the anthropic
   // ORANGE; Codex/ChatGPT wear the codex BLUE. Everywhere an agent app is
   // named with a square, the square is the vendor's.
+  // Each is Claude Code's own alias for the newest model of its family, so
+  // the labels say Latest and never need a version bump (Shane, 2026-10-13).
   const CLAUDE_MODEL_ID = {
-    "Opus 5.5": "opus",
-    "Fable 5.1": "fable",
-    "Sonnet 5.5": "sonnet",
-    "Haiku 4.5": "haiku",
+    "Latest Opus": "opus",
+    "Latest Fable": "fable",
+    "Latest Sonnet": "sonnet",
+    "Latest Haiku": "haiku",
   };
   function vendorSq(app) {
     return /claude/i.test(String(app)) ? "var(--brand-anthropic)" : "var(--agent-sq)";
@@ -12270,7 +12414,7 @@
   // it per request. Model lists read from the installed apps' own binaries
   // (Claude CLI 2.1.222; ChatGPT.app app.asar), 2026-08-12.
   const AGENT_ROUTES = {
-    "Claude Code":   { models:["Opus 5.5","Fable 5.1","Sonnet 5.5","Haiku 4.5"], efforts:["low","medium","high","xhigh","max"], model:"Opus 5.5", effort:"high" },
+    "Claude Code":   { models:["Latest Opus","Latest Fable","Latest Sonnet","Latest Haiku"], efforts:["low","medium","high","xhigh","max"], model:"Latest Opus", effort:"high" },
     // The app's OWN catalogue, read from ChatGPT.app/Contents/Resources/app.asar
     // (gpt-5.6-sol / -terra / -luna, gpt-5.5, gpt-5.4, gpt-5.3-codex[-spark]).
     // Labels are the app's, so the picker reads like the one the user knows.
@@ -12306,7 +12450,7 @@
   }
   function providerReadyForWork(provider) {
     const item = providerStatusForWork(provider);
-    return Boolean(item?.authLoaded && item?.enabled && item?.connected);
+    return Boolean(item?.authLoaded && item?.connected);
   }
   function showWorkProviderPrompt(id, provider, error = "") {
     const key = String(id || "");
@@ -17095,6 +17239,14 @@
   // Every unread projection must share this rule: otherwise the raw staged
   // packet inflates the tab badge while the conversation correctly shows no
   // unread row.
+  // A Relay you sent yourself is drawn as a received one (Shane, 2026-10-13):
+  // its card is the one you act on (the Run block, Reject and Done), not the
+  // sender's tracker, so the same Relay never has two different cards. Quick
+  // texts to yourself stay notes on your own side. Only the side changes;
+  // unread and receipts still follow relayIsSelfAuthored.
+  function selfRelayDirection(outbound, selfSent, textLike) {
+    return outbound && !(selfSent && !textLike) ? "out" : "in";
+  }
   function relayIsSelfAuthored(row, sentTwin = null, viewerEmail = "") {
     const mine = String(viewerEmail || "").trim().toLowerCase();
     const sender = String(row?.senderEmail || "").trim().toLowerCase();
@@ -17836,7 +17988,7 @@
       // Non-completion execution output stays on the Task reading surface.
       if (!completion && !request && onRequestThread(r, reqThreads) && !textLike) continue;
       msgs.push({
-        id: r.id, threadId: r.threadId || r.id, direction: selfAuthored ? "out" : "in",
+        id: r.id, threadId: r.threadId || r.id, direction: selfRelayDirection(selfAuthored, selfAuthored, textLike),
         seen: sentTwin ? sentIsRead(sentTwin) : false,
         seenAt: sentTwin?.readAt || null,
         delivered: sentTwin ? sentIsDelivered(sentTwin) : false,
@@ -18652,7 +18804,7 @@
         threadId:String(item?.threadId || id || `direct-chat:${chat.chatId}`),
         inReplyToRelayId:String(item?.inReplyToRelayId || ""),
         inReplyToTopicPost:item?.inReplyToTopicPost || null,
-        direction:mine ? "out" : "in",
+        direction:selfRelayDirection(mine, address === String(payload.account?.email || "").trim().toLowerCase(), textLike),
         seen:mine && (item?.readReceipts || []).some((receipt) => receipt && receipt.seen),
         seenAt:mine ? ((item?.readReceipts || []).find((receipt) => receipt && receipt.readAt)?.readAt || null) : null,
         delivered:mine && !new Set(["pending", "failed"]).has(String(item?.state || "")),
@@ -19503,7 +19655,7 @@
   function hostBarHtml(options, message) {
     const sentence = pullSentenceFor(message);
     return `<div class="th-host-bar">
-        ${options.length ? `<div class="th-host-marks" role="group" aria-label="Open in">${options.map((o) => `<button class="th-host-mark" type="button" data-host="${o.host}" aria-label="Open in ${esc(o.name)}" title="Open in ${esc(o.name)}" ${o.attrs}><img class="th-host-logo" src="${o.mark}" alt="" /></button>`).join("")}</div>` : ""}
+        ${options.length ? `<div class="th-host-marks" role="group" aria-label="Open in">${options.map((o) => `<button class="th-host-mark" type="button" data-host="${o.host}" aria-label="Open in ${esc(o.name)}" title="Open in ${esc(o.name)}" ${o.attrs}><img class="th-host-logo" src="${o.mark}" alt="" /><span class="th-host-name" aria-hidden="true">${esc(o.name)}</span></button>`).join("")}</div>` : ""}
         <button class="th-host-copy" type="button" data-pull-copy="${esc(sentence)}" title="${esc(sentence)}"><span>Copy prompt</span><span>for your agent</span></button>
       </div>`;
   }
@@ -19521,6 +19673,12 @@
     const mine = (message && (message.direction === "out" || message.outbound === true)) || row.direction === "out" || row.outbound === true || Boolean(row.recipient && !row.senderEmail);
     const first = mine ? "" : String(relaySender(row) || message?.party || "their").trim().split(/\s+/)[0];
     const whose = mine ? "my sent" : `${first}${/s$/i.test(first) ? "’" : "’s"}`;
+    // A Task asks for work, so the agent is told to do it, or for one you
+    // sent, to say where it stands; "what’s happening" fits only a Relay.
+    const task = [message, row].some((r) => r && (isTaskRow(r) || r.kind === "task" || r.request === true));
+    if (task) return mine
+      ? `Pull my sent Task “${subject}” from Relay and tell me where it stands.`
+      : `Pull ${whose} Task “${subject}” from Relay and carry it out.`;
     return `Pull ${whose} relay “${subject}” from Relay and tell me what’s happening.`;
   }
   // The reader's box when no app is switched on: the sentence itself, since
@@ -20014,6 +20172,7 @@
   function renderThreadDetail() {
     // Back shows inside a chat's thread even beside the list (see syncPaneRoot).
     syncPaneRoot();
+    syncCardsWide();
     // Register queue aliases before building history can retire optimistic rows.
     for (const [key, row] of optimisticChatReplies) RelayChatRows.rememberSend(key, row);
     for (const row of payload.outbox || []) RelayChatRows.rememberSend(row.id, row);
@@ -20468,7 +20627,11 @@
       // (Shane, 2026-10-03). A message still sending has no thread to open.
       const opensThread = Boolean(roomReplyThreads && !focusedReplyRoot && textLike && !m.ownedAgent
         && !m.request && !m.pending && !m.deletedAt && !attachmentOnly && !taskEvent && !groupPostingBlocked);
-      const taskFooter = m.request ? taskCardFooterHtml(m) : "";
+      const taskWide = m.request && cardsWide ? { pickers:[] } : null;
+      const taskFooter = m.request ? taskCardFooterHtml(m, taskWide) : "";
+      const taskWidePickers = taskWide && taskWide.pickers.length
+        ? `<div class="tk-wide-pick" data-stop="1" data-task-card="${esc(taskIdOf(m))}">${taskWide.pickers.join("")}</div>`
+        : "";
       // The thread link (and, inside a thread, its divider) hangs off the
       // content: under the words, or under the image when the image is the
       // whole message.
@@ -20484,35 +20647,16 @@
         const count = (roomReplyThreads.groups.get(replyThreadFocusId) || []).length;
         return `<div class="th-rt-divider" role="separator" data-chat-key="${esc(renderKey)}:thread"><span>${count ? `${count} ${count === 1 ? "reply" : "replies"}` : "No replies yet"}</span></div>`;
       })() : ""}`;
-      return `${slackThreadContextHtml(m)}${chunkDivider}${runHeader}
-      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${holdsNews ? " holds-news" : ""}${opensThread ? " opens-thread" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${taskEvent ? ` tk-event ${taskEvent.tone}${taskEvent.bare ? " bare" : ""}` : ""}${m.request ? " tk-card" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${editingMessage ? " editing" : ""}${confirmingDelete ? " deleting" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-chat-key="${esc(renderKey)}:body" data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
-        ${sideMenuHtml}
-        ${taskEvent ? taskEventRefHtml(taskEvent) : messageReplyReferenceHtml(m)}
-        ${`
-          ${textLike ? '<div class="th-text-content">' : ""}<span class="th-msg-title"${textLike ? ` data-clock="${esc(clockLabel)}"` : ""}>${agentWorking
-            ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>'
-            : taskEvent ? (taskEvent.bare ? "" : linkify(taskEvent.note, m.groupId || thread.groupId)) : `${m.request ? taskChipHtml(m) : ""}${tombstone ? esc(tombstone) : textLike ? linkify(m.title, m.groupId || thread.groupId) : esc(m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}`}</span>${textLike ? `${chatTimestampHtml(m.at, "th-blk-time", clockLabel)}</div>` : ""}
-
-          ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
-          ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
-          ${!textLike && open ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
-          ${allowHtml}
-        `}
-
-        <div class="row-err${rowNotes.get(m.id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(m.id)}" data-stop="1">${esc(rowNotes.get(m.id)?.text || "")}</div>
-        ${showProviderByline ? providerBylineHtml(m) : ""}
-        ${hasHostActions ? relayHostActionsHtml(m, { persistent:hostActionsPersistent }) : ""}
-        ${!textLike && !editingMessage ? chatTimestampHtml(m.at) : ""}
-        ${hasHostActions ? `${holdsNews ? replyNewsTrayHtml(m, newsItems, messageById, { thread:replyThreadRepliesFor(m) }) : ""}${replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { strip:true, quiet:holdsNews })}` : newsInBubble}
-        ${taskFooter}
-        ${badges}
-      </div>
-      ${slackUnsyncedHtml(m)}
-      ${attachmentOnly ? "" : threadTailHtml}
-      ${(() => {
-        // THE CARGO LAW: a bubble holds WORDS. Photos, video and files stand
-        // free BENEATH it — never inside, where the enclosure outweighed the
-        // message. Each render-model message owns its attachments; looking
+      const relayWide = cardsWide && !textLike && !m.request && !taskEvent && !m.deletedAt && !attachmentOnly;
+      const relayRail = relayWide
+        ? `<div class="rl-rail" data-stop="1">${mine ? relayRailStepsHtml(m) : ""}${hasHostActions ? `<div class="rl-rail-h">Open with</div>${relayHostActionsHtml(m, { persistent:true })}` : ""}</div>`
+        : "";
+      // THE CARGO LAW: a bubble holds WORDS. Photos, video and files stand
+      // free BENEATH it — never inside, where the enclosure outweighed the
+      // message. The exception is a full-screen Relay card (relayWide), whose
+      // left column has room for its files under the words (Shane, 2026-10-13).
+      const cargoHtml = (() => {
+        // Each render-model message owns its attachments; looking
         // them up again in the inbound-only payload made every sent image
         // disappear at the final presentation boundary.
         if (!attachments.length) return "";
@@ -20532,7 +20676,38 @@
           messageId: String(m.id || ""),
         })).filter((item) => item.attachmentId));
         return `<div class="th-cargo${mine ? " mine" : ""}" data-chat-key="${esc(renderKey)}:cargo" data-att-msg="${esc(m.id)}"${canReplyHere ? ` data-att-reply="${esc(m.id)}"` : ""}>${chatAttachmentCargo(cargoAttachments, { relayId, mine })}${attachmentOnly ? chatTimestampHtml(m.at, "th-cargo-time") : ""}</div>`;
-      })()}
+      })();
+      return `${slackThreadContextHtml(m)}${chunkDivider}${runHeader}
+      <div class="th-msg${hasHostActions ? " has-host-actions" : ""}${holdsNews ? " holds-news" : ""}${opensThread ? " opens-thread" : ""}${m.unread ? " unread" : ""}${mine ? " mine" : ""}${cont ? " cont" : ""}${textLike ? " text" : ""}${taskEvent ? ` tk-event ${taskEvent.tone}${taskEvent.bare ? " bare" : ""}` : ""}${m.request ? " tk-card" : ""}${relayWide ? " rl-card" : ""}${attachmentOnly ? " attachment-only" : ""}${agentWorking ? " agent-working" : ""}${open ? " open" : ""}${activeMentionVisit?.selected === String(m.id) ? " mention-target" : ""}${m.deletedAt ? " deleted" : ""}${editingMessage ? " editing" : ""}${confirmingDelete ? " deleting" : ""}${aggregates.length ? " has-rx" : ""}${liveCanonicalArrivalIds.has(String(m.id || "")) ? " live-arrival" : ""}"${textLike ? "" : ' role="button" tabindex="0"'}${agentWorking ? ' aria-busy="true"' : ""}${hasHostActions ? ` aria-expanded="${hostActionsPersistent ? "true" : "false"}"` : ""} data-chat-key="${esc(renderKey)}:body" data-msg="${esc(m.id)}" data-dir="${m.direction}" data-opening-id="${esc(m.id)}">
+        ${sideMenuHtml}
+        ${m.request ? '<div class="tk-main">' : relayWide ? '<div class="rl-main">' : ""}
+        ${taskEvent ? taskEventRefHtml(taskEvent) : messageReplyReferenceHtml(m)}
+        ${`
+          ${textLike ? '<div class="th-text-content">' : ""}<span class="th-msg-title"${textLike ? ` data-clock="${esc(clockLabel)}"` : ""}>${agentWorking
+            ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>'
+            : taskEvent ? (taskEvent.bare ? "" : linkify(taskEvent.note, m.groupId || thread.groupId)) : `${m.request ? taskChipHtml(m) : ""}${tombstone ? esc(tombstone) : textLike ? linkify(m.title, m.groupId || thread.groupId) : esc((!open && !inlineBody && clippedTitleBody(m.title, m.body)) || m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}`}</span>${textLike ? `${chatTimestampHtml(m.at, "th-blk-time", clockLabel)}</div>` : ""}
+
+          ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
+          ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
+          ${!textLike && open ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
+          ${allowHtml}
+        `}
+
+        <div class="row-err${rowNotes.get(m.id)?.cls === "ok" ? " ok" : ""}" data-err="${esc(m.id)}" data-stop="1">${esc(rowNotes.get(m.id)?.text || "")}</div>
+        ${showProviderByline ? providerBylineHtml(m) : ""}
+        ${hasHostActions && !relayWide ? relayHostActionsHtml(m, { persistent:hostActionsPersistent }) : ""}
+        ${relayWide ? cargoHtml : ""}
+        ${!textLike && !editingMessage ? chatTimestampHtml(m.at) : ""}
+        ${m.request || relayWide ? "</div>" : ""}
+        ${relayRail}
+        ${hasHostActions ? `${holdsNews ? replyNewsTrayHtml(m, newsItems, messageById, { thread:replyThreadRepliesFor(m) }) : ""}${replyThreadSummaryHtml(m, replyThreadRepliesFor(m), { strip:true, quiet:holdsNews })}` : newsInBubble}
+        ${taskFooter}
+        ${taskWidePickers}
+        ${badges}
+      </div>
+      ${slackUnsyncedHtml(m)}
+      ${attachmentOnly ? "" : threadTailHtml}
+      ${relayWide ? "" : cargoHtml}
       ${attachmentOnly ? threadTailHtml : ""}
       ${(() => {
         // Receipts stay beneath the bubble; text actions use the side menu.
@@ -20540,7 +20715,8 @@
         // With attachments, repeat the normal receipt below the last attachment.
         // A deleted message carries no receipt (WhatsApp shows no ticks on one).
         // A message typed in Slack has no Relay delivery to report: no "Sent".
-        const receipt = m.deletedAt || m.origin === "slack" || (m.request && !attachments.length) ? null : receiptFor(m, msgs);
+        // A full-screen Relay card shows its receipt as the steps in its rail.
+        const receipt = m.deletedAt || m.origin === "slack" || (m.request && !attachments.length) || relayWide ? null : receiptFor(m, msgs);
         const bits = [];
         if (confirmingDelete) {
           // The question sits under the bubble it is about, with who it affects.
@@ -21540,13 +21716,8 @@
   let chatAgentPreferencesError = "";
   let providerAuthInfo = null;  // safe status only; credentials stay in provider CLIs
   let providerAuthBusy = "";
-  let providerDetailsOpen = "";
   let providerAuthNote = "";
   let providerAuthError = "";
-  let providerInventoryRefreshing = false;
-  let providerInventoryStale = true;
-  let providerInventoryCheckedAt = null;
-  let providerInventoryError = "";
   let providerAuthPollTimer = null;
   let settingsLoadSeq = 0;
   let svPairOpen = false;       // inline code-entry row revealed
@@ -21557,7 +21728,6 @@
   let inviteLinkCopied = false;
   let inviteLinkCopyTimer = null;
   let inviteLinkError = "";
-  let permTrayOpen = null;      // vendor key whose mode tray is unfolded
   let svDraft = "";             // pairing-code text preserved across re-renders
   let svBusy = false;           // pair / sign-out in flight
   let svNote = "";              // success note while the pill restarts
@@ -21722,27 +21892,6 @@
       </div>
       <div class="sv-hint" data-stop="1">Need the setup page again? <button class="sv-setup-link" type="button" id="svSetupLink">Open here</button>.</div>`;
   }
-  function providerInventoryStateText() {
-    if (providerInventoryError) {
-      return providerInventoryCheckedAt
-        ? "Could not refresh integration health. Showing the last successful check."
-        : "Could not check integration health. Local configured MCPs are shown where available.";
-    }
-    if (providerInventoryRefreshing) {
-      return providerInventoryCheckedAt
-        ? "Refreshing integration health in the background…"
-        : "Checking integration health in the background…";
-    }
-    if (providerInventoryStale && providerInventoryCheckedAt) return "Integration health is from an earlier check.";
-    return "";
-  }
-  function updateProviderInventoryState() {
-    const el = document.getElementById("svProviderInventoryState");
-    if (!el) return;
-    const text = providerInventoryStateText();
-    el.textContent = text;
-    el.classList.toggle("hidden", !text);
-  }
   function providerRowsSignature() {
     return JSON.stringify(providerAuthInfo?.providers || {});
   }
@@ -21755,127 +21904,12 @@
       const prior = previous[id] || {};
       const fresh = result.providers[id];
       providers[id] = fresh
-        ? { ...prior, ...fresh, integrations: prior.integrations || fresh.integrations, authLoaded:true }
+        ? { ...prior, ...fresh, authLoaded:true }
         : prior;
     }
     providerAuthInfo = { ok:true, providers };
     return providerRowsSignature() !== before;
   }
-  function applyProviderInventoryResult(result) {
-    if (!result || result.ok === false || !result.providers) return false;
-    const before = providerRowsSignature();
-    const previous = providerAuthInfo?.providers || {};
-    const providers = {};
-    for (const id of ["claude", "codex"]) {
-      const prior = previous[id] || {};
-      const inventory = result.providers[id]?.integrations;
-      providers[id] = {
-        id,
-        label:id === "claude" ? "Claude Code" : "Codex",
-        enabled:true,
-        installed:false,
-        connected:false,
-        detail:"Checking connection…",
-        busy:false,
-        authLoaded:false,
-        ...prior,
-        integrations:inventory || prior.integrations || { mcpServers:[], apps:[] },
-      };
-    }
-    providerAuthInfo = { ok:true, providers };
-    return providerRowsSignature() !== before;
-  }
-  function connectionDisclosureHtml({ id, label, logo, meta, stateHtml, detailHtml }) {
-    const open = providerDetailsOpen === id;
-    return `<div class="sv-provider" data-provider-row="${esc(id)}">
-      <button class="sv-agent-provider-toggle" type="button" data-provider-details="${esc(id)}" aria-expanded="${open ? "true" : "false"}" aria-controls="svProviderDetail-${esc(id)}">
-        <img class="sv-agent-provider-logo" src="${esc(logo)}" alt="" />
-        <span class="sv-agent-provider-summary"><span class="sv-provider-name">${esc(label)}</span><span class="sv-agent-provider-count">${esc(meta)}</span></span>
-        ${stateHtml}
-        <svg class="sv-agent-provider-chev" width="12" height="7" viewBox="0 0 12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 1.5L6 5.5L10.5 1.5"/></svg>
-      </button>
-      <div class="sv-agent-provider-detail${open ? " open" : ""}" id="svProviderDetail-${esc(id)}" aria-hidden="${open ? "false" : "true"}"${open ? "" : " inert"}><div class="sv-agent-provider-detail-inner"><div class="sv-agent-provider-detail-body">
-        ${detailHtml}
-      </div></div></div>
-    </div>`;
-  }
-  function providerConnectionRowsHtml() {
-    const providers = providerAuthInfo && providerAuthInfo.providers ? providerAuthInfo.providers : {};
-    return ["claude", "codex"].map((id) => {
-      const item = providers[id] || { id, label: id === "claude" ? "Claude Code" : "Codex", enabled:true, installed:false, connected:false, detail:"Checking connection…", busy:false, authLoaded:false };
-      const authLoaded = item.authLoaded === true;
-      const busy = providerAuthBusy === id || item.busy;
-      const requirement = item.requirement || (id === "claude" ? "Claude subscription required" : "ChatGPT subscription required");
-      const status = !item.enabled
-        ? `${item.connected ? `${item.detail} · ` : ""}Disabled for Tasks`
-        : busy
-          ? item.busyDetail || "Waiting for authorization…"
-          : item.connected
-            ? `${item.detail || "Subscription connected"} · Ready for Tasks`
-            : item.detail || "Not signed in";
-      const integrations = item.integrations && typeof item.integrations === "object" ? item.integrations : {};
-      const mcpServers = Array.isArray(integrations.mcpServers) ? integrations.mcpServers : [];
-      const apps = Array.isArray(integrations.apps) ? integrations.apps : [];
-      const totalConnections = mcpServers.length + apps.length;
-      const integrationList = (label, values) => {
-        if (!values.length) return "";
-        const list = values.map((entry) => {
-          const name = typeof entry === "string" ? entry : entry && entry.name;
-          return `<li title="${esc(name || "")}">${esc(name || "")}</li>`;
-        }).join("");
-        return `<div class="sv-agent-provider-group">
-          <div class="sv-agent-provider-group-head"><span>${esc(label)}</span><span>${esc(values.length)}</span></div>
-          <ul class="sv-agent-provider-integrations">${list}</ul>
-        </div>`;
-      };
-      const enableLabel = item.enabled ? "Disable" : "Enable";
-      const signInLabel = item.signInAction || (id === "claude" ? "Sign in to Claude Code" : "Sign in to Codex");
-      const connectLabel = busy
-        ? "Signing in…"
-        : item.connected
-          ? "Connected"
-          : item.authState === "api_billing"
-            ? (id === "claude" ? "Use Claude subscription" : "Use ChatGPT subscription")
-            : signInLabel;
-      const connectDisabled = busy || !authLoaded || !item.installed || !item.enabled || item.connected;
-      const needsInstallation = authLoaded && !item.installed;
-      const healthy = item.enabled && item.connected && !busy;
-      const logo = id === "claude" ? "claudeCodeMark.svg" : "codexMark.svg";
-      const countLabel = totalConnections === 1 ? "1 connection" : `${totalConnections} connections`;
-      const headerMeta = healthy ? countLabel : status;
-      const headerState = healthy
-        ? '<span class="sv-agent-provider-ready">Ready</span>'
-        : `<span class="sv-agent-provider-state">${esc(busy ? "Connecting" : item.enabled ? "Needs attention" : "Disabled")}</span>`;
-      const detailNote = healthy ? "" : `<div class="sv-agent-provider-note">${esc(requirement)}${status ? ` · ${esc(status)}` : ""}</div>`;
-      return connectionDisclosureHtml({
-        id,
-        label:item.label,
-        logo,
-        meta:headerMeta,
-        stateHtml:headerState,
-        detailHtml:`${detailNote}
-          ${integrationList(id === "claude" ? "MCPs and account connectors" : "Local MCPs", mcpServers)}
-          ${integrationList("Connected apps", apps)}
-          <div class="sv-agent-provider-actions">
-            ${needsInstallation ? `<button class="sv-provider-btn primary" type="button" data-provider-setup-prompt="${id}">Copy setup prompt</button>` : ""}
-            ${item.connected ? "" : `<button class="sv-provider-btn primary" type="button" data-provider-connect="${id}" ${connectDisabled ? "disabled" : ""}>${esc(connectLabel)}</button>`}
-            <button class="sv-provider-btn" type="button" data-provider-enable="${id}" data-enabled="${item.enabled ? "1" : "0"}" ${busy || !authLoaded ? "disabled" : ""}>${enableLabel}</button>
-          </div>`,
-      });
-    }).join("");
-  }
-  function connectionsHtml(info, includeAgentProviders) {
-    const rows = includeAgentProviders ? providerConnectionRowsHtml() : "";
-    if (!rows) return "";
-    return `<section class="sv-provider-section" data-stop="1">
-      <div class="sv-open-title">Connections</div>
-      <div class="sv-provider-list sv-agent-provider-list">${rows}</div>
-      ${includeAgentProviders ? `<div class="sv-hint${providerInventoryRefreshing || providerInventoryStale || providerInventoryError ? "" : " hidden"}" id="svProviderInventoryState">${esc(providerInventoryStateText())}</div>` : ""}
-      ${includeAgentProviders && providerAuthNote ? `<div class="sv-note">${esc(providerAuthNote)}</div>` : ""}
-      ${includeAgentProviders && providerAuthError ? `<div class="row-err sv-err">${esc(providerAuthError)}</div>` : ""}
-    </section>`;
-  }
-
   // Notification preferences. Unlike a ✕ (a snooze that the next relay revokes),
   // these are durable choices: nothing in the product undoes them but the user.
   function svSwitchHtml(key, checked, { disabled = false, label = "", inverted = false } = {}) {
@@ -21888,11 +21922,14 @@
   // what is yours (direct messages, mentions, Tasks), only the count, or no
   // pill at all until the status-area icon is clicked (pillHidden). Tapping the
   // row unfolds its choices inline; choosing folds it back.
+  // "New messages" read like a link to your messages, not a setting (Shane,
+  // 2026-10-13): the row is called Notifications and its second line says what
+  // the current choice does, the way "Draft a Relay when work is done" does.
   const NOTIFY_CHOICES = [
-    { value:"all", name:"Every message", short:"Every message", note:"A banner for each new message." },
-    { value:"direct", name:"Direct messages and mentions", short:"Direct and mentions", note:"Groups only count, unless someone mentions you." },
-    { value:"count", name:"Just the count", short:"Just the count", note:"Nothing pops up; the pill shows the count." },
-    { value:"hidden", name:"Menu bar only", short:"Menu bar only", note:"" },
+    { value:"all", name:"Every message", short:"Every message", sub:"Relay pops up for each new message", note:"Relay pops up for each new message." },
+    { value:"direct", name:"Direct messages and mentions", short:"Direct and mentions", sub:"Pops up only for messages to you", note:"Pops up for direct messages, mentions and Tasks. Group messages only add to the count." },
+    { value:"count", name:"Just the count", short:"Just the count", sub:"Nothing pops up; the count goes up", note:"Nothing pops up; the pill shows the count." },
+    { value:"hidden", name:"Menu bar only", short:"Menu bar only", sub:"Relay stays out of sight", note:"" },
   ];
   let notifyTrayOpen = false;
   function notifyChoiceOf(info) {
@@ -21924,97 +21961,35 @@
     }).join("");
     return `
           <button class="sv-row sv-notify-row" type="button" id="svNotifyRow" aria-expanded="${notifyTrayOpen ? "true" : "false"}" aria-controls="svNotifyTray">
-            <span class="sv-row-copy"><span class="sv-row-name">New messages</span></span>
+            <span class="sv-row-copy"><span class="sv-row-name">Notifications</span><span class="sv-row-sub">${esc(currentChoice.sub)}</span></span>
             <span class="sv-row-value">${esc(currentChoice.short)}</span>
             <svg class="sv-notify-chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
-          <div class="sv-notify-tray${notifyTrayOpen ? " open" : ""}" id="svNotifyTray" role="radiogroup" aria-label="New messages"${notifyTrayOpen ? "" : " hidden"}>${choices}</div>
+          <div class="sv-notify-tray${notifyTrayOpen ? " open" : ""}" id="svNotifyTray" role="radiogroup" aria-label="Notifications"${notifyTrayOpen ? "" : " hidden"}>${choices}</div>
           <div class="sv-row${banners ? "" : " off"}">
-            <span class="sv-row-copy"><span class="sv-row-name">Sounds</span>${banners ? "" : `<span class="sv-row-sub">Only with banners</span>`}</span>
+            <span class="sv-row-copy"><span class="sv-row-name">Sounds</span>${banners ? "" : `<span class="sv-row-sub">Only when Relay pops up</span>`}</span>
             ${svSwitchHtml("soundsMuted", !muted, { label: "Play sounds", inverted: true, disabled: !banners })}
           </div>`;
   }
-  function chatAgentDefaultsHtml() {
-    // Chat-agent defaults belong to @Claude/@Codex mentions, which keep their
-    // own gate now that Tasks are on for everyone.
-    if (payload.features?.agentMentions !== true || !window.relay.chatAgentPreferences) return "";
-    if (!chatAgentPreferences) return `<div class="sv-open-section" data-stop="1"><div class="sv-open-title">Chat agents</div><div class="sv-open-intro">${esc(chatAgentPreferencesError || "Loading model defaults…")}</div></div>`;
-    const rows = [
-      { key:"claude", label:"@Claude", logo:"claudeCodeMark.svg", models:[["opus","Opus 5.5"],["fable","Fable 5.1"],["sonnet","Sonnet 5.5"],["haiku","Haiku 4.5"]], efforts:["low","medium","high","xhigh","max"] },
-      { key:"codex", label:"@Codex", logo:"codexMark.svg", models:[["gpt-6.1-sol","6.1 Sol"],["gpt-6-astra","6 Astra"],["gpt-6-sol","6 Sol"],["gpt-6-luna","6 Luna"],["gpt-5.6-sol","5.6 Sol"],["gpt-5.6-terra","5.6 Terra"],["gpt-5.6-luna","5.6 Luna"]], efforts:["auto","low","medium","high","xhigh","max"] },
-    ];
-    return `<div class="sv-open-section sv-agent-defaults" data-stop="1">
-      <div class="sv-open-title">Chat agents</div>
-      <div class="sv-open-intro">Defaults for Work sessions that run on this computer.</div>
-      <div class="sv-open-list">${rows.map((row) => {
-        const current = chatAgentPreferences[row.key] || {};
-        return `<div class="sv-open-row">
-          <span class="sv-agent-identity"><img class="sv-open-logo" src="${row.logo}" alt="" /><span class="sv-open-copy"><span class="sv-open-name">${row.label}</span></span></span>
-          <span class="sv-agent-fields">
-            <label class="sv-agent-field"><span class="sv-agent-field-label">Model</span><select class="sv-agent-select" data-chat-agent-model="${row.key}" aria-label="${row.label} model">${row.models.map(([value,label]) => `<option value="${value}"${current.model === value ? " selected" : ""}>${label}</option>`).join("")}</select></label>
-            <label class="sv-agent-field"><span class="sv-agent-field-label">Thinking</span><select class="sv-agent-select" data-chat-agent-effort="${row.key}" aria-label="${row.label} thinking">${row.efforts.map((value) => `<option value="${value}"${current.effort === value ? " selected" : ""}>${value}</option>`).join("")}</select></label>
-          </span>
-        </div>`;
-      }).join("")}</div>
-      ${chatAgentPreferencesError ? `<div class="row-err sv-err">${esc(chatAgentPreferencesError)}</div>` : ""}
-    </div>`;
+  // ONE SET OF RUN SETTINGS PER CODING AGENT (Shane, 2026-10-13), on the
+  // agent's own row in Your AIs, for developer accounts (who are the only
+  // ones Relay starts agents for). Permission is what every run Relay starts
+  // here uses: Execute's Claude conversations, the composer under a Relay and
+  // an @-mention. Model and thinking are the account's, and an @-mention runs
+  // on them; the mentions themselves are never named on the page.
+  function runsAgentsHere() {
+    const features = payload.features || {};
+    return features.taskExecution === true || features.agentMentions === true || features.relayWork === true;
   }
-  // YOUR AGENT. Independent switches restored at David's request. These are
-  // opening preferences, not separate setup steps. Preserve the reviewed
-  // Connected copy from the Minimal pill's integrated setup contract.
-  // Four rows, the reader's order (David, 2026-09-17): the chat apps, then
-  // the agents on this Mac. Each row is a switch that decides one tile of the
-  // reader's sheet and one of the bubble's bar; all four begin on, and all
-  // four can go off. There is no Other row: the copied sentence is always
-  // offered, so it has nothing to switch (David, 2026-09-16). Conductor is a
-  // fifth row only where conductorAvailable(); everywhere else the page is
-  // the four.
-  function yourAgentHtml() {
-    const selected = agentAppSelection();
-    return `
-      <div class="sv-open-section" id="yourAgent" data-stop="1">
-        <div class="sv-open-title">Open Relays in</div>
-        <div class="sv-open-list">
-          ${CHAT_APP_OPTIONS.map((app) => {
-            const on = chatAppEnabled(app);
-            const logo = app === "ChatGPT" ? "chatgptMark.svg" : "claudeMark.svg";
-            // The Claude tile opens the Claude app when it is on this Mac
-            // (main asks the OS at the click; this is the pill's own sighting
-            // of the app), claude.ai otherwise. ChatGPT has no scheme on a
-            // computer and always opens chatgpt.com.
-            const where = app === "ChatGPT" ? "chatgpt.com" : desktopEntry("Claude Code")?.available === true ? "Claude app" : "claude.ai";
-            const why = `${where} · a new chat per relay`;
-            return `<div class="sv-open-row">
-              <img class="sv-open-logo" src="${logo}" alt="" />
-              <span class="sv-open-copy"><span class="sv-open-name">${app}</span><span class="sv-open-why">${esc(why)}</span></span>
-              <button class="sv-switch" type="button" role="switch" data-chat-app="${app}" aria-checked="${on ? "true" : "false"}" aria-label="Open Relays with ${app}"></button>
-            </div>`;
-          }).join("")}
-          ${AGENT_APP_OPTIONS.map((app) => {
-            const available = appAvailable(app);
-            const on = selected.includes(app);
-            const logo = app === "Codex" ? "codexMark.svg" : "claudeCodeMark.svg";
-            // "Connected" is said only where Your AIs has no evidence against
-            // it: an app whose Relay registration is missing or broken says so.
-            const gap = setupAgentGap(app);
-            const why = !available ? appUnavailableReason(app)
-              : gap ? gap
-              : on ? (agentOpensInApp(app) ? "Connected · opens relays in a new chat" : "Connected · Relay copies the sentence for you")
-              : "Connected";
-            return `<div class="sv-open-row${available ? "" : " off"}">
-              <img class="sv-open-logo" src="${logo}" alt="" />
-              <span class="sv-open-copy"><span class="sv-open-name">${app}</span><span class="sv-open-why">${esc(why)}</span></span>
-              <button class="sv-switch" type="button" role="switch" data-agent-app="${app}" aria-checked="${on ? "true" : "false"}" aria-label="Open Relays with ${app}"${!available ? " disabled" : ""}></button>
-            </div>`;
-          }).join("")}
-          ${conductorAvailable() ? `<div class="sv-open-row">
-              <img class="sv-open-logo" src="conductorMark.svg" alt="" />
-              <span class="sv-open-copy"><span class="sv-open-name">Conductor</span><span class="sv-open-why">A new workspace per relay</span></span>
-              <button class="sv-switch" type="button" role="switch" data-conductor-app="1" aria-checked="${conductorEnabled() ? "true" : "false"}" aria-label="Open Relays with Conductor"></button>
-            </div>` : ""}
-        </div>
-      </div>`;
-  }
+  // "Latest" is each CLI's own alias for its newest model (claude --model
+  // opus), so this list never needs a version bump. Codex's "auto" leaves the
+  // choice to Codex, which runs its current default.
+  const AGENT_MODELS = {
+    claude: [["opus","Latest Opus"],["fable","Latest Fable"],["sonnet","Latest Sonnet"],["haiku","Latest Haiku"]],
+    codex: [["auto","Latest"],["gpt-6.1-sol","6.1 Sol"],["gpt-6-astra","6 Astra"],["gpt-6-sol","6 Sol"],["gpt-6-luna","6 Luna"],["gpt-5.6-sol","5.6 Sol"],["gpt-5.6-terra","5.6 Terra"],["gpt-5.6-luna","5.6 Luna"]],
+  };
+  const AGENT_EFFORTS = { claude:["low","medium","high","xhigh","max"], codex:["auto","low","medium","high","xhigh","max"] };
+  const EFFORT_NAMES = { auto:"Auto", low:"Low", medium:"Medium", high:"High", xhigh:"Extra high", max:"Max" };
   // YOUR AIS (Setup, 2026-10-07). One page that connects Relay to every AI a
   // person uses, whenever they got it: the apps on this computer, read from
   // their own config files and running processes, and the chat AIs on the
@@ -22080,18 +22055,6 @@
     return { dot:"ok", text:host.id === "chatgpt-app" ? "Connected · new Codex chats have it" : "Connected · new chats have it" };
   }
   function setupDotHtml(dot) { return dot ? `<span class="setup-dot ${dot}" aria-hidden="true"></span>` : ""; }
-  function setupLocalRowHtml(host) {
-    const meta = SETUP_LOCAL[host.id];
-    const status = setupLocalStatus(host);
-    const connected = !status.action && !status.disabled;
-    const name = host.id === "chatgpt-app" && host.state === "available" ? meta.name : meta.name;
-    return `<div class="sv-open-row setup-row${connected ? " ok" : ""}${setupJust.has(host.id) ? " just" : ""}" data-setup-row="${host.id}">
-      <img class="sv-open-logo" src="${meta.mark}" alt="" />
-      <span class="sv-open-copy"><span class="sv-open-name">${esc(name)}</span>
-        <span class="sv-open-why">${setupDotHtml(status.dot)}<span class="setup-why-text">${esc(status.text)}</span></span></span>
-      ${status.verb ? `<button class="sv-choose${status.warn ? " warn" : ""}" type="button" data-setup-${status.action || "busy"}="${host.id}"${status.title ? ` title="${esc(status.title)}"` : ""}${status.disabled ? " disabled" : ""}>${esc(status.verb)}</button>` : ""}
-    </div>`;
-  }
   // BY THE APP A PERSON OPENS (David, 2026-10-07): "Claude app" and "Claude
   // Code" as two rows read as a contradiction when Claude Code is the Claude
   // app's Code tab. Registrations stay per config file underneath; the page
@@ -22208,18 +22171,20 @@
     const open = setupTray === surface;
     const live = connections.filter(setupConnectionLive);
     const status = waiting ? { dot:"wait", text:`Waiting for ${meta.name}…` }
-      : live.length ? { dot:"ok", text:"Connected" }
-      : { dot:"", text:"Not connected" };
-    const row = (inner, tag) => tag === "button"
-      ? `<button class="sv-open-row setup-row${live.length ? " ok" : ""}${setupJust.has(surface) ? " just" : ""}" type="button" data-setup-web="${surface}" aria-expanded="${open ? "true" : "false"}">${inner}</button>`
-      : `<div class="sv-open-row setup-row" data-setup-row="${surface}">${inner}</div>`;
+      : live.length ? { dot:"ok", text:"Connected to Relay" }
+      : { dot:"", text:"Not connected to Relay" };
     const copy = `<img class="sv-open-logo" src="${meta.mark}" alt="" />
       <span class="sv-open-copy"><span class="sv-open-name">${meta.name}</span>
         <span class="sv-open-why">${setupDotHtml(status.dot)}<span class="setup-why-text">${esc(status.text)}</span></span></span>`;
-    // Nothing connected and the tray shut: the row is a name and one verb.
-    const head = connections.length || open
-      ? row(`${copy}<svg class="perm-chev" width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="${open ? "transform:rotate(90deg)" : ""}"><path d="M2 2.5L5.5 6L2 9.5"/></svg>`, "button")
-      : row(`${copy}<button class="sv-choose" type="button" data-setup-web-connect="${surface}">Connect</button>`, "div");
+    // The name unfolds what is connected (and Disconnect); the right edge is
+    // the switch once it is connected, and the one verb until then.
+    const opener = connections.length || open
+      ? `<button class="setup-row-open" type="button" data-setup-web="${surface}" aria-expanded="${open ? "true" : "false"}">${copy}<svg class="perm-chev" width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="${open ? "transform:rotate(90deg)" : ""}"><path d="M2 2.5L5.5 6L2 9.5"/></svg></button>`
+      : `<span class="setup-row-open">${copy}</span>`;
+    const control = waiting ? ""
+      : live.length ? `<button class="sv-switch" type="button" role="switch" data-chat-app="${meta.name}" aria-checked="${chatAppEnabled(meta.name) ? "true" : "false"}" aria-label="Open Relays with ${meta.name}"></button>`
+      : `<button class="sv-choose" type="button" data-setup-web-connect="${surface}">Connect</button>`;
+    const head = `<div class="sv-open-row setup-row${live.length ? " ok" : ""}${setupJust.has(surface) ? " just" : ""}" data-setup-row="${surface}">${opener}${control}</div>`;
     let tray = "";
     if (open) {
       // Each connection: which one (when it was added) and whether it still counts.
@@ -22262,106 +22227,118 @@
     }
     return `<div class="setup-web${open ? " open" : ""}">${head}${tray}</div>`;
   }
-  // WHAT TASKS MAY DO. One value row per app, the vendor's own modes in a tray
-  // that folds back when one is chosen (David, 2026-08-18). It lives on Your
-  // AIs beside each app's switch, so You stays one screen.
-  function permPrefsHtml() {
-    if (payload.features?.requests !== true) return "";
-    return `
-      <div class="sv-open-section" id="permPrefs" data-stop="1">
-        <div class="sv-open-title">What Tasks may do</div>
-        <div class="sv-open-list">
-          ${PERM_VENDORS.map((v) => {
-            const cur = v.modes.find((m) => m.id === permMode(v.key)) || v.modes[0];
-            const open = permTrayOpen === v.key;
-            const logo = /codex/i.test(v.key) ? "codexMark.svg" : "claudeCodeMark.svg";
-            return `<div class="perm-app${open ? " open" : ""}">
-              <button type="button" class="sv-open-row perm-vrow" data-perm-open="${esc(v.key)}" aria-expanded="${open ? "true" : "false"}">
-                <img class="sv-open-logo" src="${logo}" alt="" />
-                <span class="sv-open-name">${esc(v.label)}</span>
-                <span class="perm-value">${open ? "" : esc(cur.name)}<svg class="perm-chev" width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2.5L5.5 6L2 9.5"/></svg></span>
-              </button>
-              ${open ? `<div class="open-actions perm-tray">
-                ${v.modes.map((m, i) => `${i ? '<div class="oa-sep"></div>' : ""}<button type="button" class="oa-item ap-row perm-row${cur.id === m.id ? " on" : ""}" data-perm="${esc(v.key)}" data-mode="${esc(m.id)}">
-                    <span class="ap-sq" aria-hidden="true" style="${cur.id === m.id ? `background:${vendorSq(v.sample)}` : ""}"></span>
-                    <span class="ap-name">${esc(m.name)}</span>
-                    <svg class="ap-check" width="11" height="9" viewBox="0 0 11 9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4.5L4 7.5L10 1.5"/></svg>
-                  </button>`).join("")}
-              </div>` : ""}
-            </div>`;
-          }).join("")}
-        </div>
-      </div>`;
+  // CODING AGENTS ON THIS COMPUTER (Shane, 2026-10-13). One row per agent,
+  // whichever app it runs in: Claude Code in the Claude app's Code tab and in
+  // Terminal, Codex in the ChatGPT app and in Terminal. Each place is still
+  // judged on its own proof (setupModeStatus); the row says Connected to Relay
+  // with the places that are, and keeps the verb for a place that is not.
+  // The switch appears only once it is connected: an agent that cannot read
+  // your Relays is never offered as a place to open them.
+  function setupAgentRows(hosts) {
+    const modes = setupAppGroups(hosts).flatMap((group) => group.modes);
+    const where = (place) => /:terminal$/.test(place || "") ? "Terminal" : "Desktop app";
+    const pick = (ids) => modes.filter(({ host }) => ids.includes(host.id)).map((mode) => ({ ...mode, label:where(mode.place) }));
+    return [
+      { key:"claude-code", name:"Claude Code", app:"Claude Code", provider:"claude", mark:SETUP_LOCAL["claude-code"].mark, modes:pick(["claude-code"]) },
+      { key:"codex", name:"Codex", app:"Codex", provider:"codex", mark:SETUP_LOCAL.codex.mark, modes:pick(["chatgpt-app", "codex"]) },
+      { key:SETUP_RIDER, name:SETUP_LOCAL[SETUP_RIDER].name, app:"", provider:"", mark:SETUP_LOCAL[SETUP_RIDER].mark, modes:modes.filter(({ host }) => host.id === SETUP_RIDER) },
+    ].filter((row) => row.modes.length);
   }
-  // The developer surfaces for running Tasks on this computer: the Claude Code
-  // and Codex subscriptions behind them, and device execution. They are about
-  // the same apps, so they sit on Your AIs, never on You.
-  function taskRuntimeHtml() {
-    let html = settingsInfo ? connectionsHtml(settingsInfo, payload.features?.agentConnections === true) : "";
-    if (payload.features?.taskExecution) {
-      const auto = payload.nativeExecutionMode !== "default";
-      html += `<div class="sv-copy">Device execution: ${payload.nativeExecutionEnabled ? "enabled" : "off"}. Execute will ask before the first launch.${payload.nativeExecutionEnabled ? '<button type="button" class="oa-item" id="executionDisable">Disable device execution</button>' : ""}</div>`;
-      // How Execute starts a Task's Claude conversation. Auto by default.
-      html += `<div class="sv-copy">Tasks start in ${auto ? "Auto mode: Claude Code works without asking before each step, and its own safety checks still apply" : "Manual mode: Claude Code asks before each step"}.<button type="button" class="oa-item" id="executionMode" data-mode="${auto ? "default" : "auto"}">${auto ? "Ask before each step instead" : "Use Auto mode instead"}</button></div>`;
-    }
-    return html;
+  function setupVerbHtml(status, hostId) {
+    if (!status.verb) return "";
+    return `<button class="sv-choose${status.warn ? " warn" : ""}" type="button" data-setup-${status.action || "busy"}="${hostId}"${status.title ? ` title="${esc(status.title)}"` : ""}${status.disabled ? " disabled" : ""}>${esc(status.verb)}</button>`;
+  }
+  function setupAgentRowHtml(row) {
+    const lines = row.modes.map((mode) => ({ ...mode, status:setupModeStatus(mode.host, mode.place) }));
+    const connected = lines.filter((line) => line.status.text === "Connected");
+    const busy = lines.find((line) => line.status.disabled);
+    const gaps = lines.filter((line) => !["Connected", "Checking…"].includes(line.status.text) && !line.status.disabled);
+    const plain = (text) => text === "Not connected" ? "Not connected to Relay" : text;
+    const status = busy ? { dot:"wait", text:busy.status.text }
+      : connected.length ? { dot:"ok", text:"Connected to Relay", where:connected.map((line) => line.label).filter(Boolean).join(", ") }
+      : gaps.length ? { dot:gaps[0].status.dot, text:plain(gaps[0].status.text), title:gaps[0].status.title }
+      : { dot:"", text:"Checking…" };
+    const rider = row.key === SETUP_RIDER;
+    const on = rider ? conductorEnabled() : agentAppSelection().includes(row.app);
+    const available = rider ? conductorAvailable() : appAvailable(row.app);
+    const toggle = `<button class="sv-switch" type="button" role="switch" ${rider ? 'data-conductor-app="1"' : `data-agent-app="${row.app}"`} aria-checked="${on ? "true" : "false"}" aria-label="Open Relays with ${esc(row.name)}"${available ? "" : " disabled"}></button>`;
+    const control = busy ? "" : connected.length ? toggle : gaps[0] ? setupVerbHtml(gaps[0].status, gaps[0].host.id) : "";
+    // Connected in one place and not another: the other keeps its own verb.
+    const partial = connected.length && !busy ? gaps.map((line) => `<span class="setup-gap"><span class="setup-why-text"${line.status.title ? ` title="${esc(line.status.title)}"` : ""}>${esc(line.status.text === "Not connected" ? `Not connected in ${line.label}` : `${line.label}: ${line.status.text}`)}</span>${setupVerbHtml(line.status, line.host.id)}</span>`).join("") : "";
+    return `<div class="setup-agent" data-setup-row="${row.key}">
+      <div class="sv-open-row setup-row${partial ? " setup-app" : ""}${connected.length ? " ok" : ""}${row.modes.some(({ host }) => setupJust.has(host.id)) ? " just" : ""}">
+        <img class="sv-open-logo" src="${row.mark}" alt="" />
+        <span class="sv-open-copy"><span class="sv-open-name">${esc(row.name)}</span>
+          <span class="sv-open-why">${setupDotHtml(status.dot)}<span class="setup-why-text"${status.title ? ` title="${esc(status.title)}"` : ""}>${esc(status.text)}${status.where ? `<span class="setup-where"> · ${esc(status.where)}</span>` : ""}</span></span>${partial}</span>
+        ${control}
+      </div>
+      ${row.provider ? setupAgentSettingsHtml(row.provider, row.name) : ""}
+    </div>`;
+  }
+  // The run settings under a coding agent's row, one label and value a line.
+  // Relay starts the agent through its command line, signed in to the
+  // person's plan, so a missing sign-in is said here, first.
+  function setupAgentSettingsHtml(provider, name) {
+    if (!runsAgentsHere()) return "";
+    const item = providerAuthInfo?.providers?.[provider];
+    const plan = provider === "claude" ? "Claude" : "ChatGPT";
+    const busy = providerAuthBusy === provider || item?.busy === true;
+    const note = (text, button) => `<div class="setup-kv-note">${setupDotHtml("warn")}<span class="setup-why-text">${esc(text)}</span>${button}</div>`;
+    const signIn = !item?.authLoaded ? ""
+      : !item.installed ? note(`Needs the ${name} command line to run Tasks`, `<button class="sv-choose" type="button" data-provider-setup-prompt="${provider}">Copy setup prompt</button>`)
+      : !item.connected ? note(item.authState === "api_billing" ? `Uses API billing · sign in with ${plan} to run Tasks` : `Sign in to ${plan} to run Tasks`,
+        `<button class="sv-choose" type="button" data-provider-connect="${provider}"${busy ? " disabled" : ""}>${busy ? "Signing in…" : "Sign in"}</button>`)
+      : "";
+    const pick = (label, attr, options, value, disabled = false) => {
+      const list = options.some(([optionValue]) => optionValue === value) || !value ? options : [[value, value], ...options];
+      return `<label class="setup-kv"><span>${label}</span><span class="setup-kv-pick"><select class="setup-kv-select" ${attr}="${provider}" aria-label="${esc(name)} ${label.toLowerCase()}"${disabled ? " disabled" : ""}>${list.map(([optionValue, optionLabel]) => `<option value="${esc(optionValue)}"${optionValue === value ? " selected" : ""}>${esc(optionLabel)}</option>`).join("")}</select></span></label>`;
+    };
+    // Model and thinking belong to the account (every computer); permission
+    // to this computer, beside the agent it governs.
+    const route = chatAgentPreferences?.[provider];
+    const loading = [["", chatAgentPreferencesError ? "Unavailable" : "Loading…"]];
+    const routes = !window.relay.chatAgentPreferences ? ""
+      : `${pick("Model", "data-chat-agent-model", route ? AGENT_MODELS[provider] : loading, route?.model || "", !route)}${pick("Thinking", "data-chat-agent-effort", route ? AGENT_EFFORTS[provider].map((value) => [value, EFFORT_NAMES[value] || value]) : loading, route?.effort || "", !route)}`;
+    const vendor = PERM_VENDORS.find((entry) => entry.key === provider);
+    const permission = vendor ? pick("Permission", "data-agent-permission", vendor.modes.map((mode) => [mode.id, mode.name]), permMode(provider)) : "";
+    return `<div class="setup-kvs">${signIn}${routes}${permission}${chatAgentPreferencesError && route ? `<div class="row-err sv-err">${esc(chatAgentPreferencesError)}</div>` : ""}</div>`;
   }
   function setupPageHtml() {
     const hosts = setupHosts().filter((host) => host.installed);
     const absent = ["claude-app", "chatgpt-app"].filter((id) => setupSnapshot?.hosts && !setupHost(id)?.installed);
-    const local = setupSnapshot?.hosts
-      ? hosts.length
-        ? `<div class="sv-open-list">${setupAppGroups(hosts).map(setupAppRowHtml).join("")}</div>`
-        : `<div class="sv-open-intro">No AI apps on this ${/Mac/.test(navigator.userAgent) ? "Mac" : "computer"} yet.</div>`
-      : `<div class="sv-open-intro">${setupLoading ? "Looking…" : "Couldn’t check this computer."}</div>`;
+    const machine = /Mac/.test(navigator.userAgent) ? "Mac" : "computer";
+    const rows = setupAgentRows(hosts);
+    const agents = !setupSnapshot?.hosts
+      ? `<div class="sv-open-intro">${setupLoading ? "Looking…" : "Couldn’t check this computer."}</div>`
+      : rows.length ? `<div class="sv-open-list">${rows.map(setupAgentRowHtml).join("")}</div>`
+      : `<div class="sv-open-intro">No coding agents on this ${machine} yet.</div>`;
     const others = Array.isArray(setupSnapshot?.connections) ? setupSnapshot.connections.filter((item) => !SETUP_WEB[item.surface]) : [];
     const otherHtml = others.length ? `<div class="sv-open-section" data-stop="1"><div class="sv-open-title">Other connections</div>
       <div class="sv-open-list">${others.map((item) => `<div class="sv-open-row setup-row ok">
         <span class="sv-open-copy"><span class="sv-open-name">${esc(item.name)}</span><span class="sv-open-why">${setupDotHtml("ok")}<span class="setup-why-text">${esc(setupUsedWords(item))}</span></span></span>
         <button class="sv-choose${setupArmed === item.id ? " armed" : ""}" type="button" data-setup-disconnect="${esc(item.id)}">${setupArmed === item.id ? "Disconnect?" : "Disconnect"}</button></div>`).join("")}</div></div>` : "";
-    const machine = /Mac/.test(navigator.userAgent) ? "Mac" : "computer";
+    const providerNotes = runsAgentsHere()
+      ? `${providerAuthNote ? `<div class="sv-note setup-err">${esc(providerAuthNote)}</div>` : ""}${providerAuthError ? `<div class="row-err sv-err setup-err">${esc(providerAuthError)}</div>` : ""}`
+      : "";
+    // LOCAL OR CLOUD (Shane, 2026-10-13). The chat AIs run in their makers'
+    // cloud and reach Relay through your account; the coding agents run here,
+    // in your files. That is why one app (Claude) can appear in both.
     return `<section class="setup-page" id="setupPage" aria-labelledby="setupTitle" data-stop="1">
       <button class="cv-blocked-back" type="button" id="setupBack">← You</button>
       <h2 id="setupTitle">Your AIs</h2>
-      <p class="cv-blocked-copy">Relay works inside the AIs you use. Connect each one once.</p>
-      <div class="sv-open-section"><div class="sv-open-title setup-title">On this ${machine}${setupConnectAllIds().length > 1 ? `<button class="setup-all" type="button" id="setupConnectAll"${Object.keys(setupLocalBusy).length ? " disabled" : ""}>Connect all</button>` : ""}</div>${local}</div>
-      <div class="sv-open-section"><div class="sv-open-title">On the web</div>
+      <div class="sv-open-section"><div class="sv-open-title">Chat AIs</div>
+        <div class="sv-open-intro">Connected to your account, so they reach your Relays on every device.</div>
         <div class="sv-open-list">${setupWebRowHtml("claude")}${setupWebRowHtml("chatgpt")}</div>
         ${setupSnapshot?.connectionsError ? `<div class="row-err sv-err">${esc(setupSnapshot.connectionsError)}</div>` : ""}
       </div>
+      <div class="sv-open-section"><div class="sv-open-title">Coding agents on this ${machine}</div>
+        <div class="sv-open-intro">Work in your files. Switch on the ones that open your Relays.</div>
+        ${agents}${providerNotes}
+      </div>
       ${otherHtml}
-      ${yourAgentHtml()}
-      ${permPrefsHtml()}
-      ${taskRuntimeHtml()}
       ${absent.length ? `<p class="setup-foot">Don’t have the app? ${absent.map((id) => `<button type="button" data-setup-get="${id}">Get the ${esc(SETUP_LOCAL[id].name)}</button>`).join(" · ")}</p>` : ""}
       ${setupError ? `<div class="row-err sv-err setup-err" role="alert">${esc(setupError)}</div>` : ""}
     </section>`;
-  }
-  /** What Your AIs knows is wrong with an agent the "Your agent" switches name, if anything. */
-  function setupAgentGap(app) {
-    // Codex's app and CLI share one config, so either one answers.
-    const host = (app === "Codex" ? ["chatgpt-app", "codex"] : ["claude-code"]).map(setupHost).find((entry) => entry?.installed);
-    if (!host) return "";
-    // The same answer as Your AIs: connected where its own app says so.
-    const places = setupSnapshot?.places;
-    if (places) {
-      const mine = (app === "Codex" ? ["codex:chatgpt-app", "codex:terminal"] : ["claude-code:app", "claude-code:terminal"]).map((id) => places[id]).filter((place) => place?.installed);
-      if (mine.some((place) => place.connected === true) || mine.some((place) => place.connected === null)) return "";
-      if (mine.length) return "Not connected";
-    }
-    return host.state === "available" || host.state === "broken" ? "Not connected" : "";
-  }
-  /** Every app here that one click can connect (the Claude app's connector opens Claude: always its own click). */
-  function setupConnectAllIds() {
-    return setupHosts().filter((host) => host.installed && host.id !== "claude-app" && ["available", "broken"].includes(host.state)).map((host) => host.id);
-  }
-  async function setupConnectAll() {
-    // One at a time, in the page's order: Conductor last, since connecting
-    // Claude Code and Codex usually connects it too.
-    for (const id of setupConnectAllIds().sort((a, b) => (a === SETUP_RIDER) - (b === SETUP_RIDER))) {
-      if (!setupConnectAllIds().includes(id)) continue;
-      await setupVerb("setupConnect", id, "connecting");
-    }
   }
   /** The You page's door: what is here, in marks, and what is left to do. */
   function setupEntryHtml() {
@@ -22376,9 +22353,12 @@
     // A place its own app says is not connected (Conductor only where offered).
     const placeGap = !first && Object.entries(setupSnapshot?.places || {}).some(([id, place]) => place.installed && place.connected === false
       && (place.host !== SETUP_RIDER || setupRiderOffered()) && setupHost(place.host)?.installed);
+    // Named as Your AIs names its rows: the Claude app's chats are Claude,
+    // the ChatGPT app's registration is Codex's.
+    const rowName = { "claude-app":"Claude", "chatgpt-app":"Codex", "claude-code":"Claude Code", codex:"Codex" };
     const why = !setupSnapshot ? "Checking…"
-      : placeGap ? "Something here isn’t connected"
-      : first ? `${SETUP_LOCAL[first.id].name} ${first.state === "broken" ? "needs a fix" : "isn’t connected yet"}${todo.length > 1 ? ` · ${todo.length - 1} more` : ""}`
+      : placeGap ? "Something here isn’t connected to Relay"
+      : first ? `${rowName[first.id] || SETUP_LOCAL[first.id].name} ${first.state === "broken" ? "needs a fix" : "isn’t connected to Relay"}${todo.length > 1 ? ` · ${todo.length - 1} more` : ""}`
       : count ? "Everything here is connected" : "Claude, ChatGPT and more";
     // Something to do reads as the row's line; otherwise the marks say it.
     const attention = Boolean(setupSnapshot && (first || placeGap || !count));
@@ -22550,7 +22530,6 @@
     for (const button of page.querySelectorAll("[data-setup-connect]")) {
       button.addEventListener("click", (event) => { event.stopPropagation(); void setupVerb("setupConnect", button.dataset.setupConnect, "connecting"); });
     }
-    document.getElementById("setupConnectAll")?.addEventListener("click", (event) => { event.stopPropagation(); void setupConnectAll(); });
     for (const button of page.querySelectorAll("[data-setup-web]")) {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -22617,21 +22596,31 @@
         renderSettings();
       });
     }
-    for (const row of page.querySelectorAll("[data-perm-open]")) {
-      row.addEventListener("click", (event) => {
+    // A coding agent's run settings: permission on this computer, model and
+    // thinking on the account.
+    for (const select of page.querySelectorAll("[data-agent-permission]")) {
+      select.addEventListener("click", (event) => event.stopPropagation());
+      select.addEventListener("change", (event) => {
         event.stopPropagation();
-        const key = row.getAttribute("data-perm-open");
-        permTrayOpen = permTrayOpen === key ? null : key;
+        const vendor = select.getAttribute("data-agent-permission");
+        savePillSetting({ taskPermissions: { [vendor]: select.value } });
+        setProtoPref(`proto.perm.${vendor}`, select.value);
         renderSettings();
       });
     }
-    for (const choice of page.querySelectorAll("[data-perm]")) {
-      choice.addEventListener("click", (event) => {
+    for (const select of page.querySelectorAll("[data-chat-agent-model],[data-chat-agent-effort]")) {
+      select.addEventListener("click", (event) => event.stopPropagation());
+      select.addEventListener("change", async (event) => {
         event.stopPropagation();
-        savePillSetting({ taskPermissions: { [choice.getAttribute("data-perm")]: choice.getAttribute("data-mode") } });
-        setProtoPref(`proto.perm.${choice.getAttribute("data-perm")}`, choice.getAttribute("data-mode"));
-        // Choosing folds the tray: the row's value line is the confirmation.
-        permTrayOpen = null;
+        const provider = select.getAttribute("data-chat-agent-model") || select.getAttribute("data-chat-agent-effort");
+        if (!provider || !chatAgentPreferences || !window.relay.saveChatAgentPreferences) return;
+        const route = { ...(chatAgentPreferences[provider] || {}) };
+        if (select.hasAttribute("data-chat-agent-model")) route.model = select.value;
+        else route.effort = select.value;
+        chatAgentPreferences = { ...chatAgentPreferences, [provider]:route };
+        chatAgentPreferencesError = "";
+        try { chatAgentPreferences = await window.relay.saveChatAgentPreferences({ [provider]:route }); }
+        catch (error) { chatAgentPreferencesError = error?.message || "Couldn’t save that. Try again."; }
         renderSettings();
       });
     }
@@ -22828,7 +22817,7 @@
   function accountRowHtml() {
     const turn = svAccountOpen ? ' style="transform:rotate(90deg)"' : "";
     return `<button class="sv-row${svAccountOpen ? " open" : ""}" type="button" id="svAccountRow" aria-expanded="${svAccountOpen ? "true" : "false"}" aria-controls="svAccountActions">
-        <span class="sv-row-copy"><span class="sv-row-name">Account</span></span>
+        <span class="sv-row-copy"><span class="sv-row-name">Relay account</span></span>
         <svg class="sv-row-chev"${turn} width="8" height="12" viewBox="0 0 8 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2.5L5.5 6L2 9.5"/></svg>
       </button>
       ${svAccountOpen ? `<div class="sv-row-actions" id="svAccountActions" aria-label="Account actions">
@@ -23015,7 +23004,6 @@
         <button class="oa-item oa-primary sv-update-btn" type="button" id="svUpdate" ${info.updating ? "disabled" : ""}>${info.updating ? "Updating…" : "Update and Restart"}</button>
       </div>`;
     }
-    html += chatAgentDefaultsHtml();
     html += `<div class="sv-colophon">
       <svg class="rd-end" width="16" height="4" viewBox="0 0 16 4" aria-hidden="true"><rect x="0" width="4" height="4"/><rect x="6" width="4" height="4"/><rect x="12" width="4" height="4"/></svg>
       <span class="sv-version">${esc(info.version ? `Relay ${info.version}` : "Relay")}</span>
@@ -23038,25 +23026,9 @@
     const copyLink = document.getElementById("svCopyLink");
     if (copyLink) copyLink.addEventListener("click", (e) => { e.stopPropagation(); copyInviteLinkFromSettings(); });
 
-    for (const select of settingsViewEl.querySelectorAll("[data-chat-agent-model],[data-chat-agent-effort]")) {
-      select.addEventListener("change", async (event) => {
-        event.stopPropagation();
-        const provider = select.getAttribute("data-chat-agent-model") || select.getAttribute("data-chat-agent-effort");
-        if (!provider || !chatAgentPreferences || !window.relay.saveChatAgentPreferences) return;
-        const route = { ...(chatAgentPreferences[provider] || {}) };
-        if (select.hasAttribute("data-chat-agent-model")) route.model = select.value;
-        else route.effort = select.value;
-        chatAgentPreferences = { ...chatAgentPreferences, [provider]:route };
-        chatAgentPreferencesError = "";
-        try { chatAgentPreferences = await window.relay.saveChatAgentPreferences({ [provider]:route }); }
-        catch (error) { chatAgentPreferencesError = error?.message || "Could not save that agent default."; }
-        renderSettings();
-      });
-    }
-
     wireSettings();
   }
-  // Connections and device execution, wherever Your AIs is drawn.
+  // A coding agent's sign-in to its plan, wherever Your AIs is drawn.
   function wireTaskRuntimeControls(scope) {
     for (const button of scope.querySelectorAll("[data-provider-connect]")) {
       button.addEventListener("click", () => connectProviderFromSettings(button.getAttribute("data-provider-connect")));
@@ -23074,39 +23046,6 @@
         renderSettings();
       });
     }
-    for (const button of scope.querySelectorAll("[data-provider-details]")) {
-      button.addEventListener("click", () => {
-        const provider = button.getAttribute("data-provider-details");
-        const willOpen = button.getAttribute("aria-expanded") !== "true";
-        providerDetailsOpen = willOpen ? provider : "";
-        for (const other of scope.querySelectorAll("[data-provider-details]")) {
-          const open = willOpen && other === button;
-          other.setAttribute("aria-expanded", open ? "true" : "false");
-          const detail = document.getElementById(other.getAttribute("aria-controls"));
-          if (detail) {
-            detail.classList.toggle("open", open);
-            detail.setAttribute("aria-hidden", open ? "false" : "true");
-            detail.toggleAttribute("inert", !open);
-          }
-        }
-      });
-    }
-    for (const button of scope.querySelectorAll("[data-provider-enable]")) {
-      button.addEventListener("click", () => setProviderEnabledFromSettings(
-        button.getAttribute("data-provider-enable"),
-        button.getAttribute("data-enabled") !== "1",
-      ));
-    }
-    scope.querySelector("#executionDisable")?.addEventListener("click", async () => {
-      await window.relay.executionDisable();
-      renderSettings();
-    });
-    scope.querySelector("#executionMode")?.addEventListener("click", async (event) => {
-      const mode = event.currentTarget.getAttribute("data-mode");
-      const result = await window.relay.executionMode(mode);
-      if (result?.ok) payload.nativeExecutionMode = mode;
-      renderSettings();
-    });
   }
   function wireSettings() {
     const upd = document.getElementById("svUpdate");
@@ -23252,24 +23191,6 @@
     if (providerAuthPollTimer) clearTimeout(providerAuthPollTimer);
     providerAuthPollTimer = null;
   }
-  async function refreshProviderInventory({ force = false, seq = settingsLoadSeq } = {}) {
-    if (!window.relay.providerInventory) return;
-    providerInventoryRefreshing = true;
-    providerInventoryError = "";
-    updateProviderInventoryState();
-    let result = null;
-    try { result = await window.relay.providerInventory({ refresh:true, force }); } catch (error) {
-      result = { ok:false, error:error?.message || "Could not refresh integrations." };
-    }
-    if (seq !== settingsLoadSeq) return;
-    providerInventoryRefreshing = false;
-    providerInventoryError = result?.error || (result?.ok === false ? "Could not refresh integrations." : "");
-    if (result?.checkedAt) providerInventoryCheckedAt = result.checkedAt;
-    if (typeof result?.stale === "boolean") providerInventoryStale = result.stale;
-    const changed = applyProviderInventoryResult(result);
-    if (activeView === "settings" && changed) renderSettings();
-    else updateProviderInventoryState();
-  }
   async function refreshProviderAuth({ poll = false } = {}) {
     let result = null;
     try { result = window.relay.providerAuthStatus ? await window.relay.providerAuthStatus() : null; } catch (error) {
@@ -23279,7 +23200,7 @@
     if (result?.ok === false) providerAuthError = result.error || "Could not check agent connections.";
     else if (result?.providers) providerAuthError = "";
     const changed = applyProviderAuthResult(result);
-    if (providerAuthInfo?.providers && Object.values(providerAuthInfo.providers).every((item) => item?.connected || !item?.enabled)) {
+    if (providerAuthInfo?.providers && Object.values(providerAuthInfo.providers).every((item) => item?.connected)) {
       providerAuthError = "";
     }
     for (const provider of ["claude", "codex"]) {
@@ -23289,13 +23210,12 @@
     if (poll && providerAuthBusy) {
       const provider = providerAuthBusy;
       const item = providerAuthInfo?.providers?.[provider];
-      if (item?.connected && item?.enabled) {
+      if (item?.connected) {
         providerAuthNote = `${item.label} connected with ${item.detail}.`;
         providerAuthBusy = "";
         stopProviderAuthPolling();
         settleWorkProviderPrompts(provider);
         if (activeView === "settings") renderSettings();
-        refreshProviderInventory({ force:true }).catch(() => {});
       } else if (!item?.busy) {
         providerAuthError = item?.detail || "Authorization did not finish.";
         providerAuthBusy = "";
@@ -23330,22 +23250,10 @@
       providerAuthNote = `${provider === "claude" ? "Claude Code" : "Codex"} is already signed in with the required subscription.`;
       await refreshProviderAuth();
       settleWorkProviderPrompts(provider);
-      refreshProviderInventory({ force:true }).catch(() => {});
       return;
     }
     stopProviderAuthPolling();
     providerAuthPollTimer = setTimeout(() => refreshProviderAuth({ poll:true }), 900);
-  }
-  async function setProviderEnabledFromSettings(provider, enabled) {
-    if (!provider || providerAuthBusy) return;
-    providerAuthError = "";
-    providerAuthNote = "";
-    let result = null;
-    try { result = await window.relay.providerAuthSetEnabled(provider, enabled); } catch (error) { result = { ok:false, error:error?.message }; }
-    if (!result?.ok) providerAuthError = result?.error || "Could not update this connection.";
-    else providerAuthNote = `${provider === "claude" ? "Claude Code" : "Codex"} ${enabled ? "enabled" : "disabled"} in Relay.`;
-    await refreshProviderAuth();
-    if (result?.ok) refreshProviderInventory({ force:true }).catch(() => {});
   }
   // Notification switches are phrased positively while storage remains the
   // original hidden/muted booleans. Optimistic: flip the visible state and the
@@ -23501,13 +23409,11 @@
       if (seq !== settingsLoadSeq) return;
       await refreshSlackConnection({ preserveWaiting:true });
     })();
-    // Provider profiles and integration health are only read when Agent
-    // connections can render; outside local builds the pill never inspects
-    // the CLIs' local state (the section is requests substrate — Sven,
-    // 2026-08-17).
-    const connectionsOn = payload.features?.agentConnections === true;
+    // Whether each coding agent's command line is signed in to its plan is
+    // read only where Relay runs agents itself (developer accounts); nowhere
+    // else does the pill inspect the CLIs' local state.
     const authTask = (async () => {
-      if (!connectionsOn) return;
+      if (!runsAgentsHere()) return;
       let result = null;
       try { result = window.relay.providerAuthStatus ? await window.relay.providerAuthStatus() : null; } catch (error) {
         result = { ok:false, error:error?.message || "Could not check agent connections." };
@@ -23518,25 +23424,8 @@
       else if (result?.providers) providerAuthError = "";
       if (applyProviderAuthResult(result) || providerAuthError !== previousError) renderSettings();
     })();
-    const inventoryTask = (async () => {
-      if (!connectionsOn || !window.relay.providerInventory) return;
-      let result = null;
-      try { result = await window.relay.providerInventory({ refresh:false }); } catch {}
-      if (seq !== settingsLoadSeq) return;
-      if (result?.checkedAt) providerInventoryCheckedAt = result.checkedAt;
-      if (typeof result?.stale === "boolean") providerInventoryStale = result.stale;
-      providerInventoryError = result?.error || "";
-      providerInventoryRefreshing = true;
-      const changed = applyProviderInventoryResult(result);
-      if (changed) renderSettings();
-      else updateProviderInventoryState();
-      // The exact CLI-backed health check is deliberately off the click path.
-      // Main-process TTL + in-flight sharing make bursts of focus/visibility
-      // events converge on one scan.
-      refreshProviderInventory({ seq }).catch(() => {});
-    })();
     const chatAgentTask = (async () => {
-      if (payload.features?.agentMentions !== true || !window.relay.chatAgentPreferences) return;
+      if (!runsAgentsHere() || !window.relay.chatAgentPreferences) return;
       try {
         const result = await window.relay.chatAgentPreferences();
         if (seq !== settingsLoadSeq) return;
@@ -23558,7 +23447,7 @@
       else inviteLinkUnavailable = !inviteLinkInfo;
       renderSettings();
     })();
-    await Promise.allSettled([accountTask, slackTask, authTask, inventoryTask, chatAgentTask, inviteLinkTask]);
+    await Promise.allSettled([accountTask, slackTask, authTask, chatAgentTask, inviteLinkTask]);
   }
   // Provider state is live product state, not something the user should have
   // to refresh manually. Re-read it whenever Settings becomes visible again
@@ -26002,7 +25891,6 @@
       features: next.features || payload.features,
       nativeExecutions: next.nativeExecutions || {},
       nativeExecutionEnabled: next.nativeExecutionEnabled === true,
-      nativeExecutionMode: next.nativeExecutionMode === "default" ? "default" : "auto",
       relays: projectedRelays,
       sent: Array.isArray(next.sent) ? next.sent : [],
       // Link-recipient chats (link-chats.js); null when the API cannot say.

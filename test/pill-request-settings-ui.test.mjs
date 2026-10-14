@@ -4,6 +4,7 @@ import test from "node:test";
 
 const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
 const main = fs.readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
+const preload = fs.readFileSync(new URL("../overlay/preload.cjs", import.meta.url), "utf8");
 
 function between(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -13,105 +14,100 @@ function between(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-// The request-permission section redesign (David, 2026-08-18): the section
-// wore the 11px caption header while every sibling wore sv-open-title, and
-// led with a four-line paragraph nobody read, above two permanently-open
-// menu trays. It is now one value row per app — the "Open Relays with"
-// species — that unfolds the standard open-actions tray inline on tap.
+// YOUR AIS, COMPACT (Shane, 2026-10-13). The page listed Claude Code and Codex
+// five times (On this computer, Open Relays in, What Tasks may do,
+// Connections, Chat agents) and the Claude connector twice. Now: two
+// sections, one row per AI, the switch only once it is connected, and on
+// developer accounts each coding agent's run settings under its own row.
+const page = () => between(html, "function setupPageHtml()", "/** The You page's door");
+const agentRow = () => between(html, "function setupAgentRowHtml(row)", "function setupAgentSettingsHtml(");
+const runSettings = () => between(html, "function setupAgentSettingsHtml(", "function setupPageHtml()");
+const webRow = () => between(html, "function setupWebRowHtml(surface)", "function setupAgentRows(");
 
-// It moved to the Your AIs page (Sven's cut, 2026-10-08), beside each app's
-// switch, so the section is its own function now.
-const permSection = () => between(html, "function permPrefsHtml()", "function setupPageHtml()");
-
-test("the section header is the shared settings species, not the caption label", () => {
-  const section = permSection();
-  assert.match(section, /<div class="sv-open-title">What Tasks may do<\/div>/);
-  // Rows name themselves: the one intro line went too, and the old
-  // sv-explain paragraph (and its style) must not come back.
-  assert.doesNotMatch(section, /sv-open-intro/);
-  assert.doesNotMatch(html, /sv-explain/);
-  assert.doesNotMatch(section, /td-label/);
-  // Same enclosure material as its siblings: the raised sv-open-list.
-  assert.match(section, /<div class="sv-open-list">/);
+test("Your AIs is two sections: chat AIs in the cloud, coding agents on this computer", () => {
+  const source = page();
+  assert.match(source, /<div class="sv-open-title">Chat AIs<\/div>\s*<div class="sv-open-intro">Connected to your account, so they reach your Relays on every device\.<\/div>/);
+  assert.match(source, /<div class="sv-open-title">Coding agents on this \$\{machine\}<\/div>\s*<div class="sv-open-intro">Work in your files\. Switch on the ones that open your Relays\.<\/div>/);
+  assert.match(source, /\$\{setupWebRowHtml\("claude"\)\}\$\{setupWebRowHtml\("chatgpt"\)\}/);
+  assert.match(source, /rows\.map\(setupAgentRowHtml\)/);
+  // The sections that repeated the same apps are gone, everywhere.
+  for (const gone of ["What Tasks may do", "Open Relays in", ">Connections<", ">Chat agents<", "Connect all", "On the web"]) {
+    assert.equal(html.includes(gone), false, gone);
+  }
+  for (const gone of ["function permPrefsHtml", "function yourAgentHtml", "function taskRuntimeHtml", "function connectionsHtml", "function chatAgentDefaultsHtml", "function setupConnectAll"]) {
+    assert.equal(html.includes(gone), false, gone);
+  }
 });
 
-test("each app is a value row: logo, name, current mode, chevron", () => {
-  const section = permSection();
-  assert.match(section, /class="sv-open-row perm-vrow" data-perm-open="\$\{esc\(v\.key\)\}" aria-expanded=/);
-  assert.match(section, /<img class="sv-open-logo" src="\$\{logo\}"/);
-  assert.match(section, /<span class="sv-open-name">\$\{esc\(v\.label\)\}<\/span>/);
-  // The collapsed row states the current mode; the open row hides the value
-  // (the tray below it is the value) and keeps only the turned chevron.
-  assert.match(section, /<span class="perm-value">\$\{open \? "" : esc\(cur\.name\)\}/);
-  assert.match(html, /\.perm-app\.open \.perm-chev \{ transform:rotate\(90deg\); \}/);
+test("a chat AI shows Connect until it is connected, then its opens-Relays switch", () => {
+  const source = webRow();
+  assert.match(source, /live\.length \? \{ dot:"ok", text:"Connected to Relay" \}\s*: \{ dot:"", text:"Not connected to Relay" \}/);
+  assert.match(source, /live\.length \? `<button class="sv-switch" type="button" role="switch" data-chat-app="\$\{meta\.name\}"/);
+  assert.match(source, /: `<button class="sv-choose" type="button" data-setup-web-connect="\$\{surface\}">Connect<\/button>`/);
+  // The name, not the whole row, unfolds what is connected (and Disconnect).
+  assert.match(source, /<button class="setup-row-open" type="button" data-setup-web="\$\{surface\}"/);
 });
 
-test("tapping a row unfolds the standard open-actions tray inline, one app at a time", () => {
-  const section = permSection();
-  assert.match(section, /\$\{open \? `<div class="open-actions perm-tray">/);
-  // permTrayOpen holds ONE vendor key: opening a row is exclusive, tapping it
-  // again folds it.
-  assert.match(html, /let permTrayOpen = null;/);
-  assert.match(html, /permTrayOpen = permTrayOpen === key \? null : key;/);
-  // The tray reuses the open-actions species wholesale — mode rows are the
-  // same ap-row buttons, in each vendor's own words, with the vendor square.
-  assert.match(section, /class="oa-item ap-row perm-row\$\{cur\.id === m\.id \? " on" : ""\}" data-perm="\$\{esc\(v\.key\)\}" data-mode="\$\{esc\(m\.id\)\}"/);
-  assert.match(section, /vendorSq\(v\.sample\)/);
+test("a coding agent is one row across its places, with the switch only once connected", () => {
+  const rows = between(html, "function setupAgentRows(hosts)", "function setupVerbHtml(");
+  assert.match(rows, /\? "Terminal" : "Desktop app"/);
+  assert.match(rows, /key:"claude-code", name:"Claude Code"[\s\S]*pick\(\["claude-code"\]\)/);
+  assert.match(rows, /key:"codex", name:"Codex"[\s\S]*pick\(\["chatgpt-app", "codex"\]\)/);
+  const source = agentRow();
+  assert.match(source, /connected\.length \? \{ dot:"ok", text:"Connected to Relay", where:/);
+  assert.match(source, /const control = busy \? "" : connected\.length \? toggle : gaps\[0\] \? setupVerbHtml\(gaps\[0\]\.status, gaps\[0\]\.host\.id\) : "";/);
+  assert.match(source, /data-agent-app="\$\{row\.app\}"/);
+  assert.match(source, /data-conductor-app="1"/);
+  // A place not connected while another is keeps its own verb.
+  assert.match(source, /`Not connected in \$\{line\.label\}`/);
 });
 
-test("choosing a mode persists it and folds the tray back to the value row", () => {
-  // The handlers live with the page that draws the rows: wireSetupPage,
-  // scoped to #setupPage.
-  const setup = between(html, "function wireSetupPage()", "if (setupFocus) {");
-  assert.match(setup, /const page = document\.getElementById\("setupPage"\);/);
-  const opener = between(setup, 'page.querySelectorAll("[data-perm-open]")', 'page.querySelectorAll("[data-perm]")');
-  assert.match(opener, /permTrayOpen = permTrayOpen === key \? null : key;\s*renderSettings\(\);/);
-  const wiring = setup.slice(setup.indexOf('page.querySelectorAll("[data-perm]")'));
-  assert.match(wiring, /savePillSetting\(\{ taskPermissions: \{ \[choice\.getAttribute\("data-perm"\)\]: choice\.getAttribute\("data-mode"\) \} \}\);/);
-  assert.match(wiring, /setProtoPref\(`proto\.perm\.\$\{choice\.getAttribute\("data-perm"\)\}`, choice\.getAttribute\("data-mode"\)\)/);
-  assert.match(wiring, /permTrayOpen = null;/);
-  assert.match(wiring, /renderSettings\(\);/);
-  // Nothing on the You page still claims these rows.
-  const settings = between(html, "function renderSettings()", "function wireSettings()");
-  assert.doesNotMatch(settings, /data-perm|permPrefs/);
+test("run settings sit under each coding agent, developer accounts only, and never name a mention", () => {
+  const source = runSettings();
+  assert.match(source, /if \(!runsAgentsHere\(\)\) return "";/);
+  assert.match(html, /function runsAgentsHere\(\) \{\s*const features = payload\.features \|\| \{\};\s*return features\.taskExecution === true \|\| features\.agentMentions === true \|\| features\.relayWork === true;/);
+  // Model, thinking and permission: three separate lines, three separate controls.
+  assert.match(source, /pick\("Model", "data-chat-agent-model"/);
+  assert.match(source, /pick\("Thinking", "data-chat-agent-effort"/);
+  assert.match(source, /pick\("Permission", "data-agent-permission"/);
+  assert.match(source, /<label class="setup-kv"><span>\$\{label\}<\/span><span class="setup-kv-pick"><select class="setup-kv-select"/);
+  // The plan sign-in Relay needs to start the agent is said first, on the row.
+  assert.match(source, /`Sign in to \$\{plan\} to run Tasks`/);
+  assert.match(source, /data-provider-connect="\$\{provider\}"/);
+  assert.doesNotMatch(between(html, "function setupAgentRows(hosts)", "/** The You page's door"), /@Claude|@Codex/);
 });
 
-test("the section still mounts only with the requests feature", () => {
-  assert.match(permSection(), /^function permPrefsHtml\(\) \{\s*if \(payload\.features\?\.requests !== true\) return "";\s*return `\s*<div class="sv-open-section" id="permPrefs" data-stop="1">/);
-  // It is drawn once, on Your AIs, after the app sections.
-  assert.equal((html.match(/\$\{permPrefsHtml\(\)\}/g) || []).length, 1);
-  assert.match(between(html, "function setupPageHtml()", "function setupAgentGap("), /\$\{otherHtml\}\s*\$\{yourAgentHtml\(\)\}\s*\$\{permPrefsHtml\(\)\}/);
+test("models say Latest, so the list never needs a version bump", () => {
+  assert.match(html, /claude: \[\["opus","Latest Opus"\],\["fable","Latest Fable"\],\["sonnet","Latest Sonnet"\],\["haiku","Latest Haiku"\]\]/);
+  assert.match(html, /codex: \[\["auto","Latest"\],/);
+  // The composer's model rail says the same, and resolves to the same aliases.
+  assert.match(html, /"Claude Code":\s*\{ models:\["Latest Opus","Latest Fable","Latest Sonnet","Latest Haiku"\]/);
+  assert.match(html, /"Latest Opus": "opus",/);
+  assert.doesNotMatch(html, /"Opus 5\.5"|"Fable 5\.1"|"Sonnet 5\.5"|"Haiku 4\.5"/);
 });
 
-test("Connections uses the shared section species and concise privacy copy", () => {
-  assert.match(html, /class="sv-provider-section" data-stop="1">\s*<div class="sv-open-title">Connections<\/div>\s*<div class="sv-provider-list sv-agent-provider-list">/);
-  assert.doesNotMatch(html, /Chat connections/);
-  assert.equal((html.match(/<div class="sv-open-title">Connections<\/div>/g) || []).length, 1);
-  assert.match(html, /const rows = includeAgentProviders \? providerConnectionRowsHtml\(\) : "";/);
-  assert.doesNotMatch(html, /sv-provider-intro/);
-  assert.doesNotMatch(html, /Relay uses each app's local profile/);
+test("one permission per agent: Claude Code can ask before each step", () => {
+  const vendors = between(html, "const PERM_VENDORS = [", "const PERM_DEFAULTS");
+  assert.match(vendors, /\{ id: "default", name: "Ask before each step" \}/);
+  assert.match(vendors, /\{ id: "full", name: "Full access" \}/);
+  const wiring = between(html, "function wireSetupPage()", "if (setupFocus) {");
+  const permission = between(wiring, 'page.querySelectorAll("[data-agent-permission]")', 'page.querySelectorAll("[data-chat-agent-model],[data-chat-agent-effort]")');
+  assert.match(permission, /savePillSetting\(\{ taskPermissions: \{ \[vendor\]: select\.value \} \}\);/);
+  assert.match(permission, /setProtoPref\(`proto\.perm\.\$\{vendor\}`, select\.value\);/);
+  const route = wiring.slice(wiring.indexOf('page.querySelectorAll("[data-chat-agent-model],[data-chat-agent-effort]")'));
+  assert.match(route, /window\.relay\.saveChatAgentPreferences\(\{ \[provider\]:route \}\)/);
 });
 
-test("Agent connections says subscription sign-in, never implementation jargon or fake reconnect", () => {
-  assert.match(html, /"Sign in to Claude Code" : "Sign in to Codex"/);
-  assert.match(html, /"Use Claude subscription" : "Use ChatGPT subscription"/);
-  assert.match(html, /item\.connected\s*\? "Connected"/);
-  assert.match(html, /item\.connected[\s\S]*connectDisabled/);
-  assert.doesNotMatch(html, /Connect local profile|This Mac's existing local profile/);
-  assert.doesNotMatch(html, /item\.connected \? "Reconnect"/);
-});
-
-test("healthy providers collapse to the real app mark, connection count, and Ready", () => {
-  assert.match(html, /const logo = id === "claude" \? "claudeCodeMark\.svg" : "codexMark\.svg"/);
-  assert.match(html, /const headerMeta = healthy \? countLabel : status/);
-  assert.match(html, /class="sv-agent-provider-ready">Ready<\/span>/);
-  assert.match(html, /data-provider-details="\$\{esc\(id\)\}"/);
-  assert.match(html, /sv-agent-provider-detail\$\{open \? " open" : ""\}/);
-  assert.match(html, /aria-hidden="\$\{open \? "false" : "true"\}"\$\{open \? "" : " inert"\}/);
-  assert.match(html, /providerDetailsOpen = willOpen \? provider : ""/);
-  assert.match(html, /detail\.setAttribute\("aria-hidden", open \? "false" : "true"\)/);
-  assert.match(html, /detail\.toggleAttribute\("inert", !open\)/);
-  assert.doesNotMatch(html, /<span class="sv-provider-status">\$\{esc\(requirement\)\}<\/span>/);
+test("the MCP inventory, the provider on/off switch and the device-execution controls are gone", () => {
+  for (const gone of ["providerInventory", "setProviderEnabled", "data-provider-enable", "data-provider-details", "executionDisable", "nativeExecutionMode", "id=\"executionMode\"", "sv-agent-provider"]) {
+    assert.equal(html.includes(gone), false, `inbox: ${gone}`);
+  }
+  for (const gone of ["relay:providerInventory", "relay:providerAuthSetEnabled", "relay:executionDisable", "relay:executionMode", "provider-inventory-cache"]) {
+    assert.equal(main.includes(gone), false, `main: ${gone}`);
+    assert.equal(preload.includes(gone), false, `preload: ${gone}`);
+  }
+  // A Task's readiness is the CLI installed and signed in, nothing else.
+  assert.match(html, /return Boolean\(item\?\.authLoaded && item\?\.connected\);/);
 });
 
 test("provider routes never inherit another provider's model or historical transcript", () => {
@@ -125,16 +121,4 @@ test("provider routes never inherit another provider's model or historical trans
   const preview = between(main, "async function previewTaskSession", "const providerCompletionInflight");
   assert.match(preview, /requestedProvider === "codex" && codexPath \? "codex"/);
   assert.match(preview, /requestedProvider === "claude" && claudePath \? "claude"/);
-});
-
-test("Chat agents uses labelled compact controls below each agent identity", () => {
-  const section = between(html, 'function chatAgentDefaultsHtml()', "function slackSettingsHtml");
-  assert.match(section, /class="sv-agent-identity"/);
-  assert.match(section, /class="sv-agent-fields"/);
-  assert.match(section, /class="sv-agent-field-label">Model<\/span><select class="sv-agent-select" data-chat-agent-model=/);
-  assert.match(section, /class="sv-agent-field-label">Thinking<\/span><select class="sv-agent-select" data-chat-agent-effort=/);
-  assert.match(html, /\.sv-agent-defaults \.sv-open-row \{ display:block;/);
-  assert.match(html, /\.sv-agent-fields \{ display:grid; grid-template-columns:minmax\(0,1\.35fr\) minmax\(0,1fr\);/);
-  assert.match(html, /\.sv-agent-select \{ width:100%; min-width:0;/);
-  assert.doesNotMatch(html, /\.sv-agent-defaults select \{ min-width:122px; max-width:44%;/);
 });

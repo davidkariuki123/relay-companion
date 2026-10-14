@@ -254,26 +254,12 @@ let pillOwner = null;
 const previews = new Map();
 let canonicalWorkBridgePromise = null;
 let providerAuthModulePromise = null;
-let providerInventoryServicePromise = null;
 let providerAuthStatusInFlight = null;
 function providerAuthModule() {
   if (!providerAuthModulePromise) {
     providerAuthModulePromise = import(pathToFileURL(path.join(__dirname, "..", "src", "provider-auth.js")).href);
   }
   return providerAuthModulePromise;
-}
-function providerInventoryService() {
-  if (!providerInventoryServicePromise) {
-    providerInventoryServicePromise = Promise.all([
-      providerAuthModule(),
-      import(pathToFileURL(path.join(__dirname, "..", "src", "provider-inventory-cache.js")).href),
-    ]).then(([providerAuth, inventoryCache]) => inventoryCache.createProviderInventoryCache({
-      cacheFile: path.join(RELAY_HOME, "provider-inventory.json"),
-      fallbackProviders: providerAuth.configuredProviderInventory().providers,
-      loadFresh: () => providerAuth.providerInventoryStatuses(),
-    }));
-  }
-  return providerInventoryServicePromise;
 }
 function providerAuthStatuses() {
   if (!providerAuthStatusInFlight) {
@@ -1201,8 +1187,8 @@ async function executeTaskInNativeApp(event, id, choice) {
         return answer.response === 1;
       },
       consent: () => askDeviceExecutionConsent(conductorOffered),
-      // One question, asked in the page: "Where should the agent work?" with
-      // a short list of app-and-workspace pairs, best first (the Task's own
+      // One question, asked in the page (which app, then which of its
+      // folders) from a short list of app-and-workspace pairs, best first (the Task's own
       // repo, this Topic's and this sender's earlier choices, last time, the
       // checkouts this person works in), then "another folder…" per app,
       // which is the OS dialog. The first call offers; the pick comes back
@@ -1244,9 +1230,21 @@ async function executeTaskInNativeApp(event, id, choice) {
         void pushInbox(true).catch(() => {});
       },
     });
-    if (result?.cancelled && offered) return { ok: false, cancelled: true, choose: { question: offered.question, caption: offered.caption, options: offered.options, browse: offered.browse } };
+    if (result?.cancelled && offered) return { ok: false, cancelled: true, choose: { question: offered.question, caption: offered.caption, options: offered.options, browse: offered.browse, remembered: offered.remembered } };
     return result;
   } catch (error) { return { ok: false, error: error.message || "Execute could not launch the native app." }; }
+}
+
+// Stop waiting for Codex to finish opening a Task's conversation. The Task
+// stays unsent; Execute later sends it to the same conversation.
+async function stopWaitingForNativeApp(event, id) {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false, error: "Not the Relay window." };
+  try {
+    const modules = await nativeTaskModulesPromise;
+    const result = modules.execute.stopWaitingForNativeApp(featureAccountSnapshot().config, String(id || ""));
+    void pushInbox(true).catch(() => {});
+    return result;
+  } catch (error) { return { ok: false, error: error.message || "Could not stop waiting." }; }
 }
 
 // The Task card's Run row, worked out before anyone taps (Shane, 2026-10-08):
@@ -3011,7 +3009,6 @@ function buildPayload() {
     // any agent request waiting for the person's answer.
     settings: relaySettings.pillSnapshot(relaySettings.accountKeyFor(currentAccount), {}, settingsStoreCache),
     nativeExecutionEnabled: nativeTaskModules?.launch.executionEnabled(readConfigFile()) === true,
-    nativeExecutionMode: nativeTaskModules?.launch.executionMode?.(readConfigFile()) || "auto",
     nativeExecutions: nativeExecutionSummary(relaysNow),
     // The background service the transcript depends on: "ok", "repairing"
     // while this pill puts it back, or "stopped" once that repair failed.
@@ -9799,13 +9796,7 @@ ipcMain.handle("relay:taskUnclaim", (_e, id, expectedVersion) =>
 ipcMain.handle("relay:taskStop", (_e, id) => stopTaskWork(id));
 ipcMain.handle("relay:taskExecute", executeTaskInNativeApp);
 ipcMain.handle("relay:taskRunPlan", taskRunPlan);
-ipcMain.handle("relay:executionDisable", async (event) => {
-  if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
-  const { launch } = await nativeTaskModulesPromise;
-  launch.setExecutionPreferences(readConfigFile(), { enabled: false });
-  await pushInbox(true);
-  return { ok: true };
-});
+ipcMain.handle("relay:taskExecuteStopWaiting", stopWaitingForNativeApp);
 // Allow on an @agent reply that is waiting for this computer: the same
 // question as the first Execute. The daemon starts the waiting run on its
 // next tick.
@@ -9820,16 +9811,6 @@ ipcMain.handle("relay:executionEnable", async (event) => {
     if (accountFeatureKey(snapshot) !== accountFeatureKey(featureAccountSnapshot())) return { ok: false, error: "The Relay account changed. Nothing was enabled." };
     launch.setExecutionPreferences(snapshot.config, { enabled: true, acceptedAt: new Date().toISOString(), version: 1 });
   }
-  await pushInbox(true);
-  return { ok: true };
-});
-// How Execute's Claude conversations start: Auto (the default) or asking
-// before each action. Applies to the next Task launched, not running ones.
-ipcMain.handle("relay:executionMode", async (event, mode) => {
-  if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
-  const { launch } = await nativeTaskModulesPromise;
-  if (!launch.EXECUTION_MODES.includes(mode)) return { ok: false };
-  launch.setExecutionPreferences(readConfigFile(), { permissionMode: mode });
   await pushInbox(true);
   return { ok: true };
 });
@@ -10921,32 +10902,10 @@ ipcMain.handle("relay:providerAuthStatus", async () => {
     return { ok: false, error: (error && error.message) || String(error), providers: {} };
   }
 });
-ipcMain.handle("relay:providerInventory", async (_event, input) => {
-  try {
-    const inventory = await providerInventoryService();
-    return input?.refresh === true
-      ? await inventory.refresh({ force: input?.force === true })
-      : inventory.current();
-  } catch (error) {
-    return { ok: false, error: (error && error.message) || String(error), providers: {} };
-  }
-});
 ipcMain.handle("relay:providerAuthConnect", async (_event, provider) => {
   try {
     const providerAuth = await providerAuthModule();
-    const result = await providerAuth.connectProvider(String(provider || ""));
-    if (result?.ok) (await providerInventoryService()).invalidate();
-    return result;
-  } catch (error) {
-    return { ok: false, error: (error && error.message) || String(error) };
-  }
-});
-ipcMain.handle("relay:providerAuthSetEnabled", async (_event, input) => {
-  try {
-    const providerAuth = await providerAuthModule();
-    const result = await providerAuth.setProviderEnabled(String(input?.provider || ""), input?.enabled === true);
-    if (result?.ok) (await providerInventoryService()).invalidate();
-    return result;
+    return await providerAuth.connectProvider(String(provider || ""));
   } catch (error) {
     return { ok: false, error: (error && error.message) || String(error) };
   }
@@ -11065,7 +11024,6 @@ function settingsContext() {
     config: readConfigFile(),
     trayAvailable,
     client: null,
-    executionModule: async () => (await nativeTaskModulesPromise).launch,
   };
 }
 function milestoneRelaysEnabled() {

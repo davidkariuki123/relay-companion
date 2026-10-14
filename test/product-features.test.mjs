@@ -13,18 +13,16 @@ const ORDINARY_USER = { id: "usr_test", accountKind: "human", isDeveloper: false
 const DEVELOPER_SURFACES = {
   developerAccount: true, taskExecution: true,
   topics: true, slack: true, peopleMentions: true, agentMentions: true,
-  relayWork: true, agentConnections: true, aiSessions: true, connectors: true, messageMutations: true,
+  relayWork: true, aiSessions: true, connectors: true, messageMutations: true,
 };
 // Editing and deleting one's own sent messages ship to every account on every
 // channel (David, 2026-09-17), so the flag reads true on both rows.
-// Tasks are on for every account on every deployment (David, 2026-09-17), and
-// Settings → Agent connections rides the Tasks switch (David, 2026-08-18), so
-// both read true on the ordinary row; only the legacy task protocol stays with
-// the developers.
+// Tasks are on for every account on every deployment (David, 2026-09-17); only
+// the legacy task protocol stays with the developers.
 const ORDINARY_SURFACES = {
   developerAccount: false, taskExecution: false,
   topics: false, slack: false, peopleMentions: true, agentMentions: false,
-  relayWork: false, agentConnections: true, aiSessions: false, connectors: false, messageMutations: true,
+  relayWork: false, aiSessions: false, connectors: false, messageMutations: true,
 };
 // The developer-account tier (Shane and David, 2026-09-21): on staging and
 // production a developer keeps the ordinary product surface except for the
@@ -122,7 +120,7 @@ test("developer status brings the complete Task substrate on dev but never Cowor
     {
       topics: features.topics, slack: features.slack, peopleMentions: features.peopleMentions, agentMentions: features.agentMentions,
       developerAccount: features.developerAccount, taskExecution: features.taskExecution,
-      relayWork: features.relayWork, agentConnections: features.agentConnections,
+      relayWork: features.relayWork,
       aiSessions: features.aiSessions, connectors: features.connectors, messageMutations: features.messageMutations,
     },
     DEVELOPER_SURFACES,
@@ -139,7 +137,7 @@ test("an explicit production environment wins over a local API URL, so the clone
     {
       topics: clone.topics, slack: clone.slack, peopleMentions: clone.peopleMentions, agentMentions: clone.agentMentions,
       developerAccount: clone.developerAccount, taskExecution: clone.taskExecution,
-      relayWork: clone.relayWork, agentConnections: clone.agentConnections,
+      relayWork: clone.relayWork,
       aiSessions: clone.aiSessions, connectors: clone.connectors, messageMutations: clone.messageMutations,
     },
     ORDINARY_SURFACES,
@@ -293,11 +291,12 @@ test("customer builds keep person mentions while hiding Slack and agent mentions
 
 test("disabled Tasks and Cowork do not remain in Settings", () => {
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
-  // What Tasks may do lives on Your AIs now, and still only with Tasks on.
-  assert.match(source, /function permPrefsHtml\(\) \{\s*if \(payload\.features\?\.requests !== true\) return "";\s*return `\s*<div class="sv-open-section" id="permPrefs"/);
+  // A coding agent's run settings are drawn only where Relay runs agents
+  // itself (developer accounts), on its Your AIs row, never on You.
+  assert.match(source, /function setupAgentSettingsHtml\(provider, name\) \{\s*if \(!runsAgentsHere\(\)\) return "";/);
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
-  assert.doesNotMatch(settings, /Claude Cowork|permPrefs/);
-  const setupPage = source.slice(source.indexOf("function setupPageHtml()"), source.indexOf("function setupAgentGap("));
+  assert.doesNotMatch(settings, /Claude Cowork|setupAgentSettingsHtml/);
+  const setupPage = source.slice(source.indexOf("function setupPageHtml()"), source.indexOf("/** The You page's door"));
   assert.doesNotMatch(setupPage, /Claude Cowork/);
   assert.doesNotMatch(source, /\bproductFeatures\b/, "renderer must use feature flags from its payload");
 });
@@ -318,9 +317,10 @@ test("the You page always offers which app opens relays, and the fresh open goes
   // from the first row of You, and render there unconditionally.
   assert.match(settings, /if \(info\.paired\) \{\s*const connections = `\$\{window\.relay\.setupSnapshot \? setupEntryHtml\(\) : ""\}\$\{slackSettingsHtml\(info\)\}`;/);
   assert.match(settings, /document\.getElementById\("setupEntry"\)\?\.addEventListener\("click", \(event\) => \{ event\.stopPropagation\(\); openSetupPage\(\); \}\);/);
-  const setupPage = source.slice(source.indexOf("function setupPageHtml()"), source.indexOf("function setupAgentGap("));
-  assert.match(setupPage, /\n\s*\$\{yourAgentHtml\(\)\}\n/, "the switches are not behind any condition on the page");
-  assert.match(source, /<div class="sv-open-section" id="yourAgent" data-stop="1">\s*<div class="sv-open-title">Open Relays in<\/div>/);
+  // Each AI's switch is on its own row there, shown once that AI is connected.
+  const setupPage = source.slice(source.indexOf("function setupPageHtml()"), source.indexOf("/** The You page's door"));
+  assert.match(setupPage, /\$\{setupWebRowHtml\("claude"\)\}\$\{setupWebRowHtml\("chatgpt"\)\}/);
+  assert.match(setupPage, /rows\.map\(setupAgentRowHtml\)/);
   const open = source.slice(source.indexOf("function openRelayFromUI("), source.indexOf("let unreadCount = 0;"));
   assert.match(open, /mode === "fresh" && window\.relay\.openFresh\) window\.relay\.openFresh\(id, host \|\| hostKeyFor\(agentAppName\(\)\), note\)/);
   // The same default on every un-hosted open: plain, current, and the sent copy.
@@ -330,26 +330,19 @@ test("the You page always offers which app opens relays, and the fresh open goes
   assert.match(open, /window\.relay\.openSent\(id, host \|\| hostKeyFor\(agentAppName\(\)\)\)/);
 });
 
-test("Agent connection rows stay gated, and the chat-connector rows are gone", () => {
+test("the subscription sign-in is read only where Relay runs agents, and the chat-connector rows are gone", () => {
   // The You page says what is connected; setup installs the skill for
   // everyone (Shane, 2026-09-07). "ChatGPT coming soon" and "Claude · Set up"
   // were a second place to configure an agent, and Sven's Settings has none.
   const source = fs.readFileSync(path.join(here, "../overlay/inbox.html"), "utf8");
   const settings = source.slice(source.indexOf("function renderSettings()"), source.indexOf("function wireSettings()"));
-  // The subscription rows are about the same apps as Your AIs, so they sit
-  // there (expanded-mode review, 2026-10-08), never on You.
-  assert.doesNotMatch(settings, /connectionsHtml\(/);
-  const runtime = source.slice(source.indexOf("function taskRuntimeHtml()"), source.indexOf("function setupPageHtml()"));
-  assert.match(runtime, /let html = settingsInfo \? connectionsHtml\(settingsInfo, payload\.features\?\.agentConnections === true\) : "";/);
-  const setupPage = source.slice(source.indexOf("function setupPageHtml()"), source.indexOf("function setupAgentGap("));
-  assert.match(setupPage, /\$\{permPrefsHtml\(\)\}\s*\$\{taskRuntimeHtml\(\)\}/);
-  assert.match(source, /const rows = includeAgentProviders \? providerConnectionRowsHtml\(\) : "";/);
-  assert.doesNotMatch(source, /chatConnectionRowsHtml|connectClaudeFromSettings|Relay in ChatGPT is coming soon/);
+  assert.doesNotMatch(source, /chatConnectionRowsHtml|connectClaudeFromSettings|Relay in ChatGPT is coming soon|providerConnectionRowsHtml/);
   assert.doesNotMatch(settings, /providerConnectionHtml|chatConnectionsHtml/);
+  // The Connections section and its MCP inventory are gone (Shane,
+  // 2026-10-13): nothing in Relay used the list.
   const load = source.slice(source.indexOf("async function loadSettings()"), source.indexOf("// Provider state is live product state"));
-  assert.match(load, /const connectionsOn = payload\.features\?\.agentConnections === true;/);
-  assert.match(load, /const authTask = \(async \(\) => \{\s*if \(!connectionsOn\) return;/, "the subscription-profile probe never runs off the row");
-  assert.match(load, /const inventoryTask = \(async \(\) => \{\s*if \(!connectionsOn \|\| !window\.relay\.providerInventory\) return;/, "the CLI-backed inventory scan never runs off the row");
+  assert.match(load, /const authTask = \(async \(\) => \{\s*if \(!runsAgentsHere\(\)\) return;/, "the subscription probe never runs where Relay does not run agents");
+  assert.doesNotMatch(load, /inventoryTask|providerInventory/);
 });
 
 test("People is a top-level screen without a redundant back header", () => {
@@ -460,11 +453,11 @@ test("detection feeds independent app switches with strict availability checks",
   assert.match(pick, /try \{ next = await window\.relay\.capabilities\(\); \}/, "the renderer asks main, never probes the disk itself");
   // The switches are drawn and wired on the Your AIs page.
   const setupWire = source.slice(source.indexOf("function wireSetupPage()"), source.indexOf("if (setupFocus) {", source.indexOf("function wireSetupPage()")));
-  const agent = source.slice(source.indexOf("function yourAgentHtml()"), source.indexOf("// YOUR AIS (Setup"));
-  assert.match(agent, /\$\{AGENT_APP_OPTIONS\.map\(\(app\) => \{/);
-  assert.match(agent, /const logo = app === "Codex" \? "codexMark\.svg" : "claudeCodeMark\.svg";/, "the page uses Relay's shipped app marks");
-  assert.match(agent, /role="switch" data-agent-app="\$\{app\}"/);
-  assert.doesNotMatch(agent, /<select|svOpeningSurface/, "no competing surface selector");
+  const agent = source.slice(source.indexOf("function setupAgentRows(hosts)"), source.indexOf("function setupAgentSettingsHtml("));
+  assert.match(agent, /mark:SETUP_LOCAL\["claude-code"\]\.mark/, "the page uses Relay's shipped app marks");
+  assert.match(agent, /mark:SETUP_LOCAL\.codex\.mark/);
+  assert.match(agent, /role="switch" \$\{rider \? 'data-conductor-app="1"' : `data-agent-app="\$\{row\.app\}"`\}/);
+  assert.doesNotMatch(agent, /svOpeningSurface/, "no competing surface selector");
   // Each switch really reaches its setter, scoped to the page, then repaints.
   assert.match(setupWire, /for \(const button of page\.querySelectorAll\("\[data-agent-app\]"\)\) \{[\s\S]*?setAgentAppEnabled\(button\.getAttribute\("data-agent-app"\), button\.getAttribute\("aria-checked"\) !== "true"\);\s*renderSettings\(\);/);
   assert.match(setupWire, /for \(const button of page\.querySelectorAll\("\[data-chat-app\]"\)\) \{[\s\S]*?setChatAppEnabled\(button\.getAttribute\("data-chat-app"\), button\.getAttribute\("aria-checked"\) !== "true"\);\s*renderSettings\(\);/);

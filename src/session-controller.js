@@ -24,6 +24,7 @@ import {
   RELAY_AI_SESSION_MCP_CATALOG_VERSION,
 } from "./claude-session-runtime.js";
 import { setClaudeDesktopSessionPermissionMode } from "./claude-session-writer.js";
+import relaySettings from "./relay-settings.cjs";
 import {
   cachePublishedSessions,
   discoverSessions,
@@ -701,6 +702,25 @@ function acpOperationLog(operationId) {
   return path.join(configDir(), "acp-operations", createHash("sha256").update(operationId).digest("hex") + ".jsonl");
 }
 
+// A mention run (@Claude, @Codex) starts like every other run Relay starts on
+// this computer: in the permission the person chose for that agent in Your
+// AIs (Shane, 2026-10-13). An explicit environment override, or an isolated
+// cloud cell, still decides Claude's mode; other sessions keep their own.
+const CODEX_ACP_PERMISSION = {
+  full: { fullAccess: true },
+  guardian: {},
+  ask: { approvalPolicy: "on-request", approvalsReviewer: "user" },
+};
+function claudeRunPermission(input) {
+  const overridden = process.env.RELAY_CLAUDE_PERMISSION_MODE || process.env.RELAY_SESSION_PLACEMENT === "cloud" || process.env.RELAY_SESSION_FULL_ACCESS === "1";
+  return input?.agentRunRelayId && !overridden ? relaySettings.taskPermission("claude") : relayClaudePermissionMode();
+}
+function acpRunPermission(provider, input) {
+  if (provider === "claude") return { permissionMode: claudeRunPermission(input) };
+  if (!input?.agentRunRelayId) return input;
+  return { ...input, ...(CODEX_ACP_PERMISSION[relaySettings.taskPermission("codex")] || {}) };
+}
+
 async function executeAcp({ client, claim, target, operation, input, prompt, provider }) {
   const reporter = agentRunReporter(client, input.agentRunRelayId);
   const cwd = target?.cwd || input.cwd || process.cwd();
@@ -737,7 +757,7 @@ async function executeAcp({ client, claim, target, operation, input, prompt, pro
   }
   const worker = await startAcpRun({ provider, sessionId: target?.nativeId, cwd, title: input.oneShot ? "" : title, prompt, logPath: acpOperationLog(operation.id),
     model: input.model, effort: input.effort,
-    mode: acpPermissionMode(provider, provider === "claude" ? { permissionMode: relayClaudePermissionMode() } : input),
+    mode: acpPermissionMode(provider, acpRunPermission(provider, input)),
     mcpServers: acpMcpServers({ relay: relayMcpLaunchSpec() }),
     onUpdate: update => {
       if (update.sessionUpdate === "tool_call" && update.title) reporter.progress(String(update.title).slice(0, 280));
@@ -745,7 +765,7 @@ async function executeAcp({ client, claim, target, operation, input, prompt, pro
     onSession: async nativeId => {
       const transcriptPath = provider === "claude" ? path.join(claudeHome(), "projects", String(cwd).replace(/[^a-zA-Z0-9]/g, "-"), nativeId + ".jsonl") : "";
       if (input.oneShot) recordAnonymousSession(provider, nativeId);
-      else recordControlledSession({ provider, nativeId, title, cwd, transcriptPath, permissionMode: relayClaudePermissionMode(), relayMcpCatalogVersion: RELAY_AI_SESSION_MCP_CATALOG_VERSION });
+      else recordControlledSession({ provider, nativeId, title, cwd, transcriptPath, permissionMode: claudeRunPermission(input), relayMcpCatalogVersion: RELAY_AI_SESSION_MCP_CATALOG_VERSION });
       // Persist identity before the prompt can have side effects. Recovery must
       // observe this exact session; it must never replay an uncertain prompt.
       await evidence(client, operation.id, claim.claimToken, "handed_off", { adapter: "acp", nativeSessionId: nativeId });

@@ -19,9 +19,10 @@
 // path, between a click and a window appearing.
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { codexStateDbPath, storeDir } from "./host-paths.js";
+import { claudeProjectsDir, codexStateDbPath, storeDir } from "./host-paths.js";
 import { normalizeOriginKey } from "./repo-identity.js";
 
 const CACHE_TTL_MS = Number(process.env.RELAY_REPO_INDEX_TTL_MS || 10 * 60 * 1000);
@@ -70,8 +71,36 @@ function isDir(p) {
   }
 }
 
+// Windows hands some folders over in their long-path form (\\?\C:\work);
+// everything else here, and the person, knows them as C:\work.
+function localDir(dir) {
+  return String(dir || "").replace(/^\\\\\?\\UNC\\/i, "\\\\").replace(/^\\\\\?\\/, "");
+}
+
+// The rows of a read-only query on Codex's thread DB: the sqlite3 program
+// where there is one, else Node's own SQLite (Windows has no sqlite3, and
+// Electron's Node carries node:sqlite). Either way the file is opened
+// read-only, so a concurrent Codex write is never disturbed.
+function codexRows(dbPath, sql) {
+  const uri = `file:${dbPath}?mode=ro&immutable=1`;
+  const result = spawnSync("sqlite3", ["-json", uri, sql], { encoding: "utf8", timeout: 5000, windowsHide: true });
+  if (result.status === 0 && String(result.stdout || "").trim()) {
+    try { return JSON.parse(result.stdout); } catch { return []; }
+  }
+  if (result.status === 0) return [];
+  let db;
+  try {
+    const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite");
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    return db.prepare(sql).all();
+  } catch {
+    return [];
+  } finally {
+    try { db?.close(); } catch { /* already closed */ }
+  }
+}
+
 // Codex threads: cwd + git_origin_url + recency, already joined for us.
-// Read-only and immutable so a concurrent Codex write can never be disturbed.
 function fromCodexThreads() {
   const dbPath = codexStateDbPath();
   if (!fs.existsSync(dbPath)) return [];
@@ -79,14 +108,11 @@ function fromCodexThreads() {
     "SELECT cwd, COALESCE(git_origin_url,'') AS origin, COUNT(*) AS uses, " +
     "MAX(COALESCE(recency_at_ms,0)) AS last FROM threads " +
     "WHERE cwd IS NOT NULL AND cwd <> '' GROUP BY cwd, git_origin_url;";
-  const uri = `file:${dbPath}?mode=ro&immutable=1`;
-  const result = spawnSync("sqlite3", ["-json", uri, sql], { encoding: "utf8", timeout: 5000 });
-  if (result.status !== 0 || !String(result.stdout || "").trim()) return [];
   try {
-    return JSON.parse(result.stdout)
+    return codexRows(dbPath, sql)
       .filter((r) => r && r.cwd)
       .map((r) => ({
-        dir: String(r.cwd),
+        dir: localDir(r.cwd),
         originKey: normalizeOriginKey(r.origin),
         uses: Number(r.uses) || 0,
         lastUsedAt: Number(r.last) || 0,
@@ -94,6 +120,22 @@ function fromCodexThreads() {
       }));
   } catch {
     return [];
+  }
+}
+
+// When Claude Code last started a conversation in a folder, and how many it
+// has had there: its transcripts live in ~/.claude/projects/<folder>, the
+// folder's path with every character but a letter or digit turned into "-".
+// That name cannot be turned back into a path, but a known path can be turned
+// into it, which is all this needs.
+function claudeActivity(dir) {
+  const folder = path.join(claudeProjectsDir(), dir.replace(/[^a-zA-Z0-9]/g, "-"));
+  try {
+    const lastUsedAt = fs.statSync(folder).mtimeMs || 0;
+    const uses = fs.readdirSync(folder).filter((name) => name.endsWith(".jsonl")).length;
+    return { lastUsedAt, uses: Math.max(uses, 1) };
+  } catch {
+    return { lastUsedAt: 0, uses: 1 };
   }
 }
 
@@ -105,9 +147,12 @@ function fromClaudeRegistry() {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
     const projects = parsed && typeof parsed.projects === "object" ? parsed.projects : {};
     return Object.keys(projects)
-      // Windows/WSL keys from another machine cannot resolve locally.
-      .filter((dir) => dir.startsWith("/"))
-      .map((dir) => ({ dir, originKey: "", uses: 1, lastUsedAt: 0, source: "claude" }));
+      // A key from another kind of machine (a Windows key on a Mac, say)
+      // cannot resolve here. On Windows the keys are C:\ paths, written with
+      // either slash, so they are normalised before two spellings are merged.
+      .filter((dir) => (process.platform === "win32" ? /^([a-z]:[\\/]|\\\\)/i.test(dir) : dir.startsWith("/")))
+      .map((dir) => path.resolve(dir))
+      .map((dir) => ({ dir, originKey: "", ...claudeActivity(dir), source: "claude" }));
   } catch {
     return [];
   }
@@ -174,23 +219,28 @@ function enrich(candidates) {
   const byDir = new Map();
   for (const candidate of candidates) {
     if (!candidate.dir || !isDir(candidate.dir)) continue;
-    const existing = byDir.get(candidate.dir);
+    // Windows folder names ignore case, and two sources may spell the drive differently.
+    const key = process.platform === "win32" ? candidate.dir.toLowerCase() : candidate.dir;
+    const existing = byDir.get(key);
     if (existing) {
       existing.uses += candidate.uses;
       existing.lastUsedAt = Math.max(existing.lastUsedAt, candidate.lastUsedAt);
       existing.originKey ||= candidate.originKey;
       continue;
     }
-    byDir.set(candidate.dir, { ...candidate });
+    byDir.set(key, { ...candidate });
   }
 
   const out = [];
   for (const entry of byDir.values()) {
+    // One git call first, which settles most folders that are not checkouts
+    // (temp and scratch folders are common in the agents' histories) before
+    // paying for the rest. Each call costs tens of milliseconds on Windows.
+    const [commonDir, branch = ""] = git(["rev-parse", "--path-format=absolute", "--git-common-dir", "--abbrev-ref", "HEAD"], entry.dir).split("\n");
+    if (!commonDir) continue; // not a git checkout (or one with no commit yet) — cannot be matched by repo identity
     if (!entry.originKey) entry.originKey = normalizeOriginKey(git(["remote", "get-url", "origin"], entry.dir));
-    const commonDir = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], entry.dir);
-    if (!commonDir) continue; // not a git checkout — cannot be matched by repo identity
     entry.commonDir = commonDir;
-    entry.branch = git(["rev-parse", "--abbrev-ref", "HEAD"], entry.dir);
+    entry.branch = branch;
     entry.rootCommit = git(["rev-list", "--max-parents=0", "HEAD"], entry.dir).split("\n").pop() || "";
     entry.isPrimary = path.resolve(commonDir) === path.resolve(entry.dir, ".git");
     out.push(entry);

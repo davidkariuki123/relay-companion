@@ -6,8 +6,8 @@ const { chromium } = require(process.env.RELAY_PLAYWRIGHT_MODULE || "playwright"
 const browser = await chromium.launch({ headless: true, ...(process.env.RELAY_CHROMIUM_EXECUTABLE ? { executablePath: process.env.RELAY_CHROMIUM_EXECUTABLE } : {}) });
 const errors = [];
 
-async function openPill(features) {
-  const page = await browser.newPage({ viewport: { width: 380, height: 760 } });
+async function openPill(features, viewport = { width: 380, height: 760 }) {
+  const page = await browser.newPage({ viewport });
   page.setDefaultTimeout(10000);
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript((features) => {
@@ -67,14 +67,16 @@ try {
   page = await openPill({ inboxPages: true });
   assert.equal(await page.locator("#relaysLayout").isVisible(), false, "the rows step aside");
   await page.locator(".ip-pager").waitFor();
-  assert.equal(await page.locator('.ip-dots [data-ip-to="chats"]').getAttribute("aria-selected"), "true");
+  assert.equal(await page.locator('.ip-dots [data-ip-to="chats"].on').count(), 1);
+  assert.match(await page.locator(".ip-dots").getAttribute("aria-label"), /^Show Relays and Tasks, 2 waiting on you$/, "the one button names where it goes");
   assert.equal(await page.locator(".ip-due.on").count(), 1, "the list's dot says something waits");
 
   // A swipe with vertical noise: every event is ours, and we land on the list.
   const blocked = await page.evaluate((seq) => window.pad(seq), swipe(1));
   assert.ok(blocked.every(Boolean), `no event leaked to scrolling (${blocked.filter((b) => !b).length} did)`);
   await page.waitForFunction(() => !document.querySelector(".ip-list").hidden && !document.querySelector(".card").classList.contains("ip-moving"));
-  assert.equal(await page.locator('.ip-dots [data-ip-to="list"]').getAttribute("aria-selected"), "true");
+  assert.equal(await page.locator('.ip-dots [data-ip-to="list"].on').count(), 1);
+  assert.equal(await page.locator(".ip-dots").getAttribute("aria-label"), "Show Chats");
   const forYou = await page.locator(".ip-list .row.waits").evaluateAll((els) => els.map((el) => el.dataset.ip));
   assert.deepEqual(forYou.sort(), ["relay1", "task2"], "For you holds the waiting Relay and Task, not texts or old history");
   assert.match(await page.locator(".ip-list").innerText(), /With others/);
@@ -124,6 +126,25 @@ try {
   const diag = await page.evaluate(() => window.pad(Array.from({ length: 12 }, () => [4, 11])));
   assert.equal(diag.filter(Boolean).length, 0, "a scroll is never held");
   assert.equal(await page.locator(".card").evaluate((el) => el.classList.contains("ip-moving")), false);
+  await page.close();
+
+  // The expanded app (Shane, 2026-10-12): the dots sit centred under the
+  // sidebar, inside the window, and are one button that flips the page
+  // whichever dot is clicked.
+  page = await openPill({ inboxPages: true, fullAppExpand: true }, { width: 1400, height: 900 });
+  await page.locator("#wideToggle").click();
+  await page.waitForFunction(() => document.getElementById("card").classList.contains("wide") && !document.querySelector(".ip-pager").classList.contains("ip-off"));
+  await page.waitForTimeout(600);
+  const place = await page.evaluate(() => { const d = document.querySelector(".ip-dots").getBoundingClientRect(), s = document.getElementById("wideSide").getBoundingClientRect(); return { dots: d.left + d.width / 2, left: d.left, side: s.left + s.width / 2 }; });
+  assert.ok(place.left >= 0, `the dots are inside the window (left ${place.left})`);
+  assert.ok(Math.abs(place.dots - place.side) < 2, `the dots are centred under the sidebar (${place.dots} vs ${place.side})`);
+  const settled = (view) => page.waitForFunction((v) => !document.querySelector(".card").classList.contains("ip-moving") && !document.querySelector(v === "list" ? ".ip-list" : ".ip-chats").hidden, view);
+  await page.locator('.ip-dots [data-ip-to="chats"]').click();
+  await settled("list");
+  await page.locator('.ip-dots [data-ip-to="chats"]').click();
+  await settled("chats");
+  await page.locator('.ip-dots [data-ip-to="list"]').click();
+  await settled("list");
   await page.close();
 
   assert.deepEqual(errors, []);

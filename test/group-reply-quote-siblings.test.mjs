@@ -29,6 +29,7 @@ function pillFunction(name) {
 function runThreadMessages(payload) {
   const source = [
     "const activeMentionVisit = null;",
+    pillFunction("selfRelayDirection"),
     pillFunction("relayIsSelfAuthored"),
     pillFunction("threadMessages"),
     "return threadMessages();",
