@@ -33,6 +33,8 @@ let setupChild;
 // opening the Companion, never this window. The window appears only when
 // that quiet launch could not be confirmed.
 let quietLaunchFailed = false;
+// How long a quiet launch stays windowless before saying Relay is opening.
+const OPENING_NOTICE_MS = 2500;
 let setupProgress = { phase: "idle", canCancel: false };
 function publishProgress(progress) {
   setupProgress = progress;
@@ -137,8 +139,16 @@ function openRelay() {
   if (!application || setupRunning) return Promise.reject(new Error("Relay is not ready to open"));
   return openPill().then(result => pendingLinks.length ? openRelay() : result);
 }
+// Relay is set up but its pill did not come up in time. The window says so in
+// Relay's own words (native-bootstrap.js) and never offers to install it.
+function showLaunchFailure() {
+  quietLaunchFailed = true;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("application:launch", { failed: true });
+  mainWindow.show();
+}
 function openOrShowFailure() {
-  openRelay().catch(() => { quietLaunchFailed = true; mainWindow?.show(); });
+  openRelay().catch(showLaunchFailure);
 }
 if (application) {
   for (const arg of process.argv) queueLink(arg);
@@ -315,8 +325,11 @@ app.whenReady().then(() => {
   });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (event) => event.preventDefault());
-  win.loadURL(animatedInstall ? "relay-setup://app/native-install.html" : application && candidate.desktopOnboarding ? "relay-setup://app/native-bootstrap.html" : "relay-setup://app/index.html");
   const state = installationState();
+  const quietLaunch = state.setUp && !animatedInstall;
+  // On a computer Relay is set up on, the bootstrap page loads in its opening
+  // state (?open): if it is ever seen, it says Relay is opening, never "Install Relay".
+  win.loadURL(animatedInstall ? "relay-setup://app/native-install.html" : application && candidate.desktopOnboarding ? "relay-setup://app/native-bootstrap.html" + (quietLaunch ? "?open" : "") : "relay-setup://app/index.html");
   // Relocation restarts Electron. The installed copy resumes the existing
   // bootstrap, whose verification and progress renderer remain authoritative.
   // isInApplicationsFolder exists only on macOS: calling it elsewhere threw
@@ -338,18 +351,23 @@ app.whenReady().then(() => {
       }
     } catch (error) { if (error.code !== "ENOENT") console.error("Installation handoff could not be read:", error.message); }
   }
-  if (state.setUp && !animatedInstall) {
+  if (quietLaunch) {
     // Launching Relay on a computer it is set up on opens the Companion, with
     // any relay:// link, and this process leaves. The window is shown only
-    // when the Companion cannot be seen coming up.
+    // when the Companion is slow or cannot be seen coming up.
     // An ordinary app open must never clear local data because startup was
     // slow. Show the disclosed setup/retry action when recovery is needed.
+    // A pill held up by a busy computer can take a minute (open-relay.cjs keeps
+    // watching for it): after a moment the window says Relay is opening, and it
+    // goes the moment the pill is up.
+    let settled = false;
+    const openingNotice = setTimeout(() => { if (!settled && !win.isDestroyed()) win.show(); }, OPENING_NOTICE_MS);
     const ready = state.serviceAlive ? Promise.resolve() : runLifecycle("install", { allowRecovery: false });
     ready.then(() => handoffToRelay()).then(({ opened }) => {
+      settled = true;
       if (opened) return;
-      quietLaunchFailed = true;
-      win.show();
-    }).catch(() => { quietLaunchFailed = true; win.show(); });
+      showLaunchFailure();
+    }).catch(() => { settled = true; showLaunchFailure(); }).finally(() => clearTimeout(openingNotice));
     return;
   }
   win.once("ready-to-show", () => win.show());

@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld("migration", {
   uninstall: () => ipcRenderer.invoke("application:uninstall"),
   reconcile: () => ipcRenderer.invoke("application:reconcile"),
   cancelDownload: () => ipcRenderer.invoke("application:cancel-download"),
+  onLaunch: (callback) => {
+    const listener = (_event, launch) => callback(launch);
+    ipcRenderer.on("application:launch", listener);
+    return () => ipcRenderer.removeListener("application:launch", listener);
+  },
   onProgress: (callback) => {
     const listener = (_event, progress) => callback(progress);
     ipcRenderer.on("application:progress", listener);

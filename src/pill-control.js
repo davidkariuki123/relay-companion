@@ -19,6 +19,18 @@ export function readPillStatus(file = pillStatusPath()) {
   }
 }
 
+// How long `relay pill` waits for the pill to confirm it is on screen. The
+// Relay app in the Start menu or Applications runs this command and gives up
+// on it after 20 seconds (open-relay.cjs, every launcher up to 0.1.634), then
+// shows its installer window although Relay is installed (Shane, 2026-10-16:
+// a pill held up for 87 seconds by a busy laptop). A pill that is only slow
+// often confirms within that window, so wait for as much of it as is left,
+// counted from when this process started and leaving time to exit.
+export const PILL_READY_DEADLINE_MS = 18_000;
+export function pillReadyTimeoutMs(uptimeMs = process.uptime() * 1000) {
+  return Math.max(6_000, Math.round(PILL_READY_DEADLINE_MS - uptimeMs));
+}
+
 export async function waitForPillReady(
   reopenNonce,
   {

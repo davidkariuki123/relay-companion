@@ -69,7 +69,7 @@ import {
   reconcileCanonicalRuntimeNode,
 } from "../src/canonical-runtime.js";
 import { listUpdateWorkerJobs } from "../src/canonical-updater.js";
-import { pillStatusPath, readPillStatus, waitForPillReady } from "../src/pill-control.js";
+import { pillStatusPath, pillReadyTimeoutMs, readPillStatus, waitForPillReady } from "../src/pill-control.js";
 import { liveToolRequirement, requiredLiveHosts, shouldRequireLiveTools } from "../src/setup-activation.js";
 import { openRelay, openTask } from "../src/materializer.js";
 import { runClaudeHook } from "../src/claude-hook.js";
@@ -839,7 +839,7 @@ async function cmdPill(flags = {}, positional = []) {
     spawnError = error;
   });
   child.unref();
-  const result = await waitForPillReady(reopenNonce);
+  const result = await waitForPillReady(reopenNonce, { timeoutMs: pillReadyTimeoutMs() });
   if (!result.ok) {
     const detail = spawnError ? ` ${spawnError.message || spawnError}` : "";
     throw new Error(
@@ -879,8 +879,11 @@ async function cmdDoctor(flags = {}) {
       return fsSync.readFileSync(path.join(os.homedir(), "Library", "LaunchAgents", "work.relay.companion.pill.plist"), "utf8").includes(pillLink.link);
     } catch { return false; }
   })();
+  // The native launcher updates itself separately from this runtime.
+  const { describeApplicationUpdate, applicationUpdateDoctorLines } = await import("../src/application-update-status.js");
+  const applicationUpdate = describeApplicationUpdate();
   if (flags.json) {
-    console.log(JSON.stringify({ schema: 1, cliVersion: companionVersion(), ...health,
+    console.log(JSON.stringify({ schema: 1, cliVersion: companionVersion(), ...health, applicationUpdate,
       ...(pillLink ? { pillLink: { ...pillLink, ...(pillLinkBroken ? { repair: "relay repair-installation" } : {}) } } : {}),
       ok: health.installation.health?.state === "healthy" && !pillLinkBroken, serviceStatus }, null, 2));
     return;
@@ -1003,6 +1006,7 @@ async function cmdDoctor(flags = {}) {
     }
     console.log(`    cause: see ${updateLogPath}`);
   }
+  for (const line of applicationUpdateDoctorLines(applicationUpdate)) console.log(line);
   // The canonical runtime itself: pointer state, disk footprint, live workers, and
   // the last thing the updater actually said. 37 stranded releases / 24GB burned
   // for 25 minutes while this command printed nothing at all.

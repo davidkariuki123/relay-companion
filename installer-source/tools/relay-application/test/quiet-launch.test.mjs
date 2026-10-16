@@ -16,7 +16,18 @@ test("a set-up computer whose service is not alive runs the install step before 
   assert.match(launch, /state\.serviceAlive \? Promise\.resolve\(\) : runLifecycle\("install", \{ allowRecovery: false \}\)/,
     "files alone never authorize the quiet launch; the service must be alive or be put back first");
   assert.match(launch, /ready\.then\(\(\) => handoffToRelay\(\)\)/, "the Companion opens only after that step");
-  assert.match(launch, /quietLaunchFailed = true;\s*win\.show\(\)/, "a failed repair shows the window instead of nothing");
+  assert.match(launch, /\.catch\(\(\) => \{ settled = true; showLaunchFailure\(\); \}\)/, "a failed repair shows the window instead of nothing");
+});
+
+test("an installed computer's window opens as Opening Relay, after a moment, and fails in Relay's words", () => {
+  // Shane 2026-10-16: a slow pill put "Install Relay" and a raw IPC error on screen.
+  const launch = main.slice(main.indexOf("const state = installationState();"), main.indexOf("win.once(\"ready-to-show\""));
+  assert.match(launch, /const quietLaunch = state\.setUp && !animatedInstall;/);
+  assert.match(launch, /"relay-setup:\/\/app\/native-bootstrap\.html" \+ \(quietLaunch \? "\?open" : ""\)/, "the page knows Relay is installed before it draws");
+  assert.match(launch, /setTimeout\(\(\) => \{ if \(!settled && !win\.isDestroyed\(\)\) win\.show\(\); \}, OPENING_NOTICE_MS\)/, "a slow pill gets an Opening Relay window, not nothing");
+  const failure = main.slice(main.indexOf("function showLaunchFailure()"), main.indexOf("function openOrShowFailure()"));
+  assert.match(failure, /webContents\.send\("application:launch", \{ failed: true \}\)/);
+  assert.match(main, /openRelay\(\)\.catch\(showLaunchFailure\)/);
 });
 
 test("liveness comes from the inventory's heartbeat, and the renderer-facing lifecycle still checks its caller", () => {

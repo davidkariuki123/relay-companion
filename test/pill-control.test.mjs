@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { pillStatusPath, relayCompanionHome, waitForPillReady } from "../src/pill-control.js";
+import { pillReadyTimeoutMs, pillStatusPath, relayCompanionHome, waitForPillReady } from "../src/pill-control.js";
 
 test("pill status paths follow the same RELAY_HOME precedence as the overlay", () => {
   assert.equal(relayCompanionHome({ RELAY_HOME: "/tmp/primary", RELAY_COMPANION_HOME: "/tmp/legacy" }, "/Users/x"), "/tmp/primary");
@@ -44,6 +44,15 @@ test("waitForPillReady reports a timeout instead of claiming blind launch succes
   });
   assert.equal(result.ok, false);
   assert.equal(result.reason, "pill_ready_timeout");
+});
+
+test("relay pill waits for a slow pill as long as the launcher that ran it still listens", () => {
+  // Launchers up to 0.1.634 give the command 20 seconds; it used to stop at 12.
+  assert.equal(pillReadyTimeoutMs(1_000), 17_000);
+  assert.ok(pillReadyTimeoutMs(1_000) > 12_000);
+  assert.equal(pillReadyTimeoutMs(3_500), 14_500);
+  assert.ok(1_000 + pillReadyTimeoutMs(1_000) < 20_000, "exits before the launcher gives up on it");
+  assert.equal(pillReadyTimeoutMs(15_000), 6_000, "a slow start still gets a real chance to confirm");
 });
 
 test('concurrent launches retain receipts for both callers', async () => {

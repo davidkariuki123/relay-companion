@@ -994,6 +994,15 @@ test("windowsTaskXml points the task at the windowless wscript shim", () => {
   assert.ok(!xml.includes("electron.exe"), "the action carries a script path, not the command line");
 });
 
+test("windowsTaskXml runs the pill and daemon at an interactive app's priority", () => {
+  const xml = windowsTaskXml("C:\\Relay\\electron.exe", ["C:\\Relay\\overlay\\main.cjs"], null, "C:\\Windows\\System32\\cmd.exe", "DESKTOP\\Ada", null);
+
+  // Without it Task Scheduler's default 7 gives memory priority 2 and Low I/O,
+  // and Windows pages the pill out first under memory pressure.
+  assert.match(xml, /<Settings>[\s\S]*<Priority>4<\/Priority>[\s\S]*<\/Settings>/);
+  assert.equal(xml.match(/<Priority>/g).length, 1);
+});
+
 test("windowsTaskXml falls back to the plain console action without a shim", () => {
   const xml = windowsTaskXml("C:\\Node\\node.exe", ["C:\\Relay\\relay.js", "daemon"], null, "C:\\Windows\\System32\\cmd.exe", "", null);
 

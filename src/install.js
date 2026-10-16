@@ -2871,6 +2871,17 @@ function windowsTaskXmlEscape(value) {
  * schtasks.exe's `/TR` argument. `/TR` has both a small length ceiling and its
  * own quote parser; Relay's Electron path crosses both boundaries on normal
  * Windows installs. XML keeps the command and arguments as data instead.
+ *
+ * Priority 4 runs the pill and the daemon like any app the person opened. A
+ * task without one gets Task Scheduler's default of 7: below-normal CPU,
+ * memory priority 2 and Low I/O priority. Under memory pressure Windows then
+ * takes Relay's pages first and queues their page-ins behind everyone else's,
+ * and the pill froze for minutes at a time while burning no CPU (Shane's
+ * laptop, 2026-10-16; raising the live pill to normal ended an 11-minute
+ * freeze within seconds). Measured from real tasks: 4 gives memory 5 and
+ * Normal I/O, the same as an interactive app; 5 and 6 keep Normal I/O but
+ * lower memory priority to 4 and 3. The macOS counterpart is the pill plist's
+ * ProcessType=Interactive and LowPriorityIO=false.
  */
 export function windowsTaskXml(
   executable,
@@ -2915,6 +2926,7 @@ export function windowsTaskXml(
     <RunOnlyIfIdle>false</RunOnlyIfIdle>
     <WakeToRun>false</WakeToRun>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>4</Priority>
   </Settings>
   <Actions Context="RelayUser">
     <Exec>

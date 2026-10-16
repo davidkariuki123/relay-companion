@@ -61,20 +61,25 @@ async function runBridge({ activationEnabled = false, transactionId, target, ada
         await step("stability-observed", adapters.observeStability);
         await save({ state: "committed" });
       } catch (error) {
+        // The step and a closed error code are safe to report from the fleet;
+        // the free-text failure stays on this computer. Two Dev Macs reported
+        // only "rolled-back" for their launcher updates (Oct 2026), and nobody
+        // could tell which step had failed.
+        const failed = { failure: String(error.message).slice(0, 500), failedStep: journal.pending, failureCode: failureCode(error) };
         if (error.preserveCurrent === true) {
-          await save({ state: "deferred", failure: String(error.message).slice(0, 500) });
+          await save({ state: "deferred", ...failed });
           return journal;
         }
         // A pending transfer may have taken effect before the process died. Do
         // not assume only a completed journal entry means ownership changed.
         const needsRestore = journal.transferAttempted === true || journal.completed.includes("ownership-transferred") || journal.pending === "ownership-transferred";
         if (needsRestore) {
-          await save({ state: "rollback-required", failure: String(error.message).slice(0, 500) });
+          await save({ state: "rollback-required", ...failed });
           const restored = await adapters.restorePrevious({ transactionId, target, journal });
           if (restored?.ok !== true) return journal;
           await save({ state: "rolled-back", pending: null });
         } else {
-          await save({ state: "preparing", failure: String(error.message).slice(0, 500) });
+          await save({ state: "preparing", ...failed });
         }
         return journal;
       }
@@ -91,4 +96,19 @@ async function runBridge({ activationEnabled = false, transactionId, target, ada
   } finally { await release(); }
 }
 
-module.exports = { runBridge };
+// Node's own errno words (EPERM, EACCES, ENOENT...) or a word the adapter set
+// itself (the native installer names the command that failed). Never text.
+function failureCode(error) {
+  if (typeof error?.code === "string" && /^E[A-Z0-9]{2,30}$/.test(error.code)) return error.code.toLowerCase();
+  if (typeof error?.failureCode === "string" && /^[a-z0-9-]{1,40}$/.test(error.failureCode)) return error.failureCode;
+  return null;
+}
+
+// One telemetry word for a failed handoff: the step, then the code when known,
+// e.g. "ownership-transferred-eperm" or "application-healthy".
+function failureReason(journal) {
+  if (typeof journal?.failedStep !== "string" || !/^[a-z-]{1,40}$/.test(journal.failedStep)) return null;
+  return journal.failureCode ? `${journal.failedStep}-${journal.failureCode}` : journal.failedStep;
+}
+
+module.exports = { runBridge, failureReason };

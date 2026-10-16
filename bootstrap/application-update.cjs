@@ -10,6 +10,7 @@ const { handoffApplication, updateConsent, read, write } = require("./applicatio
 const { versionCompare } = require("./application-install.cjs");
 const bootstrap = require("./relay-setup.cjs");
 const rollout = require("./application-rollout.cjs");
+const { failureReason } = require("./application-bridge.cjs");
 const CHECK_MS = 6 * 60 * 60_000;
 
 async function readOffer({ fetchImpl = globalThis.fetch, trustStore = trust, channel = "stable" } = {}) {
@@ -29,7 +30,9 @@ function rolloutDecision(payload, { owner, deviceId, now = Date.now() }) {
   const policy = payload.rollout;
   if (payload.schema !== 2 || !policy) return "rollout-policy-required";
   if (policy.expiresAt <= now || policy.expiresAt > now + 31 * 86400_000) return "rollout-policy-expired";
-  if (owner) return policy.nativeUpdates ? null : "native-updates-paused";
+  // An installed app updates when the offer is open to every app, or when this
+  // device is in the offer's cohort (production starts with internal devices).
+  if (owner) return policy.nativeUpdates || (deviceId && policy.nativeUpdateDeviceIds?.includes(deviceId)) ? null : "native-updates-paused";
   return deviceId && policy.migrateDeviceIds.includes(deviceId) ? null : "migration-not-selected";
 }
 
@@ -72,7 +75,15 @@ async function checkApplicationUpdate({ activationEnabled = rollout.enabled, hom
       const kind = platform === "darwin" ? "zip" : platform === "win32" ? "exe"
         : fs.existsSync("/usr/bin/dpkg") ? "deb" : "rpm";
       const artifact = payload.artifacts[platformKey]?.find(item => item.kind === kind);
-      if (!artifact) throw new Error("No native package for this host");
+      // A channel offer without this platform's package is the release's
+      // fault, not this computer's: say so in a word telemetry and doctor can
+      // carry, and check again on the normal schedule instead of every five
+      // minutes (Dev's launcher offer went Mac-only for six days, Oct 2026).
+      if (!artifact) {
+        const missing = { schema: 1, at: now(), nextCheckAt: now() + CHECK_MS, state: "no-package-for-platform", channel: consent.channel,
+          version: payload.version, sourceSha: payload.sourceSha, platform: platformKey, packageKind: kind, changed: false };
+        write(statusFile, missing); return missing;
+      }
       const directory = path.join(root, "application-packages", `${payload.version}-${payload.sourceSha}-${platformKey}`);
       fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
       const file = path.join(directory, `installer.${kind}`);
@@ -90,8 +101,9 @@ async function checkApplicationUpdate({ activationEnabled = rollout.enabled, hom
       const action = read(path.join(directory, "action.json"));
       if (action?.state === "installer-action-required" && result.state !== "complete") result = { ...action, bridgeState: result.state };
     }
+    const reason = failureReason(result);
     write(statusFile, { schema: 1, at: now(), nextCheckAt: now() + CHECK_MS,
-      version: payload.version, sourceSha: payload.sourceSha, ...result });
+      version: payload.version, sourceSha: payload.sourceSha, ...result, ...(reason ? { reason } : {}) });
     return result;
   } catch (error) {
     write(statusFile, { schema: 1, at: now(), nextCheckAt: now() + 5 * 60_000, state: "failed", detail: String(error.message).slice(0, 500) });

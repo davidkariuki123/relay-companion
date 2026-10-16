@@ -11,7 +11,10 @@ function inside(root, file) {
 }
 function command(run, file, args, options = {}) {
   const result = run(file, args, { encoding: "utf8", windowsHide: true, timeout: 10 * 60_000, ...options });
-  if (result.error || result.status !== 0) throw new Error(`Native installer failed: ${result.error?.message || result.stderr || result.status}`);
+  // The failure code names the command (codesign, xcrun, spctl, ditto, unzip,
+  // or the downloaded installer), which the fleet may see; stderr stays local.
+  const name = /^(codesign|xcrun|spctl|ditto|unzip)$/.test(path.basename(file)) ? path.basename(file) : "installer";
+  if (result.error || result.status !== 0) throw Object.assign(new Error(`Native installer failed: ${result.error?.message || result.stderr || result.status}`), { failureCode: name });
   return result.stdout || "";
 }
 function packageLocation({ platform = process.platform, homeDir = os.homedir(), env = process.env } = {}) {

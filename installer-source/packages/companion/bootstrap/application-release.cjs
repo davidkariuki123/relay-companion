@@ -27,8 +27,12 @@ function validateApplicationRelease(payload, { version, sourceSha, channel } = {
   if (!targets.length || Object.keys(payload.artifacts || {}).some(key => !PLATFORMS.includes(key))) throw new Error("Invalid native platform selection");
   if (payload.schema === 2) {
     const policy = payload.rollout;
-    if (!policy || typeof policy.nativeUpdates !== "boolean" || !Array.isArray(policy.migrateDeviceIds)
-      || policy.migrateDeviceIds.length > 50 || policy.migrateDeviceIds.some(id => typeof id !== "string" || !/^[A-Za-z0-9_-]{8,160}$/.test(id))
+    const deviceIds = ids => Array.isArray(ids) && ids.length <= 50 && ids.every(id => typeof id === "string" && /^[A-Za-z0-9_-]{8,160}$/.test(id));
+    // nativeUpdateDeviceIds is optional: a cohort of installed apps that update
+    // while nativeUpdates stays false. Runtimes without cohort support see only
+    // nativeUpdates:false and stay paused, so a cohort never reaches them.
+    if (!policy || typeof policy.nativeUpdates !== "boolean" || !deviceIds(policy.migrateDeviceIds)
+      || (policy.nativeUpdateDeviceIds !== undefined && !deviceIds(policy.nativeUpdateDeviceIds))
       || !Number.isSafeInteger(policy.expiresAt) || policy.expiresAt <= 0) throw new Error("Invalid native rollout policy");
   }
   for (const platform of targets) {

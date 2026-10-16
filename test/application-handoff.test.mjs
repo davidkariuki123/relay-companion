@@ -103,6 +103,43 @@ test("failed independent recovery restores the working runtime without uninstall
   assert.equal(fs.existsSync(path.join(f.homeDir, ".relay", "application-handoff-complete.json")), false);
 });
 
+test("a rolled-back handoff names its failed step and error code, never its message", async t => {
+  const f = fixture(t), { config } = options(f);
+  const recovery = await bridge.handoffApplication({ ...config, verifyRecovery: () => ({ ok: false }) });
+  assert.equal(recovery.state, "rolled-back");
+  assert.equal(recovery.failedStep, "recovery-healthy");
+  const { failureReason } = await import("../bootstrap/application-bridge.cjs");
+  assert.equal(failureReason(recovery), "recovery-healthy");
+  // A Mac that may not replace its own Relay.app fails inside the transfer.
+  const g = fixture(t), denied = options(g).config;
+  const result = await bridge.handoffApplication({ ...denied, installPackage: async () => {
+    throw Object.assign(new Error("EPERM: operation not permitted, rename '/Applications/Relay.app'"), { code: "EPERM" }); } });
+  assert.equal(result.state, "rolled-back");
+  assert.equal(failureReason(result), "ownership-transferred-eperm");
+  // A failed native command is named by the command, not by its output.
+  const h = fixture(t);
+  await assert.rejects(native.installNativePackage({ ...h, platform: "darwin", arch: process.arch, activationEnabled: true,
+    artifact: h.payload.artifacts[`darwin-${process.arch}`][1], verifyZip: () => {},
+    run: command => command.endsWith("unzip") ? { status: 1, stderr: "/Users/someone/private path" } : assert.fail(command) }),
+    error => error.failureCode === "unzip");
+  assert.equal(failureReason({ failedStep: "ownership-transferred", failureCode: null }), "ownership-transferred");
+  assert.equal(failureReason({ failedStep: "Has spaces /path" }), null);
+});
+
+test("the update status and fleet telemetry carry the failure word", async t => {
+  const f = fixture(t), { config } = options(f);
+  const result = await updates.checkApplicationUpdate({ ...config, fetchImpl: async () => new Response(JSON.stringify(f.envelope)),
+    download: async (_url, file) => fs.writeFileSync(file, f.data),
+    handoff: async () => ({ schema: 1, state: "rolled-back", failedStep: "application-healthy", failureCode: null, failure: "/private/path text" }) });
+  assert.equal(result.state, "rolled-back");
+  const status = bridge.read(path.join(f.homeDir, ".relay", "application-update.json"));
+  assert.equal(status.reason, "application-healthy");
+  const { applicationTelemetryHeader } = await import("../src/application-telemetry.js");
+  const sent = JSON.parse(Buffer.from(applicationTelemetryHeader({ homeDir: f.homeDir }), "base64url").toString("utf8"));
+  assert.equal(sent.state, "rolled-back"); assert.equal(sent.reason, "application-healthy");
+  assert.doesNotMatch(JSON.stringify(sent), /private/);
+});
+
 test("unhealthy and newer legacy runtimes never reach native installation", async t => {
   for (const kind of ["unhealthy", "newer"]) {
     const f = fixture(t), { config, calls } = options(f);
@@ -222,6 +259,28 @@ test("migration selection can pause independently of native servicing and cannot
   assert.equal(updates.rolloutDecision(payload, { now, owner: {} }), "native-updates-paused");
   assert.equal(updates.rolloutDecision(payload, { now: now + 86400001, deviceId: "dev_selected" }), "rollout-policy-expired");
 });
+
+test("a native update cohort updates only its own installed apps while the offer stays paused for the rest", () => {
+  const now = Date.now(), payload = { schema: 2, rollout: { nativeUpdates: false, migrateDeviceIds: [], nativeUpdateDeviceIds: ["dev_internal_mac"], expiresAt: now + 86400000 } };
+  assert.equal(updates.rolloutDecision(payload, { now, owner: {}, deviceId: "dev_internal_mac" }), null);
+  assert.equal(updates.rolloutDecision(payload, { now, owner: {}, deviceId: "dev_someone_else" }), "native-updates-paused");
+  assert.equal(updates.rolloutDecision(payload, { now, owner: {}, deviceId: "" }), "native-updates-paused");
+  // The cohort selects installed apps only; it never migrates a classic install.
+  assert.equal(updates.rolloutDecision(payload, { now, deviceId: "dev_internal_mac" }), "migration-not-selected");
+  assert.equal(updates.rolloutDecision(payload, { now: now + 86400001, owner: {}, deviceId: "dev_internal_mac" }), "rollout-policy-expired");
+  // Runtimes from before cohorts validate the same signed offer and read
+  // nativeUpdates:false, so for them it is paused.
+  assert.equal(release.validateApplicationRelease({ ...fixtureOffer(), rollout: payload.rollout }, { version: "0.2.0", sourceSha: "a".repeat(40), channel: "stable" }).rollout.nativeUpdates, false);
+  assert.throws(() => release.validateApplicationRelease({ ...fixtureOffer(), rollout: { ...payload.rollout, nativeUpdateDeviceIds: ["bad id"] } },
+    { version: "0.2.0", sourceSha: "a".repeat(40), channel: "stable" }), /rollout policy/);
+});
+function fixtureOffer() {
+  const version = "0.2.0";
+  return { schema: 2, channel: "stable", product: "Relay Application", version, sourceSha: "a".repeat(40), runtime: { version, sourceSha: "b".repeat(40) },
+    artifacts: Object.fromEntries(release.PLATFORMS.map(platform => [platform,
+      (platform.startsWith("darwin") ? ["dmg", "zip"] : platform.startsWith("win32") ? ["exe"] : ["deb", "rpm"]).map(kind => ({ kind, bytes: 1,
+        sha512: `sha512-${Buffer.alloc(64).toString("base64")}`, url: `https://api.sendrelays.com/v1/application-releases/v${version}/Relay-${version}-${platform}.${kind}` }))])) };
+}
 
 test("native workers use independent supervisors and a deadline outside daemon services", async t => {
   const f = fixture(t);
@@ -401,4 +460,51 @@ test("a background app update never asks setup for the destructive repair", asyn
   const activate = config.activate;
   await bridge.handoffApplication({ ...config, activate: async (args) => { seen = args; return activate(args); } });
   assert.equal(seen.allowRecovery, false);
+});
+
+test("an offer without this platform's package is reported in plain words, sent as telemetry and checked on the normal schedule", async t => {
+  const f = fixture(t); let network = 0, clock = Date.now();
+  // Dev's launcher offer went Mac-only for six days in October 2026.
+  // Dev offers may be partial; stable ones must cover every platform.
+  const base = release.applicationReleaseBase("dev");
+  const payload = { ...f.payload, channel: "dev", artifacts: Object.fromEntries(Object.entries(f.payload.artifacts).filter(([key]) => key.startsWith("darwin"))
+    .map(([key, items]) => [key, items.map(item => ({ ...item, url: `${base}/v${f.version}/Relay-${f.version}-${key}.${item.kind}` }))])) };
+  fs.writeFileSync(path.join(f.homeDir, ".relay", "config.json"), JSON.stringify({ deviceId: "dev_fixture_device", updateChannel: "dev" }));
+  const key = crypto.generateKeyPairSync("ed25519"), bytes = Buffer.from(JSON.stringify(payload));
+  const envelope = { ...f.envelope, payload: bytes.toString("base64"), signature: crypto.sign(null, bytes, key.privateKey).toString("base64") };
+  const trustStore = { ...f.trustStore, keys: [{ ...f.trustStore.keys[0], publicKeyPem: key.publicKey.export({ type: "spki", format: "pem" }).toString() }] };
+  const config = { ...f, trustStore, activationEnabled: true, platform: "win32", arch: "x64", now: () => clock,
+    fetchImpl: async () => { network++; return new Response(JSON.stringify(envelope)); },
+    download: () => assert.fail("nothing to download"), handoff: () => assert.fail("nothing to hand off") };
+  const result = await updates.checkApplicationUpdate(config);
+  assert.equal(result.state, "no-package-for-platform");
+  const status = bridge.read(path.join(f.homeDir, ".relay", "application-update.json"));
+  assert.deepEqual([status.state, status.version, status.channel, status.platform, status.packageKind, status.nextCheckAt - clock],
+    ["no-package-for-platform", f.version, "dev", "win32-x64", "exe", updates.CHECK_MS]);
+  clock += 5 * 60_000;
+  assert.equal((await updates.checkApplicationUpdate(config)).state, "backoff");
+  assert.equal(network, 1);
+
+  const { applicationTelemetryHeader } = await import("../src/application-telemetry.js");
+  const sent = JSON.parse(Buffer.from(applicationTelemetryHeader({ homeDir: f.homeDir, platform: "win32" }), "base64url").toString("utf8"));
+  assert.deepEqual([sent.state, sent.offerVersion, sent.reason], ["no-package-for-platform", f.version, null]);
+
+  const { describeApplicationUpdate, applicationUpdateDoctorLines } = await import("../src/application-update-status.js");
+  const report = describeApplicationUpdate({ homeDir: f.homeDir });
+  assert.equal(report.problem, `the dev launcher release ${f.version} has no exe package for win32-x64, so this launcher cannot update`);
+  const lines = applicationUpdateDoctorLines(report);
+  assert.match(lines[0], /^ {2}LAUNCHER CANNOT UPDATE: the dev launcher release 0\.2\.0 has no exe package for win32-x64/);
+  assert.match(lines[1], /republishing/);
+});
+
+test("a genuine launcher update failure stays a failure with the short retry", async t => {
+  const f = fixture(t), clock = 1_800_000_000_000;
+  await assert.rejects(updates.checkApplicationUpdate({ ...f, activationEnabled: true, now: () => clock,
+    fetchImpl: async () => new Response("unavailable", { status: 503 }) }), /unavailable \(503\)/);
+  const status = bridge.read(path.join(f.homeDir, ".relay", "application-update.json"));
+  assert.deepEqual([status.state, status.nextCheckAt - clock], ["failed", 5 * 60_000]);
+  const { describeApplicationUpdate, applicationUpdateDoctorLines } = await import("../src/application-update-status.js");
+  assert.match(applicationUpdateDoctorLines(describeApplicationUpdate({ homeDir: f.homeDir }))[0], /^ {2}LAUNCHER UPDATE FAILING: .*\(503\)/);
+  fs.rmSync(path.join(f.homeDir, ".relay", "application-update.json"));
+  assert.deepEqual(applicationUpdateDoctorLines(describeApplicationUpdate({ homeDir: f.homeDir })), []);
 });
