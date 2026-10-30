@@ -196,6 +196,19 @@ test("a letter short enough to be self-contained renders whole in the bubble", (
   assert.match(html, /!textLike && !open && !inlineBody && m\.preview/);
 });
 
+test("a full-screen Relay card fills its text column instead of one preview line", () => {
+  // Shane, 2026-10-19: a 600-character letter showed one preview line beside
+  // a rail many lines tall. The wide column holds about twice the pill's
+  // letter, and anything longer shows its start, faded.
+  assert.match(html, /const WIDE_INLINE_BODY_MAX = 1100/);
+  const at = html.indexOf("const inlineBody =");
+  const row = html.slice(at, html.indexOf("const aggregates", at));
+  assert.match(row, /cardsWide \? WIDE_INLINE_BODY_MAX : INLINE_BODY_MAX/);
+  assert.match(html, /!inlineBody && relayWide && m\.body \? `<div class="th-body rl-clip"/);
+  assert.match(html, /m\.preview && !\(relayWide && m\.body\)/);
+  assert.match(html, /\.wide-cards \.th-msg\.rl-card \.th-body\.rl-clip \{ max-height:/);
+});
+
 test("a titled letter's tap is the reader in either frame; texts stay inert", () => {
   // No in-between (Sven, after a 940-char in-place unfold read as a wall):
   // production's tap ontology, kept. If an unfold toggle returns to the room

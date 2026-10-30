@@ -7,6 +7,8 @@
 // THE BANNER'S REPLY (David, 2026-09-17). Under the row, from the moment a
 // message arrives, sits the room's own composer, so a one-line answer never
 // needs the room. The agent verbs are a relay's: a typed text wears none.
+// ONE ACTION SET PER KIND (Shane, 2026-10-19): a text gets the reply box only;
+// a relay gets Open (the likeliest app) and Copy, no reply; a Task gets Copy only.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -28,16 +30,20 @@ const verbs = between(inbox, "function bannerVerbsHtml(row)", "function relayIde
 const row = between(inbox, "function relayIdentityRowHtml(identity, show = null)", "// ---------- the reader");
 const peek = between(inbox, "if (peeking) {\n      // A notification wears the SAME species as the list", "sizePeek();\n      return;\n    }");
 
-test("banner verbs follow Settings › Your agent and keep David's order", () => {
-  // Copy is unconditional; each app rides its own switch AND its desktop-app opening.
-  assert.match(verbs, /const verbs = \[\{ label:"Copy for your agent"/);
+test("banner verbs: one Open for the likeliest app then Copy on a relay, Copy alone on a Task", () => {
+  // Shane, 2026-10-19: the labels are just Open and Copy; the app is the button's title.
+  assert.match(verbs, /const copy = \{ label:"Copy", attrs:`data-banner-copy=/);
+  assert.match(verbs, /const host = bannerIsTask\(row\) \? "" : bannerAgentHost\(\);/);
+  assert.match(verbs, /\[\{ label:"Open", attrs:`data-banner-open="\$\{esc\(row\.id\)\}" data-host="\$\{host\}" title="Open in /);
+  assert.match(verbs, /, copy\]\n\s+: \[copy\];/);
   assert.doesNotMatch(verbs, /otherAgentEnabled/);
   assert.doesNotMatch(inbox, /otherAgentEnabled|svOtherAgent|proto\.otherAgent/, "the Other switch is gone with its preference");
-  assert.match(verbs, /for \(const host of agentAppHosts\(\)\)/);
-  assert.match(verbs, /if \(!agentOpensInApp\(app\)\) continue;/);
-  assert.match(verbs, /label:`Open in \$\{app\}`/);
-  // Copy is pushed before the app loop, so the order is Copy, Codex, Claude Code (agentAppHosts is Codex-first).
-  assert.ok(verbs.indexOf('label:"Copy for your agent"') < verbs.indexOf("for (const host of agentAppHosts())"));
+  // The app: only ones switched on that a relay can open in; the one in front,
+  // then the last opened-in, then a running one, then the first switched on.
+  const pick = between(inbox, "function bannerAgentHost()", "// A NEW SENDER'S ROW");
+  assert.match(pick, /agentAppHosts\(\)\.filter\(\(host\) => agentOpensInApp\(/);
+  assert.match(pick, /const order = \[running\.includes\(seen\.last\) \? seen\.last : "", protoPref\(BANNER_HOST_PREF, ""\), \.\.\.running, \.\.\.hosts\];/);
+  assert.match(inbox, /setProtoPref\(BANNER_HOST_PREF, selectedProvider\)/, "opening a relay in an app remembers it");
   // Row recipe: the first verb wears the accent, the rest are muted; the strip never bubbles to the row.
   assert.match(verbs, /class="act-btn \$\{index === 0 \? "accept" : "decline"\}"/);
   assert.match(verbs, /<span class="rk-actions" data-stop="1">/);
@@ -45,13 +51,15 @@ test("banner verbs follow Settings › Your agent and keep David's order", () =>
   assert.match(verbs, /row\.direction === "out" \|\| !String\(row\.id \|\| ""\)\.startsWith\("relay_"\)/);
 });
 
-test("the identity row grows the Task chip and the verbs only while peeking", () => {
-  assert.match(row, /\$\{peeking && row\.direction !== "out" && bannerIsTask\(row\) \? `<span class="kchip">Task<\/span>` : ""\}/);
+test("the identity row grows the kind chip (Task, Relay or Text) and the verbs only while peeking", () => {
+  assert.match(row, /\$\{peeking && row\.direction !== "out" \? bannerKindChipHtml\(row\) : ""\}/);
   assert.match(row, /\$\{peeking \? bannerVerbsHtml\(row\) : ""\}/);
   // The row's message is a room projection whose Task flag is `request` (the bubble's own predicate).
   assert.match(verbs, /function bannerIsTask\(row\)[\s\S]*?row\.request \|\| isTaskRow\(relayById\(row\.id\)\) \|\| isTaskRow\(row\)/);
+  // Shane, 2026-10-19: every Relay banner names its kind; Slack rows wear none.
+  assert.match(verbs, /function bannerKindChipHtml\(row\) \{\n\s+if \(!row \|\| !String\(row\.id \|\| ""\)\.startsWith\("relay_"\)\) return "";\n\s+return `<span class="kchip">\$\{bannerIsTask\(row\) \? "Task" : row\.textLike \? "Text" : "Relay"\}<\/span>`;/);
   // The chip sits between the name and the time, as it does on the room bubble's top line.
-  assert.ok(row.indexOf('bannerIsTask(row) ? `<span class="kchip">Task</span>`') < row.indexOf('<span class="th-time">'));
+  assert.ok(row.indexOf("bannerKindChipHtml(row)") < row.indexOf('<span class="th-time">'));
   // No Start anywhere on a banner (the verb; a caret's selectionStart is not one).
   assert.doesNotMatch(row, />Start<|"Start"|label:"Start/);
   assert.doesNotMatch(verbs, />Start<|"Start"|label:"Start/);
@@ -82,13 +90,13 @@ test("the pull sentence has one builder shared by the reader block and the banne
 
 test("a text wears no agent verbs — they belong to a relay", () => {
   // Contacts' rooms: the whole verb line goes for a text.
-  assert.match(verbs, /if \(request\) return requestBannerVerbsHtml\(row, request\);\n    if \(row\.textLike\) return "";/);
-  // A stranger's text: Add to Contacts leads and Copy is gone; a stranger's relay keeps Copy first.
-  const request = between(verbs, "function requestBannerVerbsHtml(row, room)", "function bannerIsTask(row)");
-  assert.match(request, /const lead = row\.textLike\n\s+\? item\("accept", "Add to Contacts", "act-btn accept"\)/);
-  assert.match(request, /: `<button class="act-btn accept" type="button" data-banner-copy="\$\{id\}">Copy for your agent<\/button>\$\{item\("accept", "Add to Contacts", "act-btn decline"\)\}`/);
-  // A share-link guest's two verbs never had Copy; unchanged.
-  assert.match(request, /if \(isShareGuestRoom\(room\)\) \{\n\s+return `<span class="rk-actions" data-stop="1">\$\{item\("delete", "Delete relay"\)\}\$\{item\("block", "Block sender…"\)\}<\/span>`;/);
+  assert.match(verbs, /startsWith\("relay_"\)\) return "";\n(?:\s+\/\/.*\n)*\s+if \(row\.textLike\) return "";/);
+  // A new sender's row never reaches these verbs: it draws its own locked row,
+  // with Add contact and nothing that hands their words to an agent.
+  assert.match(row, /if \(identity\.requestRoom\) return requestRowHtml\(identity, show\);/);
+  const locked = between(inbox, "function requestRowHtml(identity, show = null)", "let requestRowsAccount");
+  assert.match(locked, /data-request-add=/);
+  assert.doesNotMatch(locked, /data-banner-copy|Copy for your agent|th-title|relayListGist/);
 });
 
 test("the room's composer sits under the row from the start, and only while peeking", () => {
@@ -96,14 +104,18 @@ test("the room's composer sits under the row from the start, and only while peek
   assert.match(row, /\$\{peeking \? bannerVerbsHtml\(row\) : ""\}\n\s+\$\{peeking \? bannerComposerHtml\(identity, row, inThread\) : ""\}/);
   const composer = between(inbox, "function bannerComposerHtml(identity, row, inThread = false)", "function groupRoomRecipient(room)");
   assert.match(composer, /if \(!peeking \|\| !identity \|\| identity\.requestRoom \|\| identity\.provider === "slack"\) return "";/);
+  // Only a text gets a reply box on its banner (Shane, 2026-10-19).
+  assert.match(composer, /if \(!row\.textLike\) return "";/);
   // The room composer's own box: .qr.th-qr.col, the rich field, the rail, the
   // Send verb (a typed message is a text; "Relay" is the AI-written kind). No new species.
   assert.match(composer, /<div class="qr th-qr col qr-banner" data-stop="1"\$\{inThread \? ` data-reply-to="\$\{esc\(row\.id\)\}"` : ""\}><div class="th-rich-composer" contenteditable="true" role="textbox" aria-multiline="true"/);
   assert.match(composer, /<div class="ta-rail"><span class="rt-spacer"><\/span><button type="button" class="qr-banner-send" data-stop="1">Send<\/button><\/div><\/div>/);
   // The placeholder names where the words go: the thread, the channel, or the person's first name.
   assert.match(composer, /const placeholder = inThread \? "Reply in thread…" : identity\.isGroup\n\s+\? `Reply in \$\{identity\.name\}…`\n\s+: `Reply to \$\{String\(identity\.name \|\| row\.party \|\| "them"\)\.split\(" "\)\[0\]\}…`/);
-  // Its only styling is a home inside the row; the box itself is the room's.
+  // A home inside the row, and one line: the field and Send side by side, no +.
   assert.match(inbox, /\.card\.peek \.qr\.qr-banner \{ margin:12px 0 0; padding:10px 10px 6px 16px; \}/);
+  assert.match(inbox, /\.card\.peek \.qr\.qr-banner \{ flex-direction:row;/);
+  assert.match(inbox, /\.card\.peek \.qr\.qr-banner \.cmp-plus, \.card\.peek \.qr\.qr-banner \.rt-spacer \{ display:none; \}/);
   // The field is dressed like the room's (grow, +, paste, Enter sends) and stages its own files.
   const wiring = between(inbox, "function wireBannerComposers(carriedDrafts = new Map())", "function bannerReplyNote(rowEl, message)");
   assert.match(wiring, /prepareMentionComposer\(field, \[\], carried \? carried\.value : ""\);/);
@@ -114,7 +126,7 @@ test("the room's composer sits under the row from the start, and only while peek
 
 test("a reply from the banner goes down the room's path, reads the arrival, and folds the banner", () => {
   const send = between(inbox, "async function sendBannerReply(rowEl, field, send)", "function relayIdentityRowHtml(identity, show = null)");
-  assert.match(send, /res = await window\.relay\.sendReply\(\{\n\s+text, recipient, files, idempotencyKey, agentMentions,\n\s+\.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId \} : \{\}\),\n\s+chat: \{/);
+  assert.match(send, /res = await window\.relay\.sendReply\(\{\n\s+text, recipient, files, idempotencyKey, agentMentions,\n(?:\s+\/\/.*\n)?\s+\.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId, replyKind: "thread" \} : \{\}\),\n\s+chat: \{/);
   // A reply that arrived in a thread is answered in it.
   assert.match(send, /const inReplyToRelayId = String\(field\.closest\("\.qr-banner"\)\?\.getAttribute\("data-reply-to"\) \|\| ""\);/);
   assert.match(send, /const idempotencyKey = `pill-reply-\$\{crypto\.randomUUID\(\)\}`;/);

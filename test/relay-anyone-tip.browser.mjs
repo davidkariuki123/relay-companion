@@ -42,7 +42,7 @@ try {
   });
   await page.goto(new URL("../overlay/inbox.html", import.meta.url).href);
   await page.locator(".rat-summary").waitFor();
-  await page.locator("#requestsEntry").waitFor();
+  await page.locator(".request-row").waitFor();
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   await page.evaluate(() => window.events.onOpenFull());
   await page.clock.runFor(500);
@@ -68,7 +68,7 @@ try {
     assert.doesNotMatch(example.prompt, /include (all|everything)|summary/i, "prompts never ask for extra context or a summary");
   }
   assert.equal(await page.locator(".rat-result").evaluate((el) => getComputedStyle(el).textDecorationLine), "none");
-  assert.ok(await page.locator("#requestsEntry").evaluate((el) => el.getBoundingClientRect().bottom <= document.querySelector(".rat-card").getBoundingClientRect().top));
+  assert.ok(await page.locator(".request-row").evaluate((el) => el.getBoundingClientRect().top >= document.querySelector(".rat-card").getBoundingClientRect().bottom), "the tip sits above the list, a new sender's row included");
 
   // Frequent inbox pushes must not reset or replace a card in use.
   await page.getByRole("button", {name:"Example 1 of 5",exact:true}).click();
@@ -135,10 +135,8 @@ try {
   ]);
   assert.equal(new Set(EXAMPLES.map((example) => example.id)).size, EXAMPLES.length, "every example has its own id");
   await page.evaluate(() => window.events.onInbox(structuredClone(window.fixture)));
-  await page.locator("#requestsEntry").click();
-  assert.equal(await page.locator("#relayAnyoneTip").isVisible(), false, "tip stays out of the Requests page");
-  await page.locator("#requestsBack").click();
-  assert.equal(await page.locator(".rat-summary").isVisible(), true, "navigation preserves minimisation within the open window");
+  await page.locator(".request-row .request-sent").click();
+  assert.equal(await page.locator(".rat-summary").isVisible(), true, "tapping a locked row keeps the tip minimised");
   await page.locator("#closeX").click();
   await page.clock.runFor(500);
   assert.equal(await page.evaluate(() => window.dismissed), 1);
@@ -171,7 +169,7 @@ try {
       window.events.onInbox(structuredClone(window.fixture));
     }, count);
     assert.equal(await page.locator(".rat-card").isVisible(), true);
-    assert.equal(await page.locator("#requestsEntry").count(), count ? 1 : 0);
+    assert.equal(await page.locator(".request-row").count(), count ? 1 : 0);
   }
   await page.emulateMedia({reducedMotion:"reduce"});
   await page.clock.runFor(100);
@@ -199,5 +197,5 @@ try {
     }
   }
   assert.deepEqual(errors, []);
-  console.log("PASS: Five ways to use Relay with per-slide way and result, five timed examples, poll stability, no pause button, copy success/failure, engagement events, keyboard/swipe, minimise, Requests, close/reopen, reduced motion, light/dark layout.");
+  console.log("PASS: Five ways to use Relay with per-slide way and result, five timed examples, poll stability, no pause button, copy success/failure, engagement events, keyboard/swipe, minimise, locked new sender, close/reopen, reduced motion, light/dark layout.");
 } finally { await browser.close(); }

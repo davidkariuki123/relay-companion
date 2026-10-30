@@ -10,7 +10,7 @@ function section(start, end) {
   assert.ok(a >= 0 && b > a);
   return html.slice(a, b);
 }
-const wire = section("  function wireHostOpen(scope)", "  // Before 0.1.290");
+const wire = section("  function wireHostOpen(scope)", "  // What the sender meant by a message's reply link");
 const rows = section("  function wireSessionPickerRows(scope)", "  async function retrySessionPicker");
 const deliver = section("  async function deliverSessionSelection(", "  async function loadSessionPicker");
 // A tile in the reader (inside .rd-host-actions) or in a room bubble (not).
@@ -166,6 +166,8 @@ for (const provider of ["codex", "claude"]) {
           activeView: "threads", appExpanded: expanded, readerId: null,
           wideLayoutActive: () => expanded, wideSideActivation: false, wideSideTab: () => "relays",
           assessReaderFit: () => {}, threadDetailEntryFollow: null, roomViewTransition: null,
+          setProtoPref: () => {}, BANNER_HOST_PREF: "bannerHost",
+          relayById: () => ({ senderEmail: "known@example.com" }), requestAddresses: () => new Set(),
           supersedeRoomViewTransition: () => {},
           readerSource: "relays", readerReturn: null, readerTab: "agent",
           threadDetailId: "chat-fixture", threadDetailPartyHint: "Fixture",
@@ -227,6 +229,7 @@ test("leaving during reader expansion does not reveal or fetch a stale picker", 
   const context = vm.createContext({
     activeView: "threads", readerId: null, expandedRelayId: null,
     sessionPickerState: null, agentSurfacePreference: () => "desktop",
+    setProtoPref: () => {}, BANNER_HOST_PREF: "bannerHost",
     openReader: () => new Promise(resolve => { finish = resolve; }),
     armSessionPickerReveal: () => assert.fail("Revealed a cancelled picker"),
     window: { relay: { sessionPicker: () => assert.fail("Fetched a cancelled picker") } },

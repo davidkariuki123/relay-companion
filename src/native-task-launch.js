@@ -296,7 +296,40 @@ export async function submitNativeTurn(session, ready, prompt, messageId) {
 // the turn itself when it accepted the submission.
 export function claudeTurnStartedAfter(rows, messageId) {
   const at = rows.findIndex((row) => row.type === "user" && row.uuid === messageId);
-  return at >= 0 && rows.slice(at + 1).some((row) => row.type === "assistant");
+  // Relay's own notices are never the model answering.
+  return at >= 0 && rows.slice(at + 1).some((row) => row.type === "assistant" && row.entrypoint !== "relay-execute");
+}
+
+export const CLAUDE_MOVED_NOTICE = "[Relay moved this Task to a background run because Claude did not start it here. Do not start the Task in this conversation. This notice is from Relay, not a model response.]";
+
+/**
+ * Take a pushed Task back from the Relay-made Claude conversation that never
+ * started it (only for a Task the phone sent): stop the Claude process
+ * holding it, so the held message cannot start when someone next types
+ * there, then leave a notice saying where the Task went. Resolves
+ * { started } if the model answered after all, { retired } once nothing can
+ * start it there, or neither if the process would not stop.
+ */
+export async function retireUnstartedClaudeConversation(session, { messageId, timeoutMs = 5000, kill = (pid) => process.kill(pid) } = {}) {
+  if (session?.provider !== "claude" || !session.nativeId) return {};
+  const registry = path.join(claudeHome(), "sessions");
+  const pids = names(registry).filter((n) => n.endsWith(".json")).map((n) => readJson(path.join(registry, n)))
+    .filter((r) => r?.sessionId === session.nativeId && alive(r.pid)).map((r) => Number(r.pid));
+  for (const pid of pids) { try { kill(pid); } catch { /* already gone */ } }
+  const deadline = Date.now() + timeoutMs;
+  while (pids.some(alive)) {
+    if (Date.now() > deadline) return {};
+    await sleep(200);
+  }
+  const rows = nativeTranscriptRows(session);
+  if (claudeTurnStartedAfter(rows, messageId)) return { started: true };
+  const last = rows.filter((row) => row.uuid).at(-1);
+  fs.appendFileSync(session.transcript, JSON.stringify({
+    type: "assistant", parentUuid: last?.uuid ?? null, isSidechain: false, uuid: randomUUID(), timestamp: new Date().toISOString(),
+    sessionId: session.nativeId, cwd: session.cwd, userType: "external", entrypoint: "relay-execute",
+    message: { id: `relay-moved-${randomUUID()}`, type: "message", role: "assistant", content: [{ type: "text", text: CLAUDE_MOVED_NOTICE }], stop_reason: "end_turn", usage: {} },
+  }) + "\n");
+  return { retired: true };
 }
 export async function nativeTurnStarted(session, messageId, { timeoutMs = 12000 } = {}) {
   if (session.provider !== "claude") return true;

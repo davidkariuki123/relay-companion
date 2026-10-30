@@ -113,7 +113,7 @@ test("a queued reader reply restores in Granular after a renderer restart", asyn
   assert.equal(restored.groupId, "grp_granular");
   assert.equal(restored.groupName, "Granular");
   assert.equal(restored.party, "Granular");
-  assert.equal(restored.explicitReply, true);
+  assert.equal(restored.replyKind, "thread", "the reader answers the Relay in its thread");
   assert.equal(restored.inReplyToRelayId, "relay_shane");
 });
 

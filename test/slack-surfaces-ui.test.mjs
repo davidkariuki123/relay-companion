@@ -30,6 +30,7 @@ function chatsRuntime(payload) {
     const assignFallbackChatIds = () => {};
     const knownAddresses = () => new Set();
     const isRequestRoom = () => false;
+    const ignoredRequestKeys = () => new Set();
     function slackMessagesVisible() { return false; }
     ${between(html, "function isSlackIntegratedRoom(room)", "\n  // The background service stages")}
     ${between(html, "function normalizedPartyName(", "function chatRoomForThread(")}
@@ -233,8 +234,9 @@ test("Inbox counts Relay's own unread only; Slack's messages never count", () =>
   assert.doesNotMatch(renderAll, /slackBadgeEl/);
 
   const rows = between(html, "function relayIdentityRows()", "function renderRelays()");
-  assert.match(rows, /\(room\.hasActivity !== false \|\| slackChannelRoomListed\(room\)\) && !isRequestRoom\(room, known\)/,
-    "Slack channels you are in join the same list; requests still wait in Requests");
+  assert.match(rows, /\.filter\(\(room\) => room\.hasActivity !== false \|\| slackChannelRoomListed\(room\)\)/,
+    "Slack channels you are in join the same list");
+  assert.match(rows, /requestRoom: isRequestRoom\(room, known\)/, "a new sender's room joins it too, marked locked");
 });
 
 test("an exact-linked Relay room paints first, then hydrates and polls its canonical body", () => {

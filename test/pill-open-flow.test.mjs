@@ -68,7 +68,7 @@ test("the macOS menu-bar icon has a stable shipped identity", () => {
   assert.match(main, /persistentId:[\s\S]*?tray\.getGUID\(\)/, "health reports the native Tray identity");
   assert.match(main, /RELAY_BUNDLE_IDS = \[[\s\S]*?RELAY_MAC_BUNDLE_IDENTIFIER/, "the branded pill remains self-owned when its composer activates");
   assert.match(main, /app\.on\("will-quit", preserveMacTrayPositionForExit\)/);
-  assert.match(main, /preserveMacTrayPositionForExit\(\);\s*app\.exit\(0\)/, "app.exit preserves position explicitly");
+  assert.match(main, /preserveMacTrayPositionForExit\(\);(?:\s*\/\/[^\n]*|\s*console\.error\(`[^`]*`\);)*\s*app\.exit\(/, "app.exit preserves position explicitly");
   assert.match(main, /tray: trayStatus\(\)/);
 });
 
@@ -388,7 +388,9 @@ test("a notification presents as a banner, sized to the rows it actually shows",
 
 test("dismissing a visible notification retires it instead of replaying it", () => {
   const dismissFn = sliceFunction(html, "function dismissOverlay()");
-  assert.match(dismissFn, /if \(!wasGhost\) sendAttentionDone\(true\)/);
+  // A ghost banner reports too, while its window is still visible: its dwell is the presentation.
+  assert.match(dismissFn, /\n\s+sendAttentionDone\(true\);/);
+  assert.doesNotMatch(dismissFn, /if \(!wasGhost\) sendAttentionDone/);
   assert.doesNotMatch(dismissFn, /sendAttentionDone\(false\)/);
 });
 

@@ -387,7 +387,11 @@ member at once.
 
 To attach a local file, add `files: ["<absolute path>"]` to the JSON passed on
 stdin to `send`, or `attachments: [{path: "<absolute path>", name: "report.pdf"}]`.
-The helper reads and hashes files before sending.
+The helper reads and hashes files before sending. When the file is an edited
+copy of one already in the conversation, add `revises: "<fileId of the earlier
+file>"` to that attachment, so the people and agents in the chat can tell it
+is the next version rather than a new file. Relay refuses a fileId from
+another conversation and never guesses a revision on its own.
 Use `attachment <relay-id> <attachment-id>` for an authorized download URL.
 Download URLs are private, temporary transport.
 

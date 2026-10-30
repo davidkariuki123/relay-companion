@@ -81,7 +81,7 @@ test("a dangling or re-pointed Relay.app link is reported as the reason the app 
 
 test("a pill the person quit is waiting on them, a hidden one is running by choice, and a broken launch file is named without its path", (t) => {
   const home = macHome(t, { linkInPlist: false });
-  home.write(path.join(home.homeDir, ".relay", "recovery", "intent.json"), { schema: 1, stopped: true, at: 1 });
+  home.write(path.join(home.homeDir, ".relay", "recovery", "intent.json"), { schema: 1, stopped: true, at: Date.now() });
   let report = collect(home, [home.daemon]);
   assert.equal(report.health.state, "waiting");
   assert.equal(report.health.reason, "pill-stopped");

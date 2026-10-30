@@ -14,7 +14,7 @@ assert.ok(start >= 0 && end > start && pickerStart >= 0 && pickerEnd > pickerSta
 // permission gates, and the real edit/delete rules (WhatsApp's windows).
 const render = new Function('m', 'mine', 'payload', 'groupPostingBlocked', 'messageDeleteConfirmIds',
   `const textLike=true, attachmentOnly=false, editingMessage=false, esc=s=>String(s);
-   const roomReplyThreads=null, focusedReplyRoot=null;
+   const roomReplyThreads=null, focusedReplyRoot=null, slackFocusedThreadId="", chatRoom=null;
    const REACTIONS_ENABLED=true, RX_PRIMARY=['👍'];
    ${html.slice(rulesStart, rulesEnd)}
    ${html.slice(pickerStart, pickerEnd)}
@@ -23,9 +23,11 @@ const minutesAgo = (n) => new Date(Date.now() - n * 60 * 1000).toISOString();
 const message = { id:'message-1', body:'Hello', at:minutesAgo(1) };
 const enabled = { features:{ messageMutations:true } };
 
-test('side menu retains reply but restricts mutation actions to eligible sent messages', () => {
+test('side menu retains quote but restricts mutation actions to eligible sent messages', () => {
   const sent = render(message, true, enabled, false, new Set());
-  assert.match(sent, /data-reply-to=/);
+  // Without threads the one reply verb is Quote (Shane, 2026-10-19).
+  assert.match(sent, /data-reply-quote=/);
+  assert.doesNotMatch(sent, /data-reply-thread=|data-reply-to=/);
   assert.match(sent, /data-message-edit=/);
   assert.match(sent, /data-message-delete=/);
   assert.match(sent, /data-rx-pick="message-1"/);
@@ -35,7 +37,7 @@ test('side menu retains reply but restricts mutation actions to eligible sent me
     [{...message, pending:true}, true, enabled],
   ]) {
     const result = render(item, mine, flags, false, new Set());
-    assert.match(result, /data-reply-to=/);
+    assert.match(result, /data-reply-quote=/);
     assert.doesNotMatch(result, /data-message-(?:edit|delete)=/);
   }
   assert.equal(render(message, false, enabled, true, new Set()), '');

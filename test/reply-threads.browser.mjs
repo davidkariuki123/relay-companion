@@ -21,31 +21,31 @@ try {
       { id: "relay_r1", threadId: "t1", kind: "message", relayNotificationKind: "plain_relay", title: "Conductor support research",
         forHuman: "Relay already works in Conductor.", forAgent: "The detail.", ...sven, createdAt: ago(60), unread: false, source: pill },
       { id: "relay_t2", threadId: "t1", kind: "message", title: "", forHuman: "Yes, it's only a link.", forAgent: "", ...sven,
-        inReplyToRelayId: "relay_t1", createdAt: ago(40), unread: true, source: pill },
+        inReplyToRelayId: "relay_t1", replyKind: "thread", createdAt: ago(40), unread: true, source: pill },
       { id: "relay_t3", threadId: "t3", kind: "message", title: "", forHuman: "Nice. Are we demoing Thursday?", forAgent: "", ...sven,
         createdAt: ago(30), unread: false, source: pill },
       { id: "relay_t6", threadId: "t3", kind: "message", title: "", forHuman: "Thursday is good.", forAgent: "", ...sven,
-        inReplyToRelayId: "relay_t3", createdAt: ago(3), unread: true, source: pill },
+        inReplyToRelayId: "relay_t3", replyKind: "thread", createdAt: ago(3), unread: true, source: pill },
       // An image sent alone, by a phone build that still filled the body with
       // "Sent <name>": the image is the message and its thread hangs off it.
       { id: "relay_i1", threadId: "t3", kind: "message", title: "", forHuman: "Sent image:1000166080", forAgent: "", ...sven,
         attachments: [{ id: "att_shot", name: "image:1000166080", contentType: "image/png", bytes: 68 }],
         createdAt: ago(25), unread: false, source: { host: "relay-mobile" } },
       { id: "relay_i2", threadId: "t3", kind: "message", title: "", forHuman: "That evolution card looks great.", forAgent: "", ...sven,
-        inReplyToRelayId: "relay_i1", createdAt: ago(24), unread: false, source: pill },
-      // An older client anchored every send to the message above it: no thread.
+        inReplyToRelayId: "relay_i1", replyKind: "thread", createdAt: ago(24), unread: false, source: pill },
+      // A link the sender gave no meaning to (an older client's anchor): no thread.
       { id: "relay_t5", threadId: "t3", kind: "message", title: "", forHuman: "Sent from an old pill.", forAgent: "", ...sven,
         inReplyToRelayId: "relay_t4", createdAt: ago(10), unread: false, source: { host: "relay-preview", clientVersion: "0.1.200" } },
     ];
     const sent = [
       { relayId: "relay_t1", threadId: "t1", kind: "message", title: "", forHuman: "Can we ship it this week?", forAgent: "", ...toSven,
-        inReplyToRelayId: "relay_r1", createdAt: ago(50), updatedAt: ago(50), source: pill,
+        inReplyToRelayId: "relay_r1", replyKind: "thread", createdAt: ago(50), updatedAt: ago(50), source: pill,
         reactions: { aggregates: [{ emoji: "👍", count: 1, reactedByMe: false, actors: [{ name: "Sven Wellmann" }] }] } },
       { relayId: "relay_t4", threadId: "t3", kind: "message", title: "", forHuman: "Yes. Checklist coming.", forAgent: "", ...toSven,
-        inReplyToRelayId: "relay_t3", createdAt: ago(20), updatedAt: ago(20), source: pill },
+        inReplyToRelayId: "relay_t3", replyKind: "thread", createdAt: ago(20), updatedAt: ago(20), source: pill },
       // A full Relay sent as a reply stays in the room with its quote.
       { relayId: "relay_r2", threadId: "t3", kind: "message", title: "Execute demo checklist", forHuman: "Here is the list.", forAgent: "The detail.", ...toSven,
-        inReplyToRelayId: "relay_t3", createdAt: ago(5), updatedAt: ago(5), source: pill },
+        inReplyToRelayId: "relay_t3", replyKind: "thread", createdAt: ago(5), updatedAt: ago(5), source: pill },
     ];
     const group = { id: "grp_designs", name: "Designs", owner: { userId: "self", name: "Shane", email: "shane@example.com" },
       members: [{ userId: "sven", name: "Sven Wellmann", email: "sven@example.com" }] };
@@ -108,7 +108,8 @@ try {
     await page.waitForTimeout(900);
   }
   assert.ok(await page.evaluate(() => ["relay_t2", "relay_t6"].every((id) => window.acks.includes(id))), "the capsule reaches every new reply");
-  assert.equal(await page.locator('[data-msg="relay_r1"] [data-reply-to="relay_r1"]').innerText().catch(() => ""), "reply in thread");
+  assert.equal(await page.locator('[data-msg="relay_r1"] [data-reply-thread="relay_r1"]').innerText().catch(() => ""), "reply in thread");
+  assert.equal(await page.locator('[data-msg="relay_r1"] [data-reply-quote="relay_r1"]').innerText().catch(() => ""), "quote", "Quote sits beside it in the room");
 
   // A text's thread opens as the room's subview; its composer answers the text.
   await page.locator('.th-rt-link[data-reply-thread-open="relay_t3"]').click();
@@ -118,11 +119,14 @@ try {
   assert.match(await page.locator("#thRows .th-rt-divider").innerText(), /2 replies/i);
   assert.equal(await page.evaluate(() => chatRoomForThread(threadDetailId).unreadCount), 0, "seen replies are read");
   assert.equal(await page.locator("#thQrInput").getAttribute("data-placeholder"), "Reply in thread…");
-  assert.equal(await page.locator('[data-reply-to="relay_t4"]').innerText().catch(() => ""), "reply", "inside a thread Reply quotes");
+  assert.equal(await page.locator('[data-reply-quote="relay_t4"]').innerText().catch(() => ""), "quote", "inside a thread the only verb is Quote");
+  assert.equal(await page.locator('#thRows [data-reply-thread]').count(), 0, "Reply in thread is not offered inside a thread");
+  assert.equal(await page.locator('#thRows [data-reply-quote="relay_t3"]').count(), 0, "nor Quote on the message the thread hangs from");
   await page.locator("#thQrInput").fill("Tuesday works too.");
   await page.locator("#thQrSend").click();
   await page.waitForFunction(() => window.sends.length === 1);
   assert.equal((await page.evaluate(() => window.sends))[0].inReplyToRelayId, "relay_t3");
+  assert.equal((await page.evaluate(() => window.sends))[0].replyKind, "thread", "the thread composer answers in the thread");
   assert.equal(await page.evaluate(() => chatRoomForThread(threadDetailId).unreadCount), 0, "sending does not add an unread message");
   // Back leaves the thread, not the room.
   await page.locator("#thBack").click();

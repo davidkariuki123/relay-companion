@@ -263,7 +263,7 @@ test("the pill draws Your AIs from that evidence, first on the You page, with th
   assert.match(entry, /\$\{!attention && shown\.length \? `<span class="setup-marks" aria-hidden="true">/);
   assert.match(entry, /<svg class="sv-row-chev"/);
   // The inbox's one quiet word is the setup nudge; the Slack row is its sibling.
-  assert.match(inbox, /<div id="relaysIntro" hidden><div id="relaysRequestsSummary"><\/div><div id="setupNudge"><\/div><div id="slackNudge"><\/div><div id="relayAnyoneTip" hidden><\/div><\/div>/);
+  assert.match(inbox, /<div id="relaysIntro" hidden><div id="setupNudge"><\/div><div id="slackNudge"><\/div><div id="relayAnyoneTip" hidden><\/div><\/div>/);
 
   // "Connected" only from a registered, valid entry; "working now" only from a live bridge.
   const status = inbox.slice(inbox.indexOf("function setupLocalStatus(host)"), inbox.indexOf("function setupDotHtml("));

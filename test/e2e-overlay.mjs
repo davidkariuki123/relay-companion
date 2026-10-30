@@ -563,7 +563,7 @@ try {
     return true;
   }, { label: "conversation Collapse restores compact native geometry" });
 
-  // ---- 5. a new relay revives a dismissed pill and leaves it latched ----
+  // ---- 5. put the pill away ----
   // Settle whatever is on stage FIRST, through the same seam the renderer uses
   // after an interacted dwell. The exit is a 300ms animation and an arrival
   // landing inside it calls cancelBye() by design ("a banner arriving mid-exit
@@ -581,60 +581,44 @@ try {
   );
   check("dismiss: ✕ hides the window", true);
 
+  // ---- 5. a new relay while put away shows a ghost banner; only a tap brings the pill back ----
   packets.pkt_live_5 = packet("pkt_live_5", "Relay after dismissal", "2026-07-10T00:07:00.000Z");
   writeState(packets);
-  const revived = await retry(async () => {
+  const ghosted = await retry(async () => {
     const state = await evalIn(mainConn, "global.__relayTest.state()");
     const ui = await evalIn(
       pageConn,
-      `(() => ({ notifying: document.getElementById('card').classList.contains('notifying'), count: document.getElementById('count').textContent }))()`,
+      `(() => { const c = document.getElementById('card').classList; return { ghost: c.contains('ghost'), notifying: c.contains('notifying'), count: document.getElementById('count').textContent }; })()`,
     );
-    if (!state.visible || state.dismissed || !ui.notifying) {
-      throw new Error(`visible=${state.visible} dismissed=${state.dismissed} notifying=${ui.notifying}`);
+    if (!state.visible || !state.dismissed || !ui.ghost || !ui.notifying) {
+      throw new Error(`visible=${state.visible} dismissed=${state.dismissed} ghost=${ui.ghost} notifying=${ui.notifying}`);
     }
     return { state, ui };
-  }, { tries: 24, label: "dismissed pill revival" });
+  }, { tries: 24, label: "ghost banner while dismissed" });
   check(
-    "re-alert: a fresh relay clears dismissal and shows all unread relays",
-    revived.state.attentionLatched === true && revived.ui.count === "5",
-    `latched=${revived.state.attentionLatched} count=${revived.ui.count}`,
+    "ghost: a fresh relay shows a banner without un-hiding the pill",
+    ghosted.state.dismissed === true && ghosted.state.attentionLatched === false && ghosted.ui.count === "5",
+    `dismissed=${ghosted.state.dismissed} latched=${ghosted.state.attentionLatched} count=${ghosted.ui.count}`,
   );
-  await evalIn(pageConn, "window.dispatchEvent(new MouseEvent('mousemove', { clientX: 0, clientY: 800 })); 'pointer-away'");
-  // The revived card may be sticky by now (its earlier dwells were never
-  // confirmed), and sticky cards deliberately never auto-collapse. A sticky
-  // banner folds on the first touch; an ordinary banner opens on the first
-  // lockup tap and folds on the second. Exercise that real interaction instead
-  // of assuming the main process always classifies this revival as sticky.
-  const revivedFolded = await retry(async () => {
-    await evalIn(
-      pageConn,
-      `(() => {
-        const card = document.getElementById('card');
-        card.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-        if (!card.classList.contains('collapsed')) {
-          const lockup = document.getElementById('lockup');
-          lockup.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
-          window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
-        }
-        return 'touched';
-      })()`,
-    );
-    const collapsed = await evalIn(pageConn, "document.getElementById('card').classList.contains('collapsed')");
+  // Tapping the banner is the deliberate act that brings the pill back.
+  await evalIn(pageConn, `(() => {
+    document.getElementById('lockup').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    return 'tapped';
+  })()`);
+  const tappedOpen = await retry(async () => {
     const state = await evalIn(mainConn, "global.__relayTest.state()");
-    if (!collapsed || !state.visible) throw new Error(`collapsed=${collapsed} visible=${state.visible}`);
+    const ui = await evalIn(pageConn, "(() => { const c = document.getElementById('card').classList; return { peek: c.contains('peek'), collapsed: c.contains('collapsed') }; })()");
+    if (!state.visible || state.dismissed || ui.peek || ui.collapsed) {
+      throw new Error(`visible=${state.visible} dismissed=${state.dismissed} peek=${ui.peek} collapsed=${ui.collapsed}`);
+    }
     return state;
-  }, { tries: 30, delayMs: 250, label: "revived pill collapse after touch" });
-  check(
-    "re-alert: revived notification collapses but the pill stays until another explicit dismiss",
-    revivedFolded.attentionLatched === true &&
-      revivedFolded.dismissed === false &&
-      (await evalIn(pageConn, "document.getElementById('count').textContent")) === "5 unread",
-    `latched=${revivedFolded.attentionLatched} dismissed=${revivedFolded.dismissed}`,
-  );
+  }, { tries: 20, label: "ghost banner tap opens the pill" });
+  check("ghost: tapping the banner brings the pill back open", tappedOpen.dismissed === false);
   // Drain any dwell-unconfirmed leftovers before dismissing again. On a quiet
   // eval machine no REAL input reaches the idle sampler, so earlier folds
   // (e.g. pkt_live_4's) abort back into the attention queue — and a pending
-  // entry legitimately revives the pill BY DESIGN, racing the explicit ✕ below
+  // entry legitimately presents again BY DESIGN, racing the explicit ✕ below
   // (the arrival can cancel the renderer's bye timer so relay:dismiss never
   // fires). Confirm like a present human first — the same seam boot-stack uses.
   await retry(async () => {
@@ -670,6 +654,7 @@ try {
       pageConn,
       `(() => ({
         notifying: document.getElementById('card').classList.contains('notifying'),
+        ghost: document.getElementById('card').classList.contains('ghost'),
         count: document.getElementById('count').textContent,
         titles: [...document.querySelectorAll('#relaysList .th-title')].map((el) => el.textContent),
         unread: [...document.querySelectorAll('#relaysList .th-count')].map((el) => el.textContent),
@@ -678,22 +663,22 @@ try {
     if (
       !state.visible ||
       !ui.notifying ||
-      state.dismissed ||
-      !state.attentionLatched ||
+      !ui.ghost ||
+      !state.dismissed ||
       ui.count !== "7" ||
       ui.titles[0] !== "Latest relay while away" ||
       ui.unread[0] !== "7"
     ) {
       throw new Error(
-        `visible=${state.visible} notifying=${ui.notifying} dismissed=${state.dismissed} latched=${state.attentionLatched} count=${ui.count}`,
+        `visible=${state.visible} notifying=${ui.notifying} ghost=${ui.ghost} dismissed=${state.dismissed} count=${ui.count}`,
       );
     }
     return { state, ui };
   }, { tries: 30, label: "return notification stack" });
   check(
-    "return-stack: return revives the pill with the latest room preview and full unread total",
-    returnUi.state.dismissed === false &&
-      returnUi.state.attentionLatched === true &&
+    "return-stack: return shows a ghost banner with the latest room preview and full unread total",
+    returnUi.state.dismissed === true &&
+      returnUi.state.attentionLatched === false &&
       returnUi.ui.count === "7" &&
       returnUi.ui.titles[0] === "Latest relay while away" &&
       returnUi.ui.unread[0] === "7",
@@ -725,7 +710,26 @@ try {
     `pending=${unlockedState.pendingAttention.join(",")} presented=${unlockedState.presentedRelayIds.includes("pkt_away_7")}`,
   );
 
+  // The ghost banner fades on its own and the pill it never showed stays put away.
+  const ghostFaded = await retry(async () => {
+    const state = await evalIn(mainConn, "global.__relayTest.state()");
+    if (state.visible || !state.dismissed) throw new Error(`visible=${state.visible} dismissed=${state.dismissed}`);
+    return state;
+  }, { tries: 60, label: "ghost banner fades" });
+  await sleep(1200);
+  const afterFade = await evalIn(mainConn, "global.__relayTest.state()");
+  check(
+    "ghost: the banner fades and the pill stays hidden",
+    ghostFaded.dismissed === true && afterFade.visible === false && afterFade.dismissed === true,
+    `visible=${afterFade.visible} dismissed=${afterFade.dismissed}`,
+  );
+
   // An explicit tray dismissal is authoritative even if a lock follows immediately.
+  await evalIn(mainConn, "global.__relayTest.showFromTray(); 'shown-before-tray-hide'");
+  await retry(async () => {
+    if ((await evalIn(mainConn, "global.__relayTest.state().visible")) !== true) throw new Error("not shown");
+  }, { tries: 20, label: "tray show before tray hide" });
+  await sleep(400);
   await evalIn(mainConn, "global.__relayTest.toggleFromTray(); 'tray-hidden'");
   const trayHidden = await evalIn(mainConn, "global.__relayTest.state()");
   await evalIn(mainConn, "global.__relayTest.setAway(true); 'locked-after-tray-hide'");
@@ -1129,7 +1133,7 @@ try {
     const input = document.getElementById('thQrInput');
     input.value = 'Specific reply draft';
     input.dispatchEvent(new Event('input', { bubbles:true }));
-    document.querySelector('[data-reply-to="pkt_thread_a"]').click();
+    document.querySelector('[data-reply-quote="pkt_thread_a"]').click();
   })()`);
   const targetedReply = await retry(async () => {
     const ui = await evalIn(pageConn, `(() => ({
@@ -1161,7 +1165,7 @@ try {
   })()`);
   check(
     "relays: a specific reply attaches its source to the composer and delivered replies jump back to it",
-    targetedReply.who === "Replying to E2E Harness"
+    targetedReply.who === "Quoting E2E Harness"
       && targetedReply.draft === "Specific reply draft"
       && !cancelledReply.target
       && cancelledReply.draft === "Specific reply draft"
@@ -1731,9 +1735,8 @@ try {
     return state;
   }, { label: "hidden pill goes away on ✕" });
 
-  // THE point of the feature: a new relay must NOT bring it back. This is precisely
-  // where a merely-dismissed pill reappears — see scenario 6 (re-alert), which
-  // asserts the opposite for the same event.
+  // THE point of the feature: a new relay must NOT bring it back, not even as the
+  // ghost banner a merely-dismissed pill shows (scenarios 5 and 6).
   packets.pkt_quiet_8 = packet("pkt_quiet_8", "Relay that must stay quiet", "2026-07-10T00:30:00.000Z");
   writeState(packets);
   await sleep(6000);

@@ -42,7 +42,15 @@ function claudeStartPrompt(known) {
 const CHATGPT_START_PROMPT = "Help me get started with Relay.";
 const CHATGPT_START_URL = `https://chatgpt.com/?q=${encodeURIComponent(CHATGPT_START_PROMPT)}`;
 
-function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeOwner = () => "", openExternal, writeClipboard, now = Date.now, chatGptApp = () => false }) {
+// A WORK CLAUDE ACCOUNT (2026-10-28). On Claude Team and Enterprise plans only
+// an Owner can add a custom connector, so the add dialog fails for everyone
+// else. The person says which account they use; a work account sends its
+// Owner Relay's admin page, says when Relay was added (Relay can't see a
+// Claude organization's settings), then connects from Claude's own list.
+const CLAUDE_ACCOUNTS = new Set(["personal", "work"]);
+const CLAUDE_ADMIN_PATH = "/connect/claude/admin";
+
+function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeOwner = () => "", openExternal, writeClipboard, now = Date.now, chatGptApp = () => false, webOrigin = () => "https://sendrelays.com" }) {
   const runs = new Map(); // key -> live setup run (code only in memory)
   const server = new Map(); // key -> last /v1/agent/onboarding answer
   // key + surface -> { startedAt, connected, checked, error }: a hosted connector being added
@@ -55,6 +63,7 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
     return "";
   }
   const ownsScheme = (scheme) => { try { return Boolean(String(schemeOwner(scheme) || "").trim()); } catch { return false; } };
+  const claudeAdminUrl = () => new URL(CLAUDE_ADMIN_PATH, webOrigin()).toString();
 
   function record(key) { return key && store[key] && typeof store[key] === "object" ? store[key] : null; }
   function save(key, value) {
@@ -97,7 +106,34 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
         // An AI asked Relay how to begin (server fact): the lesson is under way.
         tutorialStarted: Boolean(known?.tutorialStartedAt),
         startPrompt: chosen?.host === "chatgpt" ? CHATGPT_START_PROMPT : claudeStartPrompt(known),
+        claudeAccount: chosen?.claudeAccount || "",
+        claudeAdminAdded: Boolean(chosen?.claudeAdminAdded),
+        claudeAdminUrl: claudeAdminUrl(),
       };
+    },
+    /** Personal (Free, Pro, Max) or work (Team, Enterprise): a work account's Owner adds Relay first. */
+    setClaudeAccount(key, kind) {
+      const chosen = record(key);
+      if (chosen?.host !== "claude") throw new Error("Choose Claude first.");
+      if (kind && !CLAUDE_ACCOUNTS.has(kind)) throw new Error("Choose a personal or a work account.");
+      const { claudeAccount: _account, claudeAdminAdded: _added, ...rest } = chosen;
+      save(key, kind ? { ...rest, claudeAccount: kind } : rest);
+      return api.snapshot(key);
+    },
+    /** The person's word that their Owner added Relay; false goes back to asking them. */
+    setClaudeAdminAdded(key, added) {
+      const chosen = record(key);
+      if (chosen?.host !== "claude" || chosen.claudeAccount !== "work") throw new Error("Choose a work Claude account first.");
+      save(key, { ...chosen, claudeAdminAdded: added === true });
+      return api.snapshot(key);
+    },
+    copyClaudeAdminLink() {
+      writeClipboard(claudeAdminUrl());
+      return { ok: true };
+    },
+    async openClaudeAdminPage() {
+      await openExternal(claudeAdminUrl());
+      return { ok: true };
     },
     connectorSnapshot(key, surface = "claude") {
       const state = connectors.get(connectorKey(key, surface)) || {};
@@ -122,6 +158,13 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
         throw new Error(`Relay couldn’t reach ${name}’s setup. Check your connection and try again.`);
       }
       if (!/^https:\/\//.test(String(url || "")) && !/^http:\/\/localhost[:/]/.test(String(url || ""))) throw new Error(`Relay couldn’t reach ${name}’s setup.`);
+      // A work account whose Owner added Relay: Connect is in Claude's list, not the add dialog.
+      const chosen = record(key);
+      if (surface === "claude" && chosen?.claudeAccount === "work" && chosen.claudeAdminAdded) {
+        const listed = new URL(url);
+        listed.searchParams.set("to", "connectors");
+        url = listed.toString();
+      }
       await openExternal(url);
       connectors.set(id, { ...connectors.get(id), startedAt: now(), error: "" });
       return api.snapshot(key);
@@ -180,7 +223,8 @@ function createAgentOnboarding({ store = {}, persist = () => {}, client, schemeO
       // A connector works wherever its AI does, so Claude (and ChatGPT's app) has no "where".
       const where = connectorSurface(host) ? "" : HOSTS[host].chat ? place : "";
       const same = current.host === host && current.place === where;
-      save(key, { host, place: where, connectedAt: same ? current.connectedAt || "" : "", ...(same && current.via ? { via: current.via } : {}) });
+      save(key, { host, place: where, connectedAt: same ? current.connectedAt || "" : "", ...(same && current.via ? { via: current.via } : {}),
+        ...(same && current.claudeAccount ? { claudeAccount: current.claudeAccount, claudeAdminAdded: Boolean(current.claudeAdminAdded) } : {}) });
       return api.snapshot(key);
     },
     reset(key) {

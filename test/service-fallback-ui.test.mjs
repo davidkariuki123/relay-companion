@@ -28,7 +28,7 @@ const main = read("../overlay/main.cjs");
 const inbox = read("../overlay/inbox.html");
 
 test("the pill judges the daemon's heartbeat on its own tick and repairs it through the shared module", () => {
-  const watch = between(main, "const daemonWatchEnabled", "if (relaunchRequested || !transport) return;");
+  const watch = between(main, "const daemonWatchEnabled", "if (daemonWatchEnabled && transport) judgeConnectivity(");
   assert.match(watch, /pillLiveness\.daemonRepairDecision\(\{/, "the rule is the shared one, not a second definition");
   assert.match(watch, /updating: updateInFlight \|\| updateTransactionOpen\(\)/, "an update transaction owns the services");
   assert.match(watch, /if \(decision\.action === "repair"\) void repairCompanionDaemon\(decision\)/);
@@ -92,4 +92,24 @@ test("the only thing ever said out loud is a repair that failed, and it is a sen
   const note = between(inbox, '<div class="service-note gone" id="serviceStoppedNote"', "</div>");
   assert.doesNotMatch(note, /<button/i, "no Repair button: the pill already tried, and a person cannot do more from here");
   assert.doesNotMatch(inbox, /payload\.service\?\.daemon === "repairing"[^\n]*textContent/, "a repair in progress is nobody's business");
+});
+
+test("no network is a sentence in the card and the pill stays up through it", () => {
+  const tick = between(main, "const daemonWatchEnabled", "let latestCardMotionId");
+  assert.doesNotMatch(tick, /relaunchPillSoon|app\.exit|app\.quit/, "an outage never quits or relaunches the pill");
+  assert.match(tick, /if \(daemonWatchEnabled && transport\) judgeConnectivity\(transport, readJson\(DAEMON_HEARTBEAT_PATH\), now\)/);
+  assert.match(tick, /pillLiveness\.pillConnectivityDecision\(\{ transport, daemon, osOnline: osReportsOnline\(\), now, lastProbeAt: lastConnectivityProbeAt \}\)/);
+  assert.match(tick, /await client\.me\(\);/, "the retry is one fresh call");
+  assert.match(between(main, "function buildPayload()", "// Pushes are serialized"), /network: networkHealth,/);
+  assert.match(inbox, /offline: "No internet connection\. Relay will reconnect by itself when you’re back online\."/);
+  assert.match(inbox, /networkNoteEl\.classList\.toggle\("gone", !note\)/);
+  const note = between(inbox, '<div class="service-note gone" id="networkNote"', "</div>");
+  assert.doesNotMatch(note, /<button/i, "nothing to press: it reconnects on its own");
+});
+
+test("a pill relaunch under its macOS LaunchAgent exits non-zero so launchd starts it again", () => {
+  const relaunch = between(main, "function relaunchPillSoon(", "const ACCOUNT_CHANGE_RELAUNCH_DELAY_MS");
+  assert.match(relaunch, /process\.platform === "darwin" && process\.env\.XPC_SERVICE_NAME === "work\.relay\.companion\.pill"/);
+  assert.match(relaunch, /if \(!launchdRestarts\) \{\s*try \{\s*app\.relaunch\(\);/);
+  assert.match(relaunch, /app\.exit\(launchdRestarts \? 75 : 0\);/);
 });

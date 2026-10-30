@@ -44,7 +44,7 @@ test("failed sync rechecks permission and stale account responses never paint", 
 
 test("Google consent follows the dev API despite a saved production account website", () => {
   const source = readFileSync(new URL("../overlay/main.cjs", import.meta.url), "utf8");
-  const block = source.slice(source.indexOf("function googleContactsWebUrl("), source.indexOf("function accountSettingsPath("));
+  const block = source.slice(source.indexOf("function matchingWebOrigin("), source.indexOf("function accountSettingsPath("));
   for (const [api, web, expected] of [
     ["https://dev-api.sendrelays.com", "https://sendrelays.com", "https://dev.sendrelays.com"],
     ["https://api.sendrelays.com", "https://sendrelays.com", "https://sendrelays.com"],

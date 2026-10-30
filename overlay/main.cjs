@@ -287,9 +287,10 @@ let overlayElevated = true;
 let lastSig = "";
 
 // Dismissed mode: the user clicked the ✕ on the card, so the overlay stays hidden
-// until they click the Relay status-area icon OR a genuinely new relay arrives. A new
-// relay latches the pill visible until the user dismisses it again, so an arrival can
-// never spend seven seconds behind a lock screen and then disappear for good.
+// until they deliberately open it (status-area icon, Relay.lnk / Relay.app, tapping a
+// banner). A new relay shows as a ghost banner that fades; the attention queue keeps
+// it pending until a visible dwell is confirmed, so a banner that spent its time
+// behind a lock screen replays rather than disappearing for good.
 const OVERLAY_PREFS_PATH = path.join(RELAY_HOME, "overlay-prefs.json");
 // Which view the app is in and how people switch (view-telemetry.cjs). Its
 // own file: overlay-prefs is rebuilt from a fixed list on every write.
@@ -404,6 +405,8 @@ const agentOnboarding = createAgentOnboarding({
   writeClipboard: (text) => clipboard.writeText(text),
   // The server's RELAY_CHATGPT_APP switch: ChatGPT connects by Relay's ChatGPT app.
   chatGptApp: () => currentProductFeatures().chatGptApp === true,
+  // Where a work Claude account's Owner reads how to add Relay.
+  webOrigin: () => matchingWebOrigin(),
 });
 const agentOnboardingRefreshing = new Set();
 // SETUP (2026-10-07): which AIs on this computer and in the browser have Relay.
@@ -478,6 +481,9 @@ let rendererListening = false;
 // The background service as this pill last judged it (see the daemon heartbeat
 // watch near the pill heartbeat below); pushed to the renderer as payload.service.
 let serviceHealth = { daemon: "ok", reason: "", detail: "", since: 0, chats: [] };
+// Whether this pill reaches Relay: "online", "offline" (the OS has no network)
+// or "unreachable" (judgeConnectivity); pushed as payload.network.
+let networkHealth = { state: "online", since: 0 };
 // Engagement drives the adaptive poll cadences: fast host/sent polling only
 // while the user recently touched the pill (or a notification is on stage).
 let lastEngagedAt = 0;
@@ -1293,8 +1299,9 @@ pendingReopenNonce = reopenNonceFromArgs(process.argv);
 // RELAY IN THE DOCK (David, Shane and Sven, 2026-10-08): opening Relay from
 // its Dock icon is Expand: the full app, in front. `relay pill --expand` asks
 // for it, and an open the native Relay.app makes (its Dock icon, Spotlight,
-// Cmd-Tab) is marked --relay-from-application by the CLI. Dev-gated
-// (features.fullAppExpand); with it off such an open is the ordinary reopen.
+// Cmd-Tab) is marked --relay-from-application by the CLI. Every account has
+// it (features.fullAppExpand); with the flag off such an open is the ordinary
+// reopen.
 function expandRequestedByArgs(argv) {
   const args = Array.isArray(argv) ? argv.map(String) : [];
   return args.includes("--relay-expand") || args.includes("--relay-from-application");
@@ -1742,21 +1749,31 @@ async function restartCompanionDaemon() {
 // invoking IPC reply reaches the renderer first — and, after an account change,
 // long enough for the human to read what the reply says (the daemon's restart
 // status and the note about open agent sessions) before the window blinks.
-function relaunchPillSoon({ delayMs = 600 } = {}) {
+function relaunchPillSoon({ delayMs = 600, reason = "unspecified" } = {}) {
   setTimeout(async () => {
     // app.exit() bypasses Electron's before-quit event. Give an acknowledgement
     // already accepted from the renderer one bounded chance to become durable
     // before the account/update relaunch tears the worker down.
     flushAckSideEffectsForExit();
     await waitForStateAcksToDrainWithin(3500);
-    try {
-      app.relaunch();
-    } catch (error) {
-      console.error("[overlay] relaunch failed:", error && error.message);
+    // Under its LaunchAgent the relaunched copy dies with this job, and
+    // KeepAlive {SuccessfulExit=false} treats exit 0 as final: Sven's pill
+    // stayed gone five times (2026-09-28 to 10-19). A non-zero exit is the one
+    // launchd restarts.
+    const launchdRestarts = process.platform === "darwin" && process.env.XPC_SERVICE_NAME === "work.relay.companion.pill";
+    if (!launchdRestarts) {
+      try {
+        app.relaunch();
+      } catch (error) {
+        console.error("[overlay] relaunch failed:", error && error.message);
+      }
     }
     stopStateAckWorker();
     preserveMacTrayPositionForExit();
-    app.exit(0);
+    // A pill that leaves on purpose says so: the five disappearances Sven
+    // reported were readable only because one line named the cause.
+    console.error(`[overlay] ${new Date().toISOString()} pill exiting to relaunch (${reason}); exit ${launchdRestarts ? "75 for launchd to restart it" : "0 after app.relaunch"}`);
+    app.exit(launchdRestarts ? 75 : 0);
   }, delayMs);
 }
 
@@ -1820,7 +1837,7 @@ async function pairWithCode(input) {
       signInHistoryPending.delete(switchedKey);
     }
     await pushInbox(true);
-    relaunchPillSoon({ delayMs: ACCOUNT_CHANGE_RELAUNCH_DELAY_MS });
+    relaunchPillSoon({ delayMs: ACCOUNT_CHANGE_RELAUNCH_DELAY_MS, reason: "account-change" });
     return { ok: true, email: (res.user && res.user.email) || "", daemon };
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
@@ -1848,7 +1865,7 @@ async function signOutAccount() {
     );
     const daemon = await restartCompanionDaemon();
     await pushInbox(true);
-    relaunchPillSoon({ delayMs: ACCOUNT_CHANGE_RELAUNCH_DELAY_MS });
+    relaunchPillSoon({ delayMs: ACCOUNT_CHANGE_RELAUNCH_DELAY_MS, reason: "account-change" });
     return { ok: true, daemon };
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
@@ -1864,13 +1881,16 @@ async function signOutAccount() {
 const SETUP_PATH = "/sign-in?switch=1&redirect_url=%2Fapp%2Fsetup";
 const ACCOUNT_SETTINGS_PATH = "/account/settings";
 
-function googleContactsWebUrl(userId) {
-  // Account settings intentionally use the production website even in dev.
-  // This newly deployed consent page must instead reach the matching dev web.
+// Account settings intentionally use the production website even in dev.
+// A newly deployed page must instead reach the web that matches the API.
+function matchingWebOrigin() {
   const api = process.env.RELAY_API_URL || readConfigFile().apiUrl || "";
-  let origin = webBase();
-  try { if (new URL(api).hostname === "dev-api.sendrelays.com") origin = "https://dev.sendrelays.com"; } catch {}
-  const url = new URL("/app/contacts/google", origin);
+  try { if (new URL(api).hostname === "dev-api.sendrelays.com") return "https://dev.sendrelays.com"; } catch {}
+  return webBase();
+}
+
+function googleContactsWebUrl(userId) {
+  const url = new URL("/app/contacts/google", matchingWebOrigin());
   url.searchParams.set("account", userId);
   return url.toString();
 }
@@ -2969,6 +2989,8 @@ function buildPayload() {
       canDismiss: trayAvailable,
       reopenSurface: reopenSurfaceName(),
       notificationDurationMs: dwellMs(),
+      // Which agent app the person is using now, so a banner offers one Open.
+      agentHosts: { last: lastHost, claude: claudeRunning, codex: codexRunning },
       onboardingVersion: COMPANION_ONBOARDING_VERSION,
       tutorialPrompt: require("./returning-tutorial-prompt.cjs")(`${webBase()}/llm_guide.md`),
       // The rules every Topic has, shown under each mandate; generated from
@@ -3014,6 +3036,7 @@ function buildPayload() {
     // while this pill puts it back, or "stopped" once that repair failed.
     // The renderer reads Relay rooms from the server while it is not "ok".
     service: serviceHealth,
+    network: networkHealth,
     pendingOpen: pendingSetupOpenPreviewCache,
     relays: hydrateReactions(relaysNow),
     sent: hydrateReactions(sentWithMaterializationState(sentCache)),
@@ -3311,12 +3334,21 @@ function pumpAttention(prebuiltPayload = null) {
   for (const id of ids) attention.beginShow(attentionQueue, id);
   burstShown += 1;
 
-  // A new presentation revokes an old dismissal and latches the pill visible.
-  dismissed = false;
-  dismissSnoozedIds = new Set();
-  attentionLatched = true;
-  ghostActive = false;
-  trayForcedVisible = false;
+  // A pill the person put away stays away: the arrival shows as a ghost banner
+  // that fades instead of folding into a pill (Shane, 2026-10-19: only a
+  // deliberate act, such as tapping the banner, brings the pill back). The
+  // queue still guards against loss: an unconfirmed ghost dwell re-queues
+  // like any other. Otherwise the presentation latches the pill visible.
+  const ghostShow = dismissed && trayAvailable;
+  if (ghostShow) {
+    ghostActive = true;
+  } else {
+    dismissed = false;
+    dismissSnoozedIds = new Set();
+    attentionLatched = true;
+    ghostActive = false;
+    trayForcedVisible = false;
+  }
   deferredAttention = false;
   maybeShow({ force: true });
   activeAttentionIds = new Set(ids);
@@ -3330,7 +3362,7 @@ function pumpAttention(prebuiltPayload = null) {
   writeOverlayPrefs();
   appendLocalTraces(ids.map((relayId) => ({ event: "relay_notification_dispatched", relayId, surface: "relay_pill" })));
   win.webContents.send("newRelay", rows, {
-    ghost: false,
+    ghost: ghostShow,
     stacked: digestMode,
     sequential: !digestMode,
     digest: digestMode ? { count: rows.length } : null,
@@ -6365,6 +6397,7 @@ function maybeShow({ force = false, reposition = true, userInitiated = false } =
       showOverlayWindow({ force, reposition, userInitiated });
     }
   } else if (win.isVisible()) {
+    leaveAppSurfaceForHide();
     win.hide();
     // Pair the hide with the throttling policy, exactly as the ✕ and tray-hide paths
     // do. This branch used to be near-dead code (both dismiss paths hide themselves
@@ -6558,7 +6591,7 @@ function appSurfaceRefit() {
   }
   return appSurface.workArea;
 }
-function exitAppSurface() {
+function exitAppSurface({ reshowPill = true, handBack = true } = {}) {
   if (!appSurface || !win || win.isDestroyed()) { appSurface = null; return; }
   const { restore, returnBundle } = appSurface;
   appSurface = null;
@@ -6571,18 +6604,21 @@ function exitAppSurface() {
     // Leaving the Dock turns Relay back into an accessory app. Should macOS
     // order the pill out as it does, bring it straight back, on every Space,
     // at its own level; a pill that stayed up is left alone (no re-show flash).
+    // A pill the person just put away stays away (reshowPill: false).
     try { app.dock.hide(); } catch {}
-    const reshow = () => {
-      if (!win || win.isDestroyed() || appSurface) return;
-      if (!win.isVisible()) showOverlayWindow({ force: true, reposition: false });
-      try { reinforceSpacePresence(win, { alwaysOnTop: overlayElevated, allSpaces: !appSurface }); } catch {}
-    };
-    setImmediate(reshow);
-    setTimeout(reshow, 250);
+    if (reshowPill) {
+      const reshow = () => {
+        if (!win || win.isDestroyed() || appSurface) return;
+        if (!win.isVisible()) showOverlayWindow({ force: true, reposition: false });
+        try { reinforceSpacePresence(win, { alwaysOnTop: overlayElevated, allSpaces: !appSurface }); } catch {}
+      };
+      setImmediate(reshow);
+      setTimeout(reshow, 250);
+    }
   }
   // Hand the screen back, but only if Relay still has it: someone who has
   // already Cmd+Tabbed to another app keeps that one.
-  if (returnBundle && process.platform === "darwin") {
+  if (handBack && returnBundle && process.platform === "darwin") {
     frontmostBundleId((bundle) => {
       if (!bundle || RELAY_BUNDLE_IDS.includes(bundle)) {
         perf.inc("spawns");
@@ -6590,6 +6626,15 @@ function exitAppSurface() {
       }
     });
   }
+}
+// Putting the full app away with the ✕ or the menu bar hides it instead of
+// collapsing it, so the pill must be given back here: its size, every Space
+// and the Dock. Otherwise the next show runs with allSpaces: false and the
+// pill lives only on the Space the full app was opened on (Sven, 26 Oct 2026).
+// No reshow: the person just put it away. No hand-back: with the Dock icon
+// gone macOS gives the screen to the next app itself.
+function leaveAppSurfaceForHide() {
+  if (appSurface) exitAppSurface({ reshowPill: false, handBack: false });
 }
 function syncAppSurfaceForCard(w, h, { settled = false } = {}) {
   if (!FIXED_OVERLAY_SURFACE) return null;
@@ -7487,7 +7532,8 @@ async function sendPreviewReply(input, entry) {
       ...(body ? {} : { title: files.length === 1 ? String(files[0].name || "1 file") : `${files.length} files` }),
       forHuman: body || " ",
       attachments,
-      ...(inReplyToRelayId ? { inReplyToRelayId } : {}),
+      // The preview window answers the Relay it shows, in its thread.
+      ...(inReplyToRelayId ? { inReplyToRelayId, replyKind: "thread" } : {}),
       idempotencyKey,
       source: { host: "relay-preview" },
     });
@@ -9159,6 +9205,7 @@ function hideFromTray() {
   // Putting it away revokes the session override, so a pill hidden by the Settings
   // preference goes back to hidden rather than lingering until restart.
   explicitlyOpened = false;
+  leaveAppSurfaceForHide();
   if (win && !win.isDestroyed() && win.isVisible()) { win.hide(); applyThrottlingPolicy(); }
   syncTray();
   writePillStatus();
@@ -9213,8 +9260,15 @@ function syncTray() {
 // outlive us), then quit the app immediately for instant visual feedback.
 function quitRelayCompletely() {
   viewTelemetry.stop("quit");
+  // The only trace a Quit leaves: the daemon has no SIGTERM line and the
+  // recovery pause is overwritten once Relay starts again.
+  console.error(`[overlay] ${new Date().toISOString()} Quit Relay: stopping the background service and the pill; recovery paused until Relay is opened or the computer restarts`);
+  // Put away like ✕: a restart brings the background service back
+  // (bootstrap/recovery-intent.cjs) and this pill with it, hidden. Opening
+  // Relay on purpose shows it again (showFromTray).
+  setDismissed(true);
   try {
-    require("../bootstrap/recovery-intent.cjs").setStopped(true);
+    require("../bootstrap/recovery-intent.cjs").setStopped(true, undefined, { by: "quit-relay" });
     const uid = typeof process.getuid === "function" ? process.getuid() : 501;
     const [cmd, args] = quitRelayCommand({ platform: process.platform, uid });
     const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
@@ -10268,6 +10322,9 @@ async function postQueuedRelay(entry) {
     ...(Array.isArray(entry.agentMentions) ? { agentMentions: entry.agentMentions } : {}),
     attachments: prepared,
     ...(entry.inReplyToRelayId ? { inReplyToRelayId: String(entry.inReplyToRelayId) } : {}),
+    // What the person meant by the link: Quote, or Reply in thread. The
+    // server stores it with the message so every reader draws the same thing.
+    ...(entry.inReplyToRelayId && (entry.replyKind === "quote" || entry.replyKind === "thread") ? { replyKind: entry.replyKind } : {}),
     idempotencyKey: entry.idempotencyKey,
     // Human-authored pill text must never enter the MCP-only forHuman review
     // gate. Keep this explicit even though the API now positively gates only
@@ -10299,6 +10356,7 @@ function enqueueReplyFromPill(input = {}) {
       agentMentions: Array.isArray(input.agentMentions) ? input.agentMentions : undefined,
       recipient: input.recipient || {},
       inReplyToRelayId: input.inReplyToRelayId,
+      replyKind: input.replyKind,
       files,
       chat: input.chat || {},
     });
@@ -10782,6 +10840,10 @@ ipcMain.handle("relay:onboardingFocusAgent", agentOnboardingIpc(async (key) => {
   return { ok: true };
 }));
 ipcMain.handle("relay:onboardingConnectClaude", agentOnboardingIpc((key) => agentOnboarding.connectClaude(key)));
+ipcMain.handle("relay:onboardingClaudeAccount", agentOnboardingIpc((key, kind) => agentOnboarding.setClaudeAccount(key, String(kind || ""))));
+ipcMain.handle("relay:onboardingClaudeAdminAdded", agentOnboardingIpc((key, added) => agentOnboarding.setClaudeAdminAdded(key, added === true)));
+ipcMain.handle("relay:onboardingCopyClaudeAdminLink", agentOnboardingIpc(() => agentOnboarding.copyClaudeAdminLink()));
+ipcMain.handle("relay:onboardingOpenClaudeAdminPage", agentOnboardingIpc(() => agentOnboarding.openClaudeAdminPage()));
 ipcMain.handle("relay:onboardingConnectChatGptApp", agentOnboardingIpc((key) => agentOnboarding.connectChatGptApp(key)));
 // SETUP (2026-10-07). The Setup page's facts and verbs, each for the account
 // still on screen. Connecting a chat AI reuses the first-run chooser's setup
@@ -11204,8 +11266,16 @@ async function refreshServiceFallbackChats({ force = false } = {}) {
 }
 setInterval(() => { void refreshServiceFallbackChats(); }, 60_000).unref?.();
 // An update transaction owns the services while it runs; the pill keeps out.
+// A lock left by a dead owner is not an update (src/pill-liveness.cjs).
 function updateTransactionOpen() {
-  try { return fs.existsSync(path.join(os.homedir(), ".relay", "runtime", "transaction.lock")); } catch { return false; }
+  const lockPath = path.join(os.homedir(), ".relay", "runtime", "transaction.lock");
+  let stat;
+  try { stat = fs.statSync(lockPath); } catch { return false; }
+  let owner = null;
+  try { owner = JSON.parse(fs.readFileSync(path.join(lockPath, "owner.json"), "utf8")); } catch {}
+  let ownerAlive = false;
+  try { ownerAlive = require("../bootstrap/recovery-launcher.cjs").processAlive(owner?.pid); } catch {}
+  return pillLiveness.transactionLockOpen({ exists: true, owner, lockAgeMs: Date.now() - stat.mtimeMs, ownerAlive });
 }
 // Register what is missing and start the daemon (src/daemon-repair.js), once
 // per cooldown. Every self-heal used to live inside the daemon or inside a
@@ -11235,7 +11305,6 @@ function repairCompanionDaemon(decision) {
 }
 {
   const startedAt = Date.now();
-  let relaunchRequested = false;
   const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } };
   const daemonWatchEnabled = process.env.RELAY_OVERLAY_TEST !== "1" && process.env.RELAY_OVERLAY_PERF !== "1";
   setInterval(() => {
@@ -11276,13 +11345,40 @@ function repairCompanionDaemon(decision) {
       // never had a minute in which replies were missing.
       else if (decision.reason === "pill-just-started" && serviceHealth.daemon === "ok") setServiceHealth("checking", "pill-just-started");
     }
-    if (relaunchRequested || !transport) return;
-    const verdict = pillLiveness.shouldRelaunchForWedgedTransport({ transport, daemon: readJson(DAEMON_HEARTBEAT_PATH), now });
-    if (!verdict.relaunch) return;
-    relaunchRequested = true;
-    console.error(`[overlay] every Relay API call has failed since ${new Date(transport.failingSince).toISOString()} while the background service reaches Relay; relaunching the Relay app`);
-    relaunchPillSoon();
+    if (daemonWatchEnabled && transport) judgeConnectivity(transport, readJson(DAEMON_HEARTBEAT_PATH), now);
   }, pillLiveness.PILL_HEARTBEAT_MS).unref?.();
+}
+// No network is said, never acted on: the pill stays up and calls again until
+// Relay answers (src/pill-liveness.cjs pillConnectivityDecision).
+let lastConnectivityProbeAt = 0;
+let connectivityProbeInFlight = false;
+function osReportsOnline() {
+  try { return require("electron").net.isOnline(); } catch { return true; }
+}
+function judgeConnectivity(transport, daemon, now) {
+  const decision = pillLiveness.pillConnectivityDecision({ transport, daemon, osOnline: osReportsOnline(), now, lastProbeAt: lastConnectivityProbeAt });
+  if (decision.state !== networkHealth.state) {
+    const back = decision.state === "online";
+    console.error(back
+      ? "[overlay] Relay reachable again"
+      : `[overlay] ${decision.state === "offline" ? "no network connection" : `Relay unreachable for ${Math.round((decision.failingForMs || 0) / 1000)}s`}; showing the connection note`);
+    networkHealth = { state: decision.state, since: now };
+    pushInbox(true);
+  }
+  if (!decision.probe || connectivityProbeInFlight) return;
+  lastConnectivityProbeAt = now;
+  connectivityProbeInFlight = true;
+  void (async () => {
+    try {
+      const client = await relayClient();
+      await client.me();
+    } catch {
+      // An HTTP error status still proved the network. Either way the client
+      // recorded the outcome, and the next tick judges it.
+    } finally {
+      connectivityProbeInFlight = false;
+    }
+  })();
 }
 
 let latestCardMotionId = 0;
@@ -11381,6 +11477,7 @@ ipcMain.on("relay:dismiss", () => {
   // The ✕ is the user putting the pill away, so it revokes the session override
   // that let a pill hidden by the Settings preference stay on screen.
   explicitlyOpened = false;
+  leaveAppSurfaceForHide();
   if (win && !win.isDestroyed() && win.isVisible()) { win.hide(); applyThrottlingPolicy(); }
   writePillStatus();
 });
@@ -11403,7 +11500,7 @@ ipcMain.on("relay:undismiss", () => {
 // overlay is still dismissed.
 ipcMain.on("relay:notifDone", () => {
   ghostActive = false;
-  if (dismissed && win && !win.isDestroyed() && win.isVisible()) win.hide();
+  if (dismissed && win && !win.isDestroyed() && win.isVisible()) { win.hide(); applyThrottlingPolicy(); }
   writePillStatus();
 });
 // A card (or digest) finished its visible interval. A completed, visible dwell
@@ -11470,6 +11567,19 @@ if (!gotSingleInstanceLock) {
   // second copy never needs.
   app.exit(0);
 } else {
+  // The facts of how this pill came to be running, not a guess at who wanted it:
+  // `relay pill` and a second-instance reopen carry a reopen nonce, while
+  // launchd (login, Relay.app's kickstart, recovery) and logon tasks do not.
+  console.error(`[overlay] ${new Date().toISOString()} pill started pid=${process.pid} version=${pillVersion()} reopen-nonce=${pendingReopenNonce ? "yes" : "no"} launchd-job=${process.env.XPC_SERVICE_NAME || "none"}`);
+  // A pill started at login or by recovery does not lift a Quit's pause: only
+  // opening Relay (`relay pill`) or a restart does (bootstrap/recovery-intent.cjs).
+  if (process.env.RELAY_OVERLAY_TEST !== "1" && process.env.RELAY_OVERLAY_PERF !== "1") {
+    try {
+      const intent = require("../bootstrap/recovery-intent.cjs");
+      const pause = intent.stopped() ? intent.describe() : { stopped: false };
+      if (pause.stopped) console.error(`[overlay] recovery is paused by ${pause.by}${pause.at ? ` since ${new Date(pause.at).toISOString()}` : ""}`);
+    } catch {}
+  }
   app.on("second-instance", (_event, argv, _workingDirectory, additionalData = {}) => {
     const deepLink = relayDeepLinkFromArgv(argv);
     if (deepLink) {

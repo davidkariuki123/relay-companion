@@ -281,7 +281,7 @@ test("an empty direct chat can be written to from the main pill", () => {
   // message after it answers the one before, like any other chat.
   const send = between(main, "async function sendPreviewReply", "function installActiveSpaceWatcher");
   assert.match(send, /if \(!inReplyToRelayId && !to\) return \{ ok: false, error: "There is nothing here to reply to\." \}/);
-  assert.match(send, /\.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId \} : \{\}\)/);
+  assert.match(send, /\.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId, replyKind: "thread" \} : \{\}\)/);
 });
 
 test("a resolved direct chat keeps one identity through hydration and account changes", () => {

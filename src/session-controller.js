@@ -8,6 +8,7 @@ import updateActivity from "../bootstrap/update-activity.cjs";
 import { configDir, readConfig } from "./config.js";
 import { executionEnabled, nativeProviders } from "./native-task-launch.js";
 import { runTaskOperation, TASK_RUN_OFF_MESSAGE } from "./task-run-remote.js";
+import { CODEX_ACP_PERMISSION, taskClaudePermission } from "./task-run-headless.js";
 import { acpAvailable, acpMcpServers } from "./acp-client.js";
 import { startAcpRun, acpPermissionMode } from "./acp-session.js";
 import { acpSessionOwner } from "./acp-session-owner.js";
@@ -706,14 +707,8 @@ function acpOperationLog(operationId) {
 // this computer: in the permission the person chose for that agent in Your
 // AIs (Shane, 2026-10-13). An explicit environment override, or an isolated
 // cloud cell, still decides Claude's mode; other sessions keep their own.
-const CODEX_ACP_PERMISSION = {
-  full: { fullAccess: true },
-  guardian: {},
-  ask: { approvalPolicy: "on-request", approvalsReviewer: "user" },
-};
 function claudeRunPermission(input) {
-  const overridden = process.env.RELAY_CLAUDE_PERMISSION_MODE || process.env.RELAY_SESSION_PLACEMENT === "cloud" || process.env.RELAY_SESSION_FULL_ACCESS === "1";
-  return input?.agentRunRelayId && !overridden ? relaySettings.taskPermission("claude") : relayClaudePermissionMode();
+  return input?.agentRunRelayId ? taskClaudePermission() : relayClaudePermissionMode();
 }
 function acpRunPermission(provider, input) {
   if (provider === "claude") return { permissionMode: claudeRunPermission(input) };

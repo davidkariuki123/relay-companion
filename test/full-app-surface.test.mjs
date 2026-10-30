@@ -55,10 +55,11 @@ function harness() {
     function showOverlayWindow() { calls.push(["show"]); }
     function reinforceSpacePresence() {}
     function syncAppBadge() {}
-    function setImmediate(fn) { fn(); }
-    function setTimeout() {}
+    function setImmediate(fn) { calls.push(["reshowTimer"]); fn(); }
+    function setTimeout() { calls.push(["reshowTimer"]); }
     ${block}
     return {
+      hide: () => leaveAppSurfaceForHide(),
       size: (w, h, settled) => { cardSize = { w, h }; return syncAppSurfaceForCard(w, h, { settled }); },
       max: () => overlayCardMax(),
       inset: () => appSurfaceInset(),
@@ -105,6 +106,28 @@ test("Collapse returns the pill to exactly where it was, on top, and hands the s
   assert.deepEqual(calls.find((c) => c[0] === "execFile")?.[1], ["-b", "com.anthropic.claudefordesktop"], "the app that was in front comes back");
 });
 
+// Sven, 26 Oct 2026: the full app closed with the ✕ or the menu bar left the
+// pill on the one Space the app was opened on, until the next Collapse.
+test("putting the full app away with the ✕ or the menu bar gives the pill back every Space, without re-showing it", () => {
+  const { calls, bounds, api } = harness();
+  api.size(1512, 949);
+  api.front("work.relay.application");
+  calls.length = 0;
+  api.hide();
+  assert.equal(api.active(), false, "no longer the full app");
+  assert.deepEqual(bounds, { x: 604, y: 41, width: 900, height: 800 }, "pill-sized again for the next show");
+  assert.deepEqual(calls.filter((c) => c[0] === "allSpaces").at(-1), ["allSpaces", true, { visibleOnFullScreen: true, skipTransformProcessType: true }],
+    "the next show is on every Space");
+  assert.ok(calls.some((c) => c[0] === "dock" && c[1] === "hide"), "out of the Dock");
+  assert.equal(api.elevated(), true, "floating again when it next shows");
+  assert.equal(calls.some((c) => c[0] === "reshowTimer" || c[0] === "show"), false, "a pill the person put away stays away");
+  assert.equal(calls.some((c) => c[0] === "execFile"), false, "no app is brought forward over a hidden pill");
+  assert.equal(api.hide(), undefined, "a pill that was never the full app is left alone");
+  assert.match(main, /ipcMain\.on\("relay:dismiss"[\s\S]*?leaveAppSurfaceForHide\(\);\n\s+if \(win && !win\.isDestroyed\(\) && win\.isVisible\(\)\) \{ win\.hide\(\);/, "the ✕ leaves the full app before hiding");
+  assert.match(main, /function hideFromTray\(\) \{[\s\S]*?leaveAppSurfaceForHide\(\);\n\s+if \(win && !win\.isDestroyed\(\) && win\.isVisible\(\)\) \{ win\.hide\(\);/, "the menu bar leaves the full app before hiding");
+  assert.match(main, /\} else if \(win\.isVisible\(\)\) \{\n\s+leaveAppSurfaceForHide\(\);\n\s+win\.hide\(\);/, "so does a hide by the Keep Relay hidden setting");
+});
+
 test("Collapse never yanks focus from an app the person already switched to", () => {
   const { calls, api } = harness();
   api.size(1512, 949);
@@ -121,7 +144,7 @@ test("the renderer sizes the expanded app to the screen and places the card at t
   assert.match(main, /if \(appSurface\) return \{ \.\.\.appSurfaceRefit\(\) \};/, "re-showing the full app never shrinks it");
   assert.match(main, /showInactiveOnAllSpaces\(win, \{ force, userInitiated, alwaysOnTop: overlayElevated, allSpaces: !appSurface \}\)/, "a Space switch never re-shows the full app");
   assert.doesNotMatch(main, /reinforceSpacePresence\(win, \{ alwaysOnTop: overlayElevated \}\)/, "every presence repair knows about the full app");
-  assert.match(html, /if \(payload\.features\?\.fullAppExpand !== true\) \{\n\s+return \{ w: Math\.max\(READER\.w, Math\.min\(WIDE\.w, aw - 48\)\)/, "without the developer gate Expand keeps the two-thirds card");
+  assert.match(html, /if \(payload\.features\?\.fullAppExpand !== true\) \{\n\s+return \{ w: Math\.max\(READER\.w, Math\.min\(WIDE\.w, aw - 48\)\)/, "with the flag off Expand keeps the two-thirds card");
 });
 
 test("the full app opens on the screen under the pointer, and a pill elsewhere grows from that screen's corner", () => {

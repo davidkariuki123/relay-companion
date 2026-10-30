@@ -33,6 +33,7 @@ async function pauseRecoveryChecks({ homeDir, timeoutMs = 3 * 60_000, pollMs = 2
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   const intent = require("./recovery-intent.cjs");
   const wasStopped = intent.stopped(homeDir);
+  const before = intent.describe(homeDir);
   // Recorded as held by this setup, so Relay's own setup and pill launch during
   // activation leave it paused; a dead holder no longer counts.
   const hold = () => intent.setStopped(true, homeDir, { heldBy: "setup", pid: process.pid });
@@ -48,7 +49,8 @@ async function pauseRecoveryChecks({ homeDir, timeoutMs = 3 * 60_000, pollMs = 2
   }
   return {
     repause: hold,
-    resume: succeeded => intent.setStopped(succeeded ? false : wasStopped, homeDir),
+    resume: succeeded => intent.setStopped(succeeded ? false : wasStopped, homeDir,
+      { by: succeeded ? "setup-finished" : wasStopped ? before.by : "setup-failed" }),
   };
 }
 

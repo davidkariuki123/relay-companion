@@ -288,6 +288,8 @@ function createOutbox({
         : undefined,
       recipient: input.recipient && typeof input.recipient === "object" ? input.recipient : {},
       inReplyToRelayId: String(input.inReplyToRelayId || ""),
+      // "quote" or "thread": what the person meant by the link (the composer's verb).
+      replyKind: input.replyKind === "quote" || input.replyKind === "thread" ? input.replyKind : "",
       title: String(input.title || ""),
       files: spoolFiles(idempotencyKey, Array.isArray(input.files) ? input.files : []),
       chat: input.chat && typeof input.chat === "object" ? input.chat : {},

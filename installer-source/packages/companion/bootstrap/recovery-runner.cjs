@@ -166,8 +166,17 @@ async function recoverLocked({ homeDir = os.homedir(), env = process.env, now = 
   repairServices = require("./service-recovery.cjs").repairServiceRegistrations } = {}) {
   const root = path.join(homeDir, ".relay");
   if (require("./recovery-intent.cjs").stopped(homeDir)) {
-    const result = { ok: true, status: "intentionally-stopped", runtimeHealthy: false };
-    write(path.join(root, "recovery", "status.json"), { schema: 1, checkedAt: now(), runId: env.RELAY_RECOVERY_RUN_ID || null, launcherVersion: require("../package.json").version, ...result });
+    // Who paused recovery and since when, in status.json and once per pause in
+    // recovery.log: a bare "intentionally-stopped" every minute for four days
+    // told nobody that a Quit had switched recovery off (Sven, 2026-10-19).
+    const pause = require("./recovery-intent.cjs").describe(homeDir, now());
+    const result = { ok: true, status: "intentionally-stopped", runtimeHealthy: false, pausedBy: pause.by || "unknown", pausedAt: pause.at || null };
+    const statusFile = path.join(root, "recovery", "status.json");
+    const previous = (() => { try { return JSON.parse(fs.readFileSync(statusFile, "utf8")); } catch { return null; } })();
+    if (previous?.status !== "intentionally-stopped" || previous.pausedAt !== result.pausedAt) {
+      recoveryLogger(root, env.RELAY_RECOVERY_RUN_ID, now)(`standing down: recovery paused by=${result.pausedBy} at=${result.pausedAt ? new Date(result.pausedAt).toISOString() : "unknown"}; the background service and the pill are left as they are`);
+    }
+    write(statusFile, { schema: 1, checkedAt: now(), runId: env.RELAY_RECOVERY_RUN_ID || null, launcherVersion: require("../package.json").version, ...result });
     return result;
   }
   // Local availability is independent of update eligibility, network, memory,

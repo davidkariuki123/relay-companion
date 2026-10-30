@@ -69,10 +69,10 @@ try {
     assert.ok(geometry.menu.bottom <= geometry.card.y + geometry.card.h - 8, 'menu stays inside the card at the bottom');
     // Click the label that used to overhang the native hit region, not the
     // menu's right edge (which could still overlap the card and appear to work).
-    await page.locator(`[data-reply-to="${id}"]`).click({ position:{ x:20, y:15 } });
+    await page.locator(`[data-reply-quote="${id}"]`).click({ position:{ x:20, y:15 } });
     await composer.locator('.th-reply-target').waitFor();
     assert.equal(await composer.getAttribute('data-reply-target'), id);
-    assert.equal(await composer.locator('.th-reply-target-who').innerText(), 'Replying to You');
+    assert.equal(await composer.locator('.th-reply-target-who').innerText(), 'Quoting You');
     assert.equal(await field.evaluate(element => document.activeElement === element), true);
     assert.equal(await field.evaluate(element => element.value), 'Keep this draft');
     await composer.locator('[data-reply-cancel]').click();

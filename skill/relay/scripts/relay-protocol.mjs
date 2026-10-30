@@ -818,7 +818,8 @@ async function directToolCommand(command, body, config) {
   else if (name === "relay_mark_read") value = await request("POST", `/v1/relays/${args.relayId}/read`, { idempotencyKey: args.idempotencyKey });
   else if (name === "relay_send") {
     const { replyToRelayId, ...draft } = args;
-    value = await sendPersisted({ ...draft, ...(replyToRelayId ? { inReplyToRelayId: replyToRelayId } : {}) });
+    // An agent's named reply answers in that Relay's thread; quoting is a person's verb.
+    value = await sendPersisted({ ...draft, ...(replyToRelayId ? { inReplyToRelayId: replyToRelayId, replyKind: "thread" } : {}) });
   }
   else if (name === "relay_forward") {
     const { relayId, ...forward } = args;

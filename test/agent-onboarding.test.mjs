@@ -156,6 +156,44 @@ test("Claude connects by connector: no place, one handoff link, and connecting m
   assert.equal(h.opened.at(-1), "claude://claude.ai/new?surface=chat", "the Claude app, which owns claude://, with no prefill (Claude bannered prefilled links)");
 });
 
+test("a work Claude account sends its Owner the admin page, then connects from Claude's own list", async () => {
+  const h = harness();
+  const key = "user:usr_alex";
+  h.onboarding.choose(key, "claude");
+  assert.equal(h.onboarding.snapshot(key).claudeAccount, "", "Claude asks which account before anything opens");
+  assert.throws(() => h.onboarding.setClaudeAdminAdded(key, true), /work Claude account/);
+  assert.equal(h.onboarding.setClaudeAccount(key, "work").claudeAccount, "work");
+  assert.equal(h.onboarding.snapshot(key).claudeAdminUrl, "https://sendrelays.com/connect/claude/admin");
+  h.onboarding.copyClaudeAdminLink(key);
+  assert.equal(h.copied.at(-1), "https://sendrelays.com/connect/claude/admin", "the link the person sends their admin");
+  await h.onboarding.openClaudeAdminPage(key);
+  assert.equal(h.opened.at(-1), "https://sendrelays.com/connect/claude/admin", "an admin can open the steps themselves");
+  assert.equal(h.onboarding.setClaudeAdminAdded(key, true).claudeAdminAdded, true);
+  h.onboarding.choose(key, "claude");
+  assert.equal(h.store[key].claudeAdminAdded, true, "choosing Claude again keeps the answer: the admin may have taken days");
+  await h.onboarding.connectClaude(key);
+  assert.equal(h.opened.at(-1), "https://sendrelays.com/connect/claude?to=connectors#handoff=mcp_handoff.x.y", "Connect is in Claude's list, not the add dialog");
+  assert.equal(h.onboarding.setClaudeAdminAdded(key, false).claudeAdminAdded, false, "Not in Claude's list? goes back to asking");
+  // A personal account keeps the add dialog, and switching drops the admin answer.
+  assert.equal(h.onboarding.setClaudeAccount(key, "personal").claudeAdminAdded, false);
+  await h.onboarding.connectClaude(key);
+  assert.equal(h.opened.at(-1), "https://sendrelays.com/connect/claude#handoff=mcp_handoff.x.y");
+  assert.throws(() => h.onboarding.setClaudeAccount(key, "school"), /personal or a work/);
+  h.onboarding.reset(key);
+  assert.equal(h.onboarding.snapshot(key).claudeAccount, "", "a different AI starts over");
+});
+
+test("the pill asks which Claude account, and a work account's Owner adds Relay before Connect", () => {
+  const html = fs.readFileSync(new URL("../overlay/inbox.html", import.meta.url), "utf8");
+  const preload = fs.readFileSync(new URL("../overlay/preload.cjs", import.meta.url), "utf8");
+  assert.match(html, /if \(!agent\.claudeAccount\) \{ renderClaudeAccount\(agent, option\); return; \}/);
+  assert.match(html, /if \(agent\.claudeAccount === "work" && !agent\.claudeAdminAdded\) \{ renderClaudeAskAdmin\(agent\); return; \}/);
+  assert.match(html, /My admin added Relay/);
+  for (const method of ["onboardingClaudeAccount", "onboardingClaudeAdminAdded", "onboardingCopyClaudeAdminLink", "onboardingOpenClaudeAdminPage"]) {
+    assert.match(preload, new RegExp(`${method}: \\(userId`), `${method} reaches the renderer`);
+  }
+});
+
 test("a Claude that already has Relay goes straight to copying; Open Claude opens claude.ai when no Claude app is here", async () => {
   const h = harness();
   const key = "user:usr_alex";

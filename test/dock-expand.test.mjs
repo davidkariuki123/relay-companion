@@ -1,6 +1,6 @@
 // RELAY IN THE DOCK (David, Shane and Sven, 2026-10-08): opening Relay from its
-// Dock icon is Expand — the full app, in front. Dev-gated (features.fullAppExpand,
-// defined with the full-app frame in src/product-features.cjs).
+// Dock icon is Expand — the full app, in front. Every account has it
+// (features.fullAppExpand, defined in src/product-features.cjs).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";

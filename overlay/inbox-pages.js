@@ -79,8 +79,11 @@
     function model() {
       const p = payload();
       const viewer = String(p.account?.email || "").trim().toLowerCase();
+      // A new sender's relays wait locked in Chats until they are added.
+      const locked = env.lockedSenders();
       const inbound = (p.relays || []).filter((r) => !r.deletedAt && !isResult(r) && !r.request
         && String(r.senderEmail || "").trim().toLowerCase() !== viewer
+        && !locked.has(String(r.senderEmail || "").trim().toLowerCase())
         && (isTask(r) || String(r.forAgent || "").trim()) && r.source?.host !== "relay-agent-run");
       const sent = (p.sent || []).filter((r) => !isResult(r) && (r.kind === "task" || String(r.forAgent || "").trim()));
       const you = [
@@ -171,7 +174,7 @@
     function inboxShowing() {
       if (env.peeking() || cardEl.classList.contains("collapsed") || cardEl.classList.contains("searching") || cardEl.classList.contains("signup")) return false;
       if (env.wideLayoutActive()) return env.wideSideTab() === "relays";
-      return env.activeView() === "relays" && !env.requestInboxOpen();
+      return env.activeView() === "relays";
     }
 
     // ---------- the physics, drawn ----------

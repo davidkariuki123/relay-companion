@@ -78,6 +78,7 @@ const CHAT_SEND_INPUT_SCHEMA = {
           path: { type: "string" }, filePath: { type: "string" }, id: { type: "string" },
           name: { type: "string" }, filename: { type: "string" }, contentType: { type: "string" },
           bytes: { type: "number" }, sha256: { type: "string" }, contentBase64: { type: "string" },
+          revises: { type: "string", description: "Optional. The fileId of the earlier file in this same conversation that this file replaces, exactly as a read showed it. Set it whenever you send back an edited copy of a file already in the conversation; leave it out for a new file. A fileId from another conversation is refused." },
         },
       },
     },
@@ -613,7 +614,7 @@ export const TOOLS = [
         attachments: {
           type: "array",
           description:
-            "Optional files to send with the relay. Prefer files: [absolutePath] for local files. Low-level callers may pass fully prepared attachments with id, name, contentType, bytes, sha256, and contentBase64.",
+            "Optional files to send with the relay. Prefer files: [absolutePath] for local files; use an item here with path and revises when the file is an edited copy of one already in the conversation. Low-level callers may pass fully prepared attachments with id, name, contentType, bytes, sha256, and contentBase64.",
           items: {
             type: "object",
             properties: {
@@ -626,6 +627,7 @@ export const TOOLS = [
               bytes: { type: "number" },
               sha256: { type: "string" },
               contentBase64: { type: "string" },
+              revises: { type: "string", description: "Optional. The fileId of the earlier file in this same conversation that this file replaces, exactly as a read showed it. Set it whenever you send back an edited copy of a file already in the conversation; leave it out for a new file. A fileId from another conversation is refused." },
             },
           },
         },
@@ -2643,7 +2645,8 @@ async function handleAdmittedCall(client, name, args, {
         source: relaySource(args.repo, sessionContext),
         targetSurfaces: args.targetSurfaces || [],
         attachments: sendAttachments,
-        ...(explicitReplyToRelayId ? { inReplyToRelayId: explicitReplyToRelayId } : {}),
+        // An agent's named reply answers in that Relay's thread; quoting is a person's verb.
+        ...(explicitReplyToRelayId ? { inReplyToRelayId: explicitReplyToRelayId, replyKind: "thread" } : {}),
         // Rolling clients may still submit the old control-plane `type`.
         // Keep transport compatibility, but do not expose it in the model
         // schema: provider completion is automatic and a model choosing
@@ -2970,7 +2973,7 @@ async function handleAdmittedCall(client, name, args, {
             ...(args.longForHumanConfirmed === true ? { longForHumanConfirmed: true } : {}),
             source: relaySource(args.repo, sessionContext),
             attachments: chatAttachments,
-            ...(args.replyToRelayId ? { inReplyToRelayId: String(args.replyToRelayId) } : {}),
+            ...(args.replyToRelayId ? { inReplyToRelayId: String(args.replyToRelayId), replyKind: "thread" } : {}),
             idempotencyKey: args.idempotencyKey,
           });
       retainSentAttachmentsLocally(chatAttachments, chatSent, { log: (m) => console.error(`[relay] ${m}`) });

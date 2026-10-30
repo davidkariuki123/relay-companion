@@ -13,9 +13,9 @@ const slice = (start, end) => {
 
 // PEOPLE (Sven, 2026-09-08, the Minimal design). Two ways in, told apart:
 // "adding someone with email is only for people on relay, vs people off relay
-// will come in with a link." A stranger's first message is a request: it waits
-// in People, out of the feed and the count, until you accept it, reply, or
-// ignore it. A contact is an address and what you call them.
+// will come in with a link." A stranger's first message is a request: it sits
+// in the inbox and the count, locked, until you add them (Shane, 2026-10-28).
+// A contact is an address and what you call them.
 
 test("Add offers two cases: an address for someone on Relay, your link for everyone else", async () => {
   // One field finds and adds; there is no separate add sheet any more.
@@ -242,7 +242,7 @@ test("your link is offered in place for whoever is not on Relay yet", async () =
 });
 
 test("a request is a direct Relay room from an address you do not know and never wrote to", () => {
-  const model = slice("const IGNORED_REQUESTS_PREF", "function renderRequestsPane()");
+  const model = slice("const IGNORED_REQUESTS_PREF", "async function acceptRequestRoom(room)");
   assert.match(model, /if \(!room \|\| room\.isGroup \|\| room\.provider === "slack" \|\| room\.integration\) return false;/);
   assert.match(model, /if \(!address \|\| known\.has\(address\)\) return false;/);
   assert.match(model, /\.some\(\(message\) => message\.direction === "out"\)\) return false;/, "writing to someone makes them a conversation");
@@ -329,10 +329,10 @@ test("source-only acceptance invalidates the contact cache fingerprint", () => {
   assert.match(main, /contacts: payload.contacts.map\(\(c\) => \[c.id, c.name, c.email, c.relayUserId, c.onRelay, c.source\]\)/);
 });
 
-test("requests use one Relays entry, with no Contacts badge or third Contacts pane", () => {
+test("requests sit in the inbox itself, with no Requests page, Contacts badge or third Contacts pane", () => {
   const rows = slice("function relayIdentityRows()", "function renderRelays()");
-  assert.match(rows, /!isRequestRoom/);
-  assert.match(html, /requestSummaryHtml\(requestCount\)/);
+  assert.match(rows, /requestRoom: isRequestRoom\(room, known\)/);
+  assert.doesNotMatch(html, /requestSummaryHtml|renderRequestsPane|id="requestsEntry"|requestInboxOpen/);
   assert.match(html, /setBadge\(peopleBadgeEl, 0\)/);
   assert.doesNotMatch(html, /id="cvSegRequests"/);
   assert.doesNotMatch(html, /id="cvSeg|data-pane="(people|groups)"/, "Contacts has no panes at all now");

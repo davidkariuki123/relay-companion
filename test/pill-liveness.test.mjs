@@ -34,21 +34,36 @@ test("the supervisor restarts a pill that is alive but silent, and nothing else"
   assert.ok(restart.ageMs > liveness.PILL_STALE_MS);
 });
 
-test("the pill relaunches only when its own transport fails while the daemon keeps reaching Relay", () => {
+test("failing calls are said and retried, never answered with a relaunch", () => {
   const now = 20 * 60_000;
-  const failingSince = now - liveness.TRANSPORT_WEDGE_MS - 1;
-  const wedged = { failingSince, lastSuccessAt: failingSince - 60_000, failureStreak: 40 };
-  const daemonOk = { at: now - 5000, apiOkAt: now - 10_000 };
-  const verdict = (transport, daemon) => liveness.shouldRelaunchForWedgedTransport({ transport, daemon, now });
-  assert.equal(verdict(null, daemonOk).reason, "transport-ok");
-  assert.equal(verdict({ failingSince: 0, lastSuccessAt: now }, daemonOk).reason, "transport-ok");
-  assert.equal(verdict({ ...wedged, failingSince: now - 1000 }, daemonOk).reason, "failing-briefly");
-  assert.equal(verdict(wedged, null).reason, "daemon-unverified");
-  assert.equal(verdict(wedged, { at: now - 90_000, apiOkAt: now - 10_000 }).reason, "daemon-unverified");
-  // The daemon's last success predates the pill's failures: Relay may simply be down.
-  assert.equal(verdict(wedged, { at: now - 5000, apiOkAt: failingSince - 1 }).reason, "api-down-for-everyone");
-  assert.equal(verdict(wedged, { at: now - 5000 }).reason, "api-down-for-everyone");
-  assert.equal(verdict(wedged, daemonOk).relaunch, true);
+  const failingSince = now - liveness.CONNECTIVITY_NOTICE_MS - 1;
+  const failing = { failingSince, lastSuccessAt: failingSince - 60_000, failureStreak: 40 };
+  const decide = (transport, daemon, extra = {}) => liveness.pillConnectivityDecision({ transport, daemon, now, ...extra });
+  assert.deepEqual(decide(null, null), { state: "online", probe: false, reason: "transport-ok" });
+  assert.equal(decide({ failingSince: 0, lastSuccessAt: now }, null).reason, "transport-ok");
+  assert.equal(decide({ failingSince, lastSuccessAt: failingSince }, null).reason, "transport-ok");
+  // The OS says there is no network: said at once, and calls would only fail.
+  assert.deepEqual(decide(failing, null, { osOnline: false }), { state: "offline", probe: false, reason: "os-offline" });
+  assert.equal(decide(null, null, { osOnline: false }).state, "offline");
+  // One dropped call is not worth a sentence, but is retried.
+  const brief = decide({ ...failing, failingSince: now - 1000 }, null);
+  assert.equal(brief.state, "online");
+  assert.equal(brief.reason, "failing-briefly");
+  assert.equal(brief.probe, true);
+  const down = decide(failing, null);
+  assert.equal(down.state, "unreachable");
+  assert.equal(down.probe, true);
+  assert.equal(decide(failing, { at: now - 5000, apiOkAt: failingSince - 1 }).state, "unreachable",
+    "a daemon success from before the failures says nothing about now");
+  assert.equal(decide(failing, { at: now - 90_000, apiOkAt: now - 10_000 }).state, "unreachable", "a stale daemon proves nothing");
+  // Sven, 2026-10-19: after an outage the daemon reconnects first. That is the
+  // network coming back, so the note goes and the pill calls again at once.
+  const back = decide(failing, { at: now - 5000, apiOkAt: now - 10_000 });
+  assert.deepEqual([back.state, back.reason, back.probe], ["online", "service-reaches-relay", true]);
+  // Probes are paced.
+  assert.equal(decide(failing, null, { lastProbeAt: now - 1000 }).probe, false);
+  assert.equal(decide(failing, null, { lastProbeAt: now - liveness.CONNECTIVITY_PROBE_MS }).probe, true);
+  assert.equal("shouldRelaunchForWedgedTransport" in liveness, false);
 });
 
 test("the pill repairs a daemon whose heartbeat is missing or stale, and nothing else", () => {

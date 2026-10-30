@@ -3095,7 +3095,7 @@ export async function runSetupInstall({ claim = false, reload = true, agentProto
   codexHooks = hookRepair.codexHooks || null;
   lease.assert();
   // An installer's setup holds the recovery pause until activation finishes.
-  createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").resumeUnlessHeld();
+  createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").resumeUnlessHeld(undefined, { by: "setup" });
   const recovery = installRecovery({ packageRoot: path.resolve(path.dirname(bin), ".."), node, reload });
   if (!recovery.ok) throw new Error(`Relay recovery setup failed: ${recovery.detail || recovery.reason}`);
   lease.assert();
@@ -3945,7 +3945,7 @@ export function runUninstall({
 } = {}) {
   const lease = lifecycleOwnership({ homeDir, env });
   try {
-  createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").setStopped(true, homeDir);
+  createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").setStopped(true, homeDir, { by: "uninstall" });
   const steps = [];
   const record = (id, label, operation) => {
     const step = retryUninstallStep(id, label, operation, { attempts, sleep });

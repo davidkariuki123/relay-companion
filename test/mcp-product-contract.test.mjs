@@ -343,13 +343,14 @@ test("model-facing Relay product language calls work Tasks, never Requests", asy
     assert.doesNotMatch(catalog, retired);
   }
   const pill = await readFile(new URL("../overlay/inbox.html", import.meta.url), "utf8");
-  // Requests now names messages from people outside Contacts. Work retains
+  // A first message from outside Contacts sits locked in the inbox. Work retains
   // the Task vocabulary in its navigation, badges and empty states.
   for (const retired of [/data-view="tasks">Requests</i, /No requests yet/i, /Untitled request/i, /What requests may do/i, /kchip">Request</i]) {
     assert.doesNotMatch(pill, retired);
   }
   assert.doesNotMatch(pill, /data-view="tasks"/, "the Todo tab is removed");
-  assert.match(pill, /Relays from senders outside your Contacts/);
+  assert.match(pill, /not in your contacts/);
+  assert.doesNotMatch(pill, /Relays from senders outside your Contacts/, "there is no Requests page");
   assert.doesNotMatch(pill, /Backlog/);
 });
 

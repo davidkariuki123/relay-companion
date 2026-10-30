@@ -43,11 +43,11 @@ test("a self-sent Task paints its title and Task chip despite having no chat unr
   // A Relay-only room: the Slack mark on the avatar is decided by the account's
   // Slack feature and the room's exact integration binding, neither present here.
   const render = Function("peeking", "esc", "relayListGist", "mentionPreviewText", "avatarHue",
-    "avatarInitials", "timeAgo", "bannerIsTask", "bannerVerbsHtml", "bannerComposerHtml",
+    "avatarInitials", "timeAgo", "bannerIsTask", "bannerKindChipHtml", "bannerVerbsHtml", "bannerComposerHtml",
     "payload", "isSlackIntegratedRoom", "messageListGist",
     `${rowSource}\nreturn relayIdentityRowHtml;`)(
     true, String, String, String, () => 0, () => "SA", () => "now",
-    (row) => row.request, () => "", () => "",
+    (row) => row.request, (row) => `<span class="kchip">${row.request ? "Task" : row.textLike ? "Text" : "Relay"}</span>`, () => "", () => "",
     { features:{} }, () => false, (row) => row.title || row.body || "Message",
   );
   const markup = render(banner);

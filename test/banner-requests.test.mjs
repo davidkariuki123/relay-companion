@@ -1,12 +1,8 @@
-// A REQUEST IN THE BANNER (David, 2026-09-17). A stranger's first message
-// waits in Relays › Requests, but it arrived, and the banner is the arrival:
-// without its row the banner was a dark card with the lockup and an ✕ and
-// nothing else. The row is the same species as any arrival, wears a Request
-// chip, and its verbs are what the request row offers under ⋯ in the pane
-// (Add to Contacts, Delete relay, Block sender…) on ONE line, so the banner
-// never changes size. A share-link guest gets no Copy for your agent and no
-// Add to Contacts: their words are not handed to the agent from here, and
-// there is no address to save.
+// A NEW SENDER IN THE BANNER (Shane, 2026-10-28). The Requests page is gone:
+// a stranger's first message arrives like any relay, in the list, the count and
+// the banner, but LOCKED. The banner draws the same locked row the list does:
+// name, address, what kind of thing arrived, Add contact and a ⋯ for Delete and
+// Block. Nothing of their words reaches the banner, the composer or an agent.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -26,48 +22,48 @@ function between(source, startMarker, endMarker) {
 const inbox = read("../overlay/inbox.html");
 const peek = between(inbox, "if (peeking) {\n      // A notification wears the SAME species as the list", "sizePeek();\n      return;\n    }");
 const row = between(inbox, "function relayIdentityRowHtml(identity, show = null)", "// ---------- the reader");
-const verbs = between(inbox, "function bannerVerbsHtml(row)", "function relayIdentityRowHtml(identity, show = null)");
+const locked = between(inbox, "function requestRowHtml(identity, show = null)", "let requestRowsAccount");
 
-test("a Request arrives in the banner like any relay, newest first, wearing its chip", () => {
-  assert.match(peek, /const requests = requestRooms\(\)/);
-  assert.match(peek, /room\.unreadCount > 0/);
-  assert.match(peek, /requestRoom: true/);
-  assert.match(peek, /bannerIdentityRows\(identityRows, allRows\)\.concat\(requests\)/);
-  // Its own class: "Request" is the pane's word for a stranger's message, and
-  // the product-language test retires the bare kchip that once meant a Task.
-  assert.match(row, /\$\{peeking && identity\.requestRoom \? `<span class="kchip request">Request<\/span>` : ""\}/);
-  // The chip sits in the top line, before the time, like the Task chip.
-  assert.ok(row.indexOf('<span class="kchip request">Request</span>') < row.indexOf('<span class="th-time">'));
-  // Nothing grows the row: no extra line under the words.
+test("a new sender arrives in the banner from the same rooms as the list, locked", () => {
+  // One source: the identity rows already carry the request room; no second list.
+  assert.match(peek, /const unread = bannerIdentityRows\(identityRows, allRows\)\n/);
+  assert.doesNotMatch(peek, /requestRooms\(\)|concat\(requests\)/);
+  assert.match(row, /if \(identity\.requestRoom\) return requestRowHtml\(identity, show\);/);
+  // The banner tap and verbs: the row's own open never fires for a locked row.
+  assert.match(peek, /querySelectorAll\("\.relay-arrival:not\(\.request-row\)"\)/);
+  assert.match(peek, /wireMessageSideMenus\(relaysListEl\);\n\s+wireRequestRows\(relaysListEl\);/);
+  // No reply box for a stranger from the banner.
+  assert.match(inbox, /if \(!peeking \|\| !identity \|\| identity\.requestRoom \|\| identity\.provider === "slack"\) return "";/);
 });
 
-test("the verbs are the pane's ⋯ options, on one line, and a guest gets neither Copy nor Add to Contacts", () => {
-  assert.match(verbs, /const request = requestRoomOf\(row\);\n    if \(request\) return requestBannerVerbsHtml\(row, request\);/);
-  const request = between(inbox, "function requestBannerVerbsHtml(row, room)", "// The identity row's message is a room projection");
-  assert.match(request, /isShareGuestRoom\(room\)/);
-  // The guest branch: Delete relay and Block sender…, nothing else.
-  const guest = between(request, "if (isShareGuestRoom(room)) {", "</span>`;");
-  assert.match(guest, /Delete relay/);
-  assert.match(guest, /Block sender…/);
-  assert.doesNotMatch(guest, /Copy for your agent|Add to Contacts/);
-  // The stranger-with-an-address branch: Copy, Add to Contacts, and the rest
-  // under ⋯ — for a relay. A text has nothing for an agent, so Add to Contacts
-  // leads and Copy is gone (David, 2026-09-17).
-  const stranger = request.slice(request.indexOf("const lead = row.textLike"));
-  assert.match(stranger, /const lead = row\.textLike\n\s+\? item\("accept", "Add to Contacts", "act-btn accept"\)\n\s+: `<button class="act-btn accept" type="button" data-banner-copy=/);
-  assert.match(stranger, /data-banner-copy=/);
-  assert.match(stranger, /Add to Contacts/);
-  assert.match(stranger, /data-message-more/);
-  assert.match(stranger, /class="th-message-menu"[^>]*popover="auto" role="menu"/);
-  assert.match(stranger, /data-banner-request="delete"[^>]*>Delete relay/);
-  assert.match(stranger, /data-banner-request="block"[^>]*>Block sender…/);
-  // The pane's own actions answer the banner's verbs.
-  const wired = between(peek, 'querySelectorAll("[data-banner-request]")', 'querySelectorAll("[data-banner-open]")');
-  assert.match(wired, /e\.stopPropagation\(\)/);
-  assert.match(wired, /deleteRequestEntries\(\[entry\]\)/);
-  assert.match(wired, /confirmRequestAction\("block", \[entry\], b\)/);
-  assert.match(wired, /acceptRequestEntry\(entry\)/);
-  assert.match(peek, /wireMessageSideMenus\(relaysListEl\);/);
+test("the locked row shows who and what kind, never the words", () => {
+  assert.match(locked, /class="relay-row relay-arrival request-row/);
+  assert.match(locked, /not in your contacts/);
+  assert.match(locked, /requestRowSentLine\(identity\)/);
+  assert.match(locked, />Add contact<\/button>/);
+  assert.match(locked, /data-request-delete=/);
+  assert.match(locked, /data-request-block="\$\{key\}">Block sender…/);
+  assert.doesNotMatch(locked, /th-title|relayListGist|messageListGist|\.title|\.body|forHuman|data-banner-copy/);
+  const sent = between(inbox, "function requestRowSentLine(room)", "const LOCK_ICON");
+  assert.match(sent, /Sent you a task/);
+  assert.match(sent, /Sent you a message/);
+  assert.match(sent, /Sent you a relay/);
+});
+
+test("nothing else opens a locked sender's words", () => {
+  const open = between(inbox, "function openThreadDetail(threadId", "const returningFromReader");
+  assert.match(open, /if \(lockedRoom && isRequestRoom\(lockedRoom\) && requestRoomMessages\(lockedRoom\)\.length\) \{ showLockedRequest\(lockedRoom\); return; \}/);
+  const reader = between(inbox, "function openReader(id, source, picker = null)", "// A notification banner remains");
+  assert.match(reader, /requestAddresses\(\)\.has\(lockedSender\)/);
+  const search = between(inbox, "function chatSearchModel(query)", "function chatSearchHtml(");
+  assert.match(search, /if \(room\.requestRoom\) continue;/);
+  assert.match(inbox, /receivedRelayRows\(allRows, identityRows\.filter\(\(room\) => !room\.requestRoom\)\)/);
+  const pages = read("../overlay/inbox-pages.js");
+  assert.match(pages, /!locked\.has\(String\(r\.senderEmail \|\| ""\)\.trim\(\)\.toLowerCase\(\)\)/);
+});
+
+test("a new sender counts as unread; only a blocked one stays out of the number", () => {
+  assert.match(inbox, /const quiet = new Set\(\[\.\.\.requestAddresses\(\)\]\.filter\(\(address\) => blocked\.has\(address\)\)\);/);
 });
 
 test("a guest's initials are the person's, not the marker's", () => {

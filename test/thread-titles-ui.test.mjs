@@ -118,20 +118,21 @@ test("the Relays tab is one latest-message row per exact identity", () => {
   };
   const quiet = { name: "New group", hasActivity: false, latest: { at: "2026-08-13T14:00:00Z" } };
   // Nobody here is a stranger: every room is known, so no request is hidden.
-  const relayIdentityRows = Function("chatSections", "knownAddresses", "isRequestRoom", "slackChannelRoomListed", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
-    () => ({ rooms: [shane, granular, quiet] }), () => new Set(), () => false, () => false,
+  const relayIdentityRows = Function("chatSections", "knownAddresses", "isRequestRoom", "slackChannelRoomListed", "ignoredRequestKeys", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
+    () => ({ rooms: [shane, granular, quiet] }), () => new Set(), () => false, () => false, () => new Set(),
   );
   const rows = relayIdentityRows();
-  assert.deepEqual(rows, [shane, granular]);
+  assert.deepEqual(rows, [{ ...shane, requestRoom: false }, { ...granular, requestRoom: false }]);
   assert.equal(rows[0].name, "Shane", "the agent byline does not create or rename its own room");
   assert.deepEqual(rows[1].people, ["Shane", "Sven"], "the group keeps its human roster");
 
   const render = html.slice(html.indexOf("function renderRelays()"), html.indexOf("function relayIdentityRowHtml"));
   assert.match(render, /const allRows = threadMessages\(\)[\s\S]*?\.sort\(\(a, b\) => new Date\(b\.at/);
   assert.match(identitySource, /const \{ rooms \} = chatSections\(\)/);
-  // A stranger's first message is a request and waits in People (2026-09-08).
+  // A stranger's first message sits here too, locked (2026-10-28).
   // Slack channels you are in are listed before anyone writes in them.
-  assert.match(identitySource, /filter\(\(room\) => \(room\.hasActivity !== false \|\| slackChannelRoomListed\(room\)\) && !isRequestRoom\(room, known\)\)/);
+  assert.match(identitySource, /filter\(\(room\) => room\.hasActivity !== false \|\| slackChannelRoomListed\(room\)\)/);
+  assert.match(identitySource, /requestRoom: isRequestRoom\(room, known\)/);
   assert.match(identitySource, /latestAt: room\.latestAt \|\| \(room\.latest && room\.latest\.at\)/);
   assert.doesNotMatch(identitySource, /message\.party|message\.partyKey|new Map/,
     "Relays must not rebuild room identity from agent-authored messages");
@@ -156,8 +157,8 @@ test("a newer Task becomes the person's latest Relays preview", () => {
       request: true,
     },
   };
-  const relayIdentityRows = Function("chatSections", "knownAddresses", "isRequestRoom", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
-    () => ({ rooms: [room] }), () => new Set(), () => false,
+  const relayIdentityRows = Function("chatSections", "knownAddresses", "isRequestRoom", "ignoredRequestKeys", `"use strict"; ${identitySource}; return relayIdentityRows;`)(
+    () => ({ rooms: [room] }), () => new Set(), () => false, () => new Set(),
   );
   const [shane] = relayIdentityRows();
 
@@ -516,7 +517,7 @@ test("a room send addresses the room and quotes only a chosen Relay", () => {
   assert.match(html, /if \(!room \|\| !room\.isGroup \|\| isSlackIntegratedRoom\(room\)\) return null;\n\s+return room\.groupId \? \{ groupId:String\(room\.groupId\) \} : null;/);
   assert.match(html, /emptyRoomAnchor\.provider === "slack"[\s\S]*\? \{ chatId:emptyRoomAnchor\.chatId \}[\s\S]*: \{ groupId:emptyRoomAnchor\.groupId \}/,
     "an exact Slack direct or channel addresses its chat while Relay groups retain their group recipient");
-  assert.match(html, /sendReply\(\{\s*text, recipient, \.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId \} : \{\}\), files, idempotencyKey,/);
+  assert.match(html, /sendReply\(\{\s*text, recipient, \.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId, \.\.\.\(replyKind \? \{ replyKind \} : \{\}\) \} : \{\}\), files, idempotencyKey,/);
   assert.doesNotMatch(html, /sendReply\(\{ text, inReplyToRelayId: newest\.id/);
 });
 
@@ -529,9 +530,9 @@ test("specific replies use an attached composer preview and render a source refe
   assert.match(html, /scrollEl\.classList\.toggle\("room-scroll-active", activeView === "threads" && Boolean\(threadDetailId\)\)/);
   assert.match(html, /class="qr th-qr col\$\{replyTargetId \? " replying" : ""\}"/);
   assert.match(html, /class="th-reply-target"/);
-  assert.match(html, /Replying to \$\{esc\(replyPreviewAuthor\(replyTarget\)\)\}/);
+  assert.match(html, /\$\{replyTargetKind === "quote" \? "Quoting" : "Replying to"\} \$\{esc\(replyPreviewAuthor\(replyTarget\)\)\}/);
   assert.match(html, /data-reply-cancel="1"/);
-  assert.match(html, /threadReplyTargets\.set\(threadStateKey, id\)/);
+  assert.match(html, /threadReplyTargets\.set\(threadStateKey, id\);\s+threadReplyKinds\.set\(threadStateKey, kind\)/);
   assert.match(html, /threadReplyTargets\.delete\(threadStateKey\)/);
   // Attaching or detaching a Relay repaints the composer's top face in place;
   // neither hands the keyboard back, and both leave the caret in the field.
@@ -564,7 +565,7 @@ test("a bubble wears no provenance line at all: no 'Sent with', no 'From Slack'"
   assert.doesNotMatch(html, /PROVIDER_BYLINE|Sent with \$\{esc\(provider\.label\)\}/);
   const start = html.indexOf("const providerBylineHtml = ");
   assert.notEqual(start, -1, "the byline moved — this test extracts it by name");
-  const source = html.slice(start, html.indexOf("const defaultReplyAnchorIds"));
+  const source = html.slice(start, html.indexOf("const replyThreadRepliesFor"));
   const esc = (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const providerBylineHtml = new Function("esc", `${source}; return providerBylineHtml;`)(esc);
   for (const surface of ["codex", "claude_code", "claude_desktop", "claude_cowork", "relay_companion", "constructor", "__proto__"]) {
@@ -596,7 +597,7 @@ test("the room composer prevents duplicate sends, and returns a draft only when 
   assert.match(html, /<div id="thQrInput" class="th-rich-composer" contenteditable="true"/);
   assert.match(html, /const priorAttempt = threadReplyAttemptKeys\.get\(threadStateKey\)/);
   assert.match(html, /priorAttempt && priorAttempt\.fingerprint === fingerprint/);
-  assert.match(html, /sendReply\(\{\s*text, recipient, \.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId \} : \{\}\), files, idempotencyKey,/);
+  assert.match(html, /sendReply\(\{\s*text, recipient, \.\.\.\(inReplyToRelayId \? \{ inReplyToRelayId, \.\.\.\(replyKind \? \{ replyKind \} : \{\}\) \} : \{\}\), files, idempotencyKey,/);
   // The restore path still exists — a device that cannot store the message at
   // all must not swallow it — but it is now reachable ONLY from that, never
   // from a failed network attempt, which the queue absorbs and retries.
@@ -957,10 +958,10 @@ test("every chat-message link uses the theme accent", () => {
 });
 
 // ---- legacy default anchors vs explicit replies ----------------------------
-// Companion <=0.1.289 used inReplyToRelayId as an automatic room-chain key.
-// Modern room sends are naked unless the human opens a Relay or selects Reply,
-// so those explicit gestures must keep their visible reference even when the
-// parent happens to be the immediately preceding message.
+// The sender says what a reply link means (replyKind: "thread" or "quote");
+// the pill no longer guesses from the sending app, its version or where the
+// parent sits (Shane, 2026-10-19). A link with no kind keys the thread and
+// draws nothing.
 function sliceFunction(src, header) {
   const start = src.indexOf(header);
   assert.notEqual(start, -1, `missing ${header}`);
@@ -974,81 +975,45 @@ function sliceFunction(src, header) {
   }
   throw new Error(`unterminated ${header}`);
 }
-const defaultReplyAnchorMap = new Function(
-  `${sliceFunction(html, "function defaultReplyAnchorMap(")}; return defaultReplyAnchorMap;`,
-)();
-const messageHasExplicitReplyGesture = new Function(
-  `${sliceFunction(html, "function versionAtLeast(")};`
-    + `${sliceFunction(html, "function messageHasExplicitReplyGesture(")};`
-    + "return messageHasExplicitReplyGesture;",
+const replyKindOf = new Function(
+  `${sliceFunction(html, "function replyKindOf(")}; return replyKindOf;`,
 )();
 
-test("the message directly above is a default anchor, and reaching past it is not", () => {
-  const anchors = defaultReplyAnchorMap([
-    { id: "reversion", at: "2026-08-18T07:39:09.000Z" },
-    { id: "fixed", at: "2026-08-18T08:26:40.000Z" },
-    { id: "sick", at: "2026-08-18T08:28:00.000Z" },
-  ]);
-  assert.ok(anchors.get("sick").has("fixed"), "the line above is the anchor the composer sets for you");
-  assert.ok(!anchors.get("sick").has("reversion"), "a reach-back is a deliberate reply");
-  assert.equal(anchors.get("reversion").size, 0, "nothing sits above the first message");
+test("a reply link means what the sender said, whatever app sent it", () => {
+  assert.equal(replyKindOf({ inReplyToRelayId: "a", replyKind: "thread" }), "thread");
+  assert.equal(replyKindOf({ inReplyToRelayId: "a", replyKind: "quote" }), "quote");
+  assert.equal(replyKindOf({ inReplyToRelayId: "a", source: { host: "relay-preview", clientVersion: "0.1.700" } }), "",
+    "the sending app and its version decide nothing");
+  assert.equal(replyKindOf({ inReplyToRelayId: "a", source: { host: "relay-mcp" } }), "", "an agent's follow-up keys the thread and draws nothing");
+  assert.equal(replyKindOf({ replyKind: "quote" }), "", "a kind without a link is nothing");
+  assert.equal(replyKindOf({ inReplyToRelayId: "a", replyKind: "banana" }), "", "an unknown kind is nothing");
+  assert.doesNotMatch(html, /defaultReplyAnchorMap|messageHasExplicitReplyGesture|explicitReply/, "the guessing is gone");
 });
 
-test("out-of-order arrivals are anchored by time, not by list position", () => {
-  const anchors = defaultReplyAnchorMap([
-    { id: "third", at: "2026-08-18T09:00:00.000Z" },
-    { id: "first", at: "2026-08-18T07:00:00.000Z" },
-    { id: "second", at: "2026-08-18T08:00:00.000Z" },
-  ]);
-  assert.ok(anchors.get("third").has("second"));
-  assert.ok(!anchors.get("third").has("first"));
-});
-
-test("a Task in between does not turn the composer's own anchor into a quote", () => {
-  // The composer skips Tasks when it picks an anchor, so both the line
-  // directly above and the newest ordinary message above are defaults.
-  const anchors = defaultReplyAnchorMap([
-    { id: "chat", at: "2026-08-18T07:00:00.000Z" },
-    { id: "request", at: "2026-08-18T07:30:00.000Z", request: true },
-    { id: "reply", at: "2026-08-18T08:00:00.000Z" },
-  ]);
-  assert.ok(anchors.get("reply").has("chat"), "the newest ordinary message above");
-  assert.ok(anchors.get("reply").has("request"), "and the message directly above");
-});
-
-test("modern pill reply gestures override the legacy adjacent-anchor suppression", () => {
-  assert.equal(messageHasExplicitReplyGesture({
-    source: { host: "relay-preview", clientVersion: "0.1.289" },
-  }), false, "legacy automatically anchored room messages stay quiet");
-  assert.equal(messageHasExplicitReplyGesture({
-    source: { host: "relay-preview", clientVersion: "0.1.290" },
-  }), true, "the first explicit-addressing Companion release shows the reply");
-  assert.equal(messageHasExplicitReplyGesture({
-    source: { host: "relay-preview", clientVersion: "0.1.402" },
-  }), true, "the reported reader reply is fixed retroactively from provenance");
-  assert.equal(messageHasExplicitReplyGesture({ explicitReply: true }), true,
-    "optimistic and outbox rows show the selected parent before canonical hydration");
-  assert.equal(messageHasExplicitReplyGesture({
-    source: { host: "relay-mcp", clientVersion: "0.1.402" },
-  }), false, "agent reply-chain metadata is not reclassified as a human quote gesture");
-});
-
-test("the reply chip preserves explicit adjacent replies and quiets only legacy defaults", () => {
-  assert.match(html, /const defaultReplyAnchorIds = defaultReplyAnchorMap\(roomMsgsBeforeFold\)/);
-  assert.match(html, /const defaults = defaultReplyAnchorIds\.get\(String\(\(message && message\.id\) \|\| ""\)\)/);
-  assert.match(html, /if \(!messageHasExplicitReplyGesture\(message\) && defaults && defaults\.has\(parentId\)\) return "";/);
-  assert.match(html, /const replyToId = quotedId \|\| r\.id;/);
-  assert.match(html, /inReplyToRelayId:replyToId, explicitReply:true/,
-    "the reader reply is visibly anchored on its first optimistic frame");
-  assert.match(html, /explicitReply: Boolean\(entry\.inReplyToRelayId\)/,
-    "the durable outbox projection retains explicit presentation");
-  assert.match(html, /inReplyToRelayId: inReplyToRelayId \|\| "",\s+explicitReply: Boolean\(inReplyToRelayId\)/,
-    "a reply-button send is visibly anchored before canonical hydration");
-  // A parent outside the loaded room is indistinguishable from a default
-  // anchor, and the default is overwhelmingly the case: say nothing rather
+test("the quote card follows the kind: a Quote always, a Reply in thread only where threads are off", () => {
+  assert.match(html, /const kind = replyKindOf\(message\);\s+if \(!kind \|\| \(kind === "thread" && roomReplyThreads\)\) return "";/);
+  assert.match(html, /const replyToId = quotedId \|\| r\.id;\s+const replyKind = quotedId \? "quote" : "thread";/);
+  assert.match(html, /inReplyToRelayId:replyToId, replyKind,/,
+    "the reader reply carries its kind on its first optimistic frame");
+  assert.match(html, /replyKind: entry\.inReplyToRelayId \? String\(entry\.replyKind \|\| ""\) : ""/,
+    "the durable outbox projection carries the kind");
+  assert.match(html, /inReplyToRelayId: inReplyToRelayId \|\| "",\s+replyKind: inReplyToRelayId \? replyKind : "",/,
+    "a composer send carries its kind before canonical hydration");
+  // A parent outside the loaded room has nothing to quote: say nothing rather
   // than stamp a placeholder on old messages.
   assert.doesNotMatch(html, /Original Relay unavailable/);
   assert.doesNotMatch(html, /th-reply-ref missing/);
+});
+
+test("the message menu offers Quote and Reply in thread as two verbs", () => {
+  const start = html.indexOf("const messageActionBits = [];");
+  const source = html.slice(start, html.indexOf("// WhatsApp's windows", start));
+  assert.match(source, /data-reply-thread="\$\{esc\(m\.id\)\}" data-stop="1">reply in thread</, "Reply in thread, where threads are on");
+  assert.match(source, /data-reply-quote="\$\{esc\(m\.id\)\}" data-stop="1">quote</, "Quote");
+  assert.match(source, /if \(roomReplyThreads && !inThread\)/, "Reply in thread is not offered inside a thread");
+  assert.match(source, /const threadTop = /, "and Quote is not offered on the message a thread hangs from");
+  assert.doesNotMatch(source, /data-reply-to=/, "the overloaded reply verb is gone from the bubble");
+  assert.match(html, /\$\{replyTargetKind === "quote" \? "Quoting" : "Replying to"\}/, "the composer banner says which");
 });
 
 test("a clipped untitled title never leaves its mid-word tail as the card preview", () => {

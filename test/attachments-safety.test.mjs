@@ -96,3 +96,17 @@ test("the app's trusted outbox spool can send while arbitrary .relay paths stay 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a path attachment that revises an earlier file carries the earlier fileId to the send", async () => {
+  await withTempFile("plan.md", "v2", async (file) => {
+    const out = await prepareOrdinaryRelayAttachments({
+      attachments: [{ path: file, revises: " att_earlier " }],
+      files: [file],
+      idempotencyKey: "k",
+    });
+    assert.equal(out.length, 2);
+    // Plain file paths come first, then attachment items.
+    assert.equal(Object.hasOwn(out[0], "revises"), false, "a plain file path revises nothing");
+    assert.equal(out[1].revises, "att_earlier", "the attachment item keeps its revises, trimmed");
+  });
+});

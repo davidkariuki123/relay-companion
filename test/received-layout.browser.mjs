@@ -51,7 +51,6 @@ try {
   assert.equal(await received.getAttribute('aria-pressed'),'true');
   assert.equal(await page.locator('.rat-card').isVisible(),true);
   assert.match(await page.locator('.rat-slide.active').innerText(),/Pick up where you left off/);
-  assert.equal(await page.locator('#requestsEntry .requests-count').innerText(),'1');
   const ids=await page.locator('#relaysList .row').evaluateAll(els=>els.map(el=>el.dataset.id));
   assert.deepEqual(ids.slice(0,4),['relay1','group8','older10','older11']);
   for(const omitted of ['text4','deleted5','self6','stranger7','sent']) assert.ok(!ids.includes(omitted),omitted);
@@ -80,10 +79,6 @@ try {
   assert.equal(await groupBadge.locator('svg').count(),1);
   assert.equal(await groupBadge.evaluate(el=>el.getBoundingClientRect().width<=100),true);
   assert.deepEqual(await page.evaluate(()=>window.readIds),[],'listing does not read items');
-  await page.locator('#requestsEntry').click();
-  assert.equal(await page.locator('#relaysLayout').isVisible(),false);
-  assert.equal(await page.locator('.request-inbox-row').count(),1);
-  await page.getByRole('button',{name:'Back to Relays',exact:true}).click();
   assert.equal(await received.getAttribute('aria-pressed'),'true');
   await page.getByRole('button',{name:'Minimise tip',exact:true}).click();
   await page.locator('#scroll').evaluate(el=>{el.scrollTop=el.scrollHeight;el.dispatchEvent(new Event('scroll'));});
@@ -123,7 +118,6 @@ try {
     window.events.onInbox(structuredClone(window.fixture));
   });
   assert.equal(await page.locator('#relaysList .row').count(),0);
-  assert.equal(await page.locator('#requestsEntry').isVisible(),true);
   await page.evaluate(()=>{window.fixture.relays=[];window.events.onInbox(structuredClone(window.fixture));});
   assert.equal(await page.locator('#relaysEmpty .t1').innerText(),'No received relays yet');
   // Type and direction are independent, and Sent uses the existing filters.
@@ -160,5 +154,5 @@ try {
   });
   assert.equal(await chats.getAttribute('aria-pressed'),'true','account preference is isolated');
   assert.deepEqual(errors,[]);
-  console.log('Received layout: filtering, tasks, chronology, pagination, requests, tip state, reader, delete, persistence and account isolation passed.');
+  console.log('Received layout: filtering, tasks, chronology, pagination, locked senders left out, tip state, reader, delete, persistence and account isolation passed.');
 } finally { await browser.close(); }

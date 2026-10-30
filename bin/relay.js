@@ -753,7 +753,7 @@ function launchedByRelayApplication({ platform = process.platform, ppid = proces
 }
 
 async function cmdPill(flags = {}, positional = []) {
-  createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").resumeUnlessHeld();
+  createRequire(import.meta.url)("../bootstrap/recovery-intent.cjs").resumeUnlessHeld(undefined, { by: "relay-pill" });
   migratePersistedContentFields({ log: (message) => console.log(`[relay] ${message}`) });
   const here = path.dirname(fileURLToPath(import.meta.url));
   const overlayMain = path.resolve(here, "../overlay/main.cjs");

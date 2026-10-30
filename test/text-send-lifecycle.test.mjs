@@ -143,7 +143,7 @@ function composer({ files = [], prepare = async () => ({ files: [], attachments:
   const address = { threadId: "room", party: "Friend", addressRecipient: { email: "friend@example.test" } };
   const c = vm.createContext({
     latestOutboxRevision: 0, optimisticChatReplies: new Map(), chatReplySending: new Set(),
-    threadReplyAttemptKeys: new Map(), threadReplyTargets: new Map(), threadComposerDrafts: new Map(),
+    threadReplyAttemptKeys: new Map(), threadReplyTargets: new Map(), threadReplyKinds: new Map(), threadComposerDrafts: new Map(),
     threadEditTargets: new Map(), edits, doThEditSave: () => { edits.push(input.value); },
     threadStateKey: "room", thReplySending: false, thQrInput: input, thQrSend: {},
     thread: { ...address, msgs: [] }, chatRoom: null, addressAnchor: address,

@@ -9,9 +9,12 @@ const PILL_HEARTBEAT_MS = 5000;
 // enough that a person waiting on the pill is not waiting on a 5-minute cadence.
 const PILL_STALE_MS = 3 * 60_000;
 const PILL_RESTART_COOLDOWN_MS = 10 * 60_000;
-// Every API call from the pill failing for this long, while the daemon on the
-// same machine keeps reaching Relay, means the pill's own transport is wedged.
-const TRANSPORT_WEDGE_MS = 5 * 60_000;
+// How long the pill's own calls must keep failing before it says so: one
+// dropped request on patchy Wi-Fi is not worth a sentence.
+const CONNECTIVITY_NOTICE_MS = 15_000;
+// While its calls fail the pill makes a fresh one this often. Nothing else may
+// be due for minutes, and without a call it cannot notice the network is back.
+const CONNECTIVITY_PROBE_MS = 15_000;
 const DAEMON_HEARTBEAT_FRESH_MS = 60_000;
 const DAEMON_API_FRESH_MS = 2 * 60_000;
 // The daemon writes its heartbeat every 5 s (src/recovery-health.js). Two
@@ -49,21 +52,35 @@ function pillSupervisorDecision({ heartbeat, now = Date.now(), alive = false, la
 }
 
 /**
- * Whether the pill should relaunch itself because its API transport is wedged.
- * The daemon's heartbeat carries apiOkAt, its last successful Relay call. Only
- * a daemon success dated AFTER the pill started failing separates "the pill is
- * broken" from "Relay is down for everyone", and only the former is fixable here.
+ * What the pill says and does while its own Relay calls fail. It never quits:
+ * every failed call already threw its connection pool away (src/client.js), so
+ * a fresh call is the whole repair. Until 2026-10-19 the pill relaunched itself
+ * after five minutes of failures if the daemon had reached Relay since. After
+ * any outage that long the daemon reconnects first, so the relaunch fired the
+ * moment the network came back, and on macOS launchd never started the pill
+ * again (Sven, five times from 2026-09-28).
+ *   online       calls are answered, or the daemon on this machine reaches
+ *                Relay (not a network problem; the next call catches up).
+ *   offline      the OS reports no network connection.
+ *   unreachable  calls have failed for a while and nothing here reaches Relay.
+ * probe says to make a fresh call now. Any HTTP answer, even an error status,
+ * counts as reaching Relay.
  */
-function shouldRelaunchForWedgedTransport({ transport, daemon, now = Date.now(),
-  wedgeMs = TRANSPORT_WEDGE_MS, daemonFreshMs = DAEMON_HEARTBEAT_FRESH_MS, apiFreshMs = DAEMON_API_FRESH_MS } = {}) {
+function pillConnectivityDecision({ transport, daemon, osOnline = true, now = Date.now(), lastProbeAt = 0,
+  noticeMs = CONNECTIVITY_NOTICE_MS, probeMs = CONNECTIVITY_PROBE_MS,
+  daemonFreshMs = DAEMON_HEARTBEAT_FRESH_MS, apiFreshMs = DAEMON_API_FRESH_MS } = {}) {
+  if (osOnline === false) return { state: "offline", probe: false, reason: "os-offline" };
   const failingSince = Number(transport?.failingSince) || 0;
-  if (!failingSince || Number(transport.lastSuccessAt) >= failingSince) return { relaunch: false, reason: "transport-ok" };
-  if (now - failingSince < wedgeMs) return { relaunch: false, reason: "failing-briefly", failingForMs: now - failingSince };
+  if (!failingSince || Number(transport.lastSuccessAt) >= failingSince) return { state: "online", probe: false, reason: "transport-ok" };
+  const probe = now - (Number(lastProbeAt) || 0) >= probeMs;
+  const failingForMs = Math.max(0, now - failingSince);
   const daemonAt = Number(daemon?.at) || 0;
-  if (!daemonAt || daemonAt > now || now - daemonAt >= daemonFreshMs) return { relaunch: false, reason: "daemon-unverified" };
-  const apiOkAt = Number(daemon.apiOkAt) || 0;
-  if (apiOkAt < failingSince || now - apiOkAt >= apiFreshMs) return { relaunch: false, reason: "api-down-for-everyone" };
-  return { relaunch: true, reason: "wedged-transport", failingForMs: now - failingSince };
+  const apiOkAt = Number(daemon?.apiOkAt) || 0;
+  if (daemonAt && daemonAt <= now && now - daemonAt < daemonFreshMs && apiOkAt >= failingSince && now - apiOkAt < apiFreshMs) {
+    return { state: "online", probe, reason: "service-reaches-relay", failingForMs };
+  }
+  if (failingForMs < noticeMs) return { state: "online", probe, reason: "failing-briefly", failingForMs };
+  return { state: "unreachable", probe, reason: "unreachable", failingForMs };
 }
 
 function daemonHeartbeatPath(homeDir) {
@@ -104,6 +121,24 @@ function daemonRepairDecision({ heartbeat, now = Date.now(), pillStartedAt = 0, 
   return { action: "repair", reason: "stale", ageMs };
 }
 
+/**
+ * Whether runtime/transaction.lock means an update owns the services right
+ * now. The pill only asks recovery for a repair, and recovery takes the lock
+ * properly, so this gate only has to keep the pill quiet during a live
+ * update. A lock whose owner has died is not one: it used to hold the pill's
+ * repair off until someone else reclaimed it.
+ *   owner          parsed owner.json, or null when missing or unreadable.
+ *   lockAgeMs      age of the lock directory (mkdir comes before owner.json).
+ *   ownerAlive     whether owner.pid is a running process.
+ */
+const TRANSACTION_OWNERLESS_GRACE_MS = 10 * 60_000;
+function transactionLockOpen({ exists = false, owner = null, lockAgeMs = 0, ownerAlive = false,
+  ownerlessGraceMs = TRANSACTION_OWNERLESS_GRACE_MS } = {}) {
+  if (!exists) return false;
+  if (!Number.isInteger(owner?.pid) || owner.pid <= 0) return !(lockAgeMs >= ownerlessGraceMs);
+  return ownerAlive === true;
+}
+
 // Whether the service is actually RECEIVING messages (src/inbox-health.js),
 // which a fresh heartbeat alone does not prove. No evidence from this very
 // process (an older service, or the file of one that has since been replaced)
@@ -130,13 +165,16 @@ module.exports = {
   daemonHeartbeatPath,
   daemonHeartbeatIsFresh,
   pillSupervisorDecision,
-  shouldRelaunchForWedgedTransport,
+  pillConnectivityDecision,
   daemonRepairDecision,
+  transactionLockOpen,
   PILL_HEARTBEAT_MS,
   PILL_STALE_MS,
   PILL_RESTART_COOLDOWN_MS,
-  TRANSPORT_WEDGE_MS,
+  CONNECTIVITY_NOTICE_MS,
+  CONNECTIVITY_PROBE_MS,
   DAEMON_STALE_MS,
   DAEMON_REPAIR_GRACE_MS,
   DAEMON_REPAIR_COOLDOWN_MS,
+  TRANSACTION_OWNERLESS_GRACE_MS,
 };

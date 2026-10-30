@@ -215,6 +215,11 @@
      answer never needs the room. Same classes as the room composer; only its
      home changes: it lines up with the text column, like the verbs do. */
   .card.peek .qr.qr-banner { margin:12px 0 0; padding:10px 10px 6px 16px; }
+  /* Only a text has a reply box on its banner, and it is one line: the field
+     and Send side by side, no + (Shane, 2026-10-19). Long words still grow it. */
+  .card.peek .qr.qr-banner { flex-direction:row; align-items:flex-end; gap:8px; padding:6px 6px 6px 14px; }
+  .card.peek .qr.qr-banner > .th-rich-composer { flex:1 1 auto; min-width:0; align-self:center; }
+  .card.peek .qr.qr-banner .cmp-plus, .card.peek .qr.qr-banner .rt-spacer { display:none; }
   /* After Return the words take the row's own "You:" line, then the banner folds. */
   .card.peek .rk-line + .rk-line { margin-top:6px; }
   /* How many relays a conversation holds is reference for the list. On an
@@ -264,7 +269,7 @@
   .card.searching .chat-search { display:flex; }
   .card.searching .chat-search-cancel { display:inline-flex; }
   .card.searching .relays-layout, .card.searching .relays-filter,
-  .card.searching #relaysIntro, .card.searching #serviceStoppedNote,
+  .card.searching #relaysIntro, .card.searching #serviceStoppedNote, .card.searching #networkNote,
   .card.searching #relaysList, .card.searching #relaysEmpty { display:none !important; }
   .chat-search { flex:1 1 auto; min-width:0; align-items:center; gap:7px; height:32px; padding:0 4px 0 10px; box-sizing:border-box;
     border-radius:var(--r-2); background:var(--wash-2); color:var(--muted-2);
@@ -2700,10 +2705,14 @@
   .th-message-menu .rx-menu { display:flex; flex-wrap:wrap; gap:1px; padding:3px 2px 8px; border-bottom:1px solid var(--hair); }
   .th-message-menu .rx-menu button { width:auto; min-width:32px; padding:6px; border-radius:6px; text-align:center; font-size:19px; line-height:1; }
   .th-msg:has(.th-message-more) { max-width:calc(100% - 64px); }
+  /* A card's minimum width must not eat the ⋯'s gutter: in a narrow pill the
+     300px floor beat the max-width and pushed the button off the edge. */
+  .th-msg:is(.has-host-actions, .holds-news):has(.th-message-more) { min-width:min(300px, calc(100% - 64px)); }
   @media (hover:none), (pointer:coarse) {
     .rx-badge { min-width:44px; min-height:44px; justify-content:center; }
     .th-message-menu .rx-menu button { min-width:44px; min-height:44px; }
     .th-msg:has(.th-message-more) { max-width:calc(100% - 76px); }
+    .th-msg:is(.has-host-actions, .holds-news):has(.th-message-more) { min-width:min(300px, calc(100% - 76px)); }
   }
   /* A message the server refused stays a whisper — it is not an alarm — but it
      has to read as a problem, and it carries the only two acts left on it. */
@@ -3768,6 +3777,7 @@
   @keyframes su-copied-in { from { opacity:0; transform:scale(.85); } to { opacity:1; transform:none; } }
   .su-first-message b svg { width:11px; height:11px; fill:none; stroke:currentColor; stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round; }
   .su-first-message.copied { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--ok) 45%, transparent); }
+  .su-first-message.su-link-box span { min-width:0; overflow-wrap:anywhere; }
   /* A mouse whose wheel rolls down, over and over. */
   .su-wheel { flex:none; position:relative; width:13px; height:19px; border-radius:7px; box-shadow:inset 0 0 0 1.5px currentColor; }
   .su-wheel::after { content:""; position:absolute; left:50%; top:4px; width:2px; height:5px; margin-left:-1px; border-radius:1px; background:currentColor;
@@ -3971,24 +3981,20 @@
   @media (prefers-reduced-motion:reduce) { .su-spinner { animation:none; border-top-color:var(--hair); } }
   @media (prefers-reduced-motion:reduce) { .su-check-active .su-check-mark { animation:none; border-top-color:var(--hair); } }
 
-  /* The accepted compact Requests row: one slot regardless of request count. */
-  .requests-entry { width:calc(100% - 24px); margin:4px 12px; padding:9px 4px 11px; display:flex; align-items:center; gap:10px; border:0; border-bottom:1px solid var(--hair); border-radius:0; background:transparent; color:var(--ink); font:600 12px var(--sans); text-align:left; cursor:pointer; }
-  .requests-entry:hover { background:var(--wash); }
-  .requests-icon { flex:none; width:18px; color:var(--accent); }
-  .requests-count { margin-left:auto; color:var(--muted-2); font:11px var(--mono); white-space:nowrap; }
-  .requests-chevron { color:var(--muted-2); font-size:19px; }
-  .requests-head { display:flex; align-items:center; gap:6px; padding:0 16px; height:46px; border-bottom:1px solid var(--hair); }
-  .requests-head strong { font:600 12px var(--sans); }
-  .requests-head .th-back { width:18px; font-size:24px; }
-  .requests-head .requests-count { margin-left:0; font-size:10px; }
-  .requests-delete-all { margin-left:auto; padding:6px 0; border:0; background:transparent; color:var(--danger); font:11px var(--sans); cursor:pointer; }
-  .requests-delete-all:disabled { opacity:.45; cursor:default; }
-  .requests-note { padding:10px 16px 3px; color:var(--muted-2); font:10.5px var(--sans); }
-  .requests-error { padding:8px 16px; color:var(--danger); font:11px var(--sans); }
-  .request-inbox-row { position:relative; }
-  .request-inbox-row .th-time { margin-right:22px; }
-  .request-inbox-more { position:absolute; top:8px; right:7px; width:24px; height:24px; border:0; border-radius:var(--r-1); background:transparent; color:var(--muted-2); font:18px var(--sans); cursor:pointer; }
-  .request-inbox-more:hover, .request-inbox-more:focus-visible { color:var(--ink); background:var(--wash-2); }
+  /* A new sender's row: who they are and what kind of thing they sent, locked
+     until Add contact (Shane, 2026-10-28). The words never render here. */
+  .request-row { cursor:default; }
+  .request-address { display:block; margin-top:2px; font-family:var(--mono); font-size:10.5px; color:var(--muted-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .request-sent { display:inline-flex; align-items:center; gap:5px; margin-top:6px; font-family:var(--sans); font-size:12px; color:var(--muted); }
+  .request-row.unread .request-sent { color:var(--ink-2); font-weight:500; }
+  .request-lock { flex:none; color:var(--muted-2); }
+  .request-hint { color:var(--accent); font-weight:500; }
+  .request-acts { margin-top:10px; gap:12px; }
+  .request-acts .act-btn.accept { padding:6px 12px; border-radius:var(--r-pill); background:var(--accent); color:var(--on-accent); font-size:12px; }
+  .request-error { display:block; margin-top:6px; font-family:var(--sans); font-size:11px; color:var(--danger); }
+  .request-row.nudged [data-request-add] { animation:requestNudge .5s var(--settle); }
+  @keyframes requestNudge { 30% { transform:scale(1.08); } 60% { transform:scale(.97); } }
+  @media (prefers-reduced-motion:reduce) { .request-row.nudged [data-request-add] { animation:none; } }
 
 .tp-thread-search { display:flex; gap:8px; padding:12px 16px; box-sizing:border-box; width:100%; }
 .tp-thread-search input { min-width:0; width:0; flex:1 1 0; }
@@ -4241,6 +4247,8 @@
   .wide-cards .th-msg.rl-card .th-msg-title { font-size:16.5px; line-height:1.45; }
   .wide-cards .th-msg.rl-card .th-preview { font-size:12.5px; }
   .wide-cards .th-msg.rl-card .th-body { flex:1 0 100%; }
+  .wide-cards .th-msg.rl-card .th-body.rl-clip { max-height:calc(1.6em * 10); overflow:hidden;
+    -webkit-mask-image:linear-gradient(to bottom, #000 72%, transparent); mask-image:linear-gradient(to bottom, #000 72%, transparent); }
   .wide-cards .th-msg.rl-card > .rl-main > .th-blk-time { text-align:left; margin-top:6px; }
   .wide-cards .rl-card .th-cargo { flex:1 0 100%; width:auto; max-width:none; margin:10px 0 0; align-items:flex-start; }
   .wide-cards .rl-card .th-cargo .ca-row { justify-content:flex-start; }
@@ -4501,10 +4509,13 @@
       <section class="view hidden wide-empty" id="wideEmpty" aria-live="polite"></section>
       <!-- Relays view -->
       <section class="view" id="relaysView">
-        <div id="relaysIntro" hidden><div id="relaysRequestsSummary"></div><div id="setupNudge"></div><div id="slackNudge"></div><div id="relayAnyoneTip" hidden></div></div>
+        <div id="relaysIntro" hidden><div id="setupNudge"></div><div id="slackNudge"></div><div id="relayAnyoneTip" hidden></div></div>
         <!-- Said only after the pill's own repair of the background service
              failed: a repair that works is silent, and a Repair button would
              ask the person to do the pill's job. -->
+        <!-- The pill stays up through an outage and says so here; it reconnects
+             on its own, so there is nothing to press. -->
+        <div class="service-note gone" id="networkNote" role="status"></div>
         <div class="service-note gone" id="serviceStoppedNote" role="status">Relay’s background service stopped and could not be restarted. Open conversations still load, but new messages won’t notify you until you restart this computer.</div>
         <div class="chat-search-results" id="chatSearchResults" role="listbox" aria-label="Search results"></div>
         <div class="cs-live" id="chatSearchLive" role="status" aria-live="polite"></div>
@@ -4756,7 +4767,6 @@
   const relaysViewEl = document.getElementById("relaysView");
   const relaysLayoutEl = document.getElementById("relaysLayout");
   const relaysIntroEl = document.getElementById("relaysIntro");
-  const relaysRequestsSummaryEl = document.getElementById("relaysRequestsSummary");
   const relaysListEl = document.getElementById("relaysList");
   const relaysEmptyEl = document.getElementById("relaysEmpty");
   const relaysBadgeEl = document.getElementById("relaysBadge");
@@ -4831,6 +4841,11 @@
   const setupPaneEl = document.getElementById("setupPane");
   const signInBannerEl = document.getElementById("signInBanner");
   const serviceStoppedNoteEl = document.getElementById("serviceStoppedNote");
+  const networkNoteEl = document.getElementById("networkNote");
+  const NETWORK_NOTES = {
+    offline: "No internet connection. Relay will reconnect by itself when you’re back online.",
+    unreachable: "Can’t reach Relay right now. It will reconnect by itself.",
+  };
   const signupViewEl = document.getElementById("signupView");
   const signupBodyEl = document.getElementById("signupBody");
 
@@ -4916,9 +4931,9 @@
   // two thirds was too big to work beside and too small to be the app. The
   // native window grows to the screen's work area to hold it (main.cjs,
   // "THE FULL APP").
-  // Dev-gated (fullAppExpand): everyone else keeps the two-thirds card, never
-  // wider or taller than the screen that holds it, which never grows the
-  // native surface.
+  // Every account has it (fullAppExpand, released 2026-10-10). The flag stays
+  // as a switch: off, Expand keeps the two-thirds card, never wider or taller
+  // than the screen that holds it, which never grows the native surface.
   let surfaceFullSize = null; // the full app's exact area, from main, while it is on screen
   function wideSize() {
     const aw = Number(window.screen?.availWidth) || WIDE.w;
@@ -5623,8 +5638,10 @@
     // The card was visibly presented and the person deliberately dismissed it.
     // That is stronger evidence than a passive dwell, so this notification id
     // is retired. Re-queuing on ✕ was the remaining source of the same banner
-    // appearing two or three times after the 0.1.183 dwell fix.
-    if (!wasGhost) sendAttentionDone(true);
+    // appearing two or three times after the 0.1.183 dwell fix. A ghost banner
+    // reports here too, while its window is still visible: its finished dwell
+    // is the presentation main confirms.
+    sendAttentionDone(true);
     cardEl.classList.add("bye");
     setInteractive(false);
     byeTimer = setTimeout(() => {
@@ -5646,13 +5663,16 @@
     refreshCountLabel();
     cardEl.classList.remove("collapsed", "offstage", "bye");
     ghost = true; peeking = true;
-    cardEl.classList.add("peek", "ghost");
+    activeNotificationIds = (Array.isArray(row) ? row : [row]).filter(Boolean).map((item) => item.id).filter(Boolean);
+    notifInteracted = false;
+    notifSticky = false; // a ghost always fades; it never latches into a pill
+    cardEl.classList.add("peek", "ghost", "notifying");
     activeView = "relays";
     commitNavigation({ outerScrollTop: 0 });
     // Size to the rendered first row (no pill morph — the banner just appears at size).
     snapSize(PEEK.w, peekHeight());
     playArrivalSound();
-    // Leave after ~7s — but never rug-pull someone mid-reply or with the pointer on
+    // Leave after the show's dwell — but never rug-pull someone mid-reply or with the pointer on
     // the banner; check again shortly instead (macOS banners hold while hovered too).
     ghostTimer = setTimeout(function tick() {
       ghostTimer = null;
@@ -5726,13 +5746,10 @@
   // including the initial expanded card before any explicit open gesture.
   function notifyArrival(rows, meta) {
     noteViewCause("arrival");
-    // The full app behind another app (Cmd+Tab back to Claude) hears nothing
-    // it can show. A full app the person cannot see folds back to the pill,
-    // and the arrival takes the banner every other message takes. One still
-    // in view (say on a second screen) keeps its place and shows it there.
-    if (typeof appExpanded !== "undefined" && appExpanded && !collapsed && !peeking && !ghost && document.visibilityState === "hidden") {
-      setCollapsed(true);
-    }
+    // An open card, the full app included, never turns into a banner: the
+    // arrival lands in its list and the app icon's unread badge says it came,
+    // even with the app behind another window (Shane, 2026-10-19). Only the
+    // minimised pill and a hidden pill show a banner.
     const onStageFull = !collapsed && !peeking && !ghost
       && !cardEl.classList.contains("offstage") && !cardEl.classList.contains("bye");
     // Main defers setup notifications; also cover an arrival already in flight
@@ -6714,7 +6731,7 @@
       { id:"select", label:"Select…", hint:"" },
     ];
     if (image) items.push({ id:"copy", label:"Copy image", hint:"⌘C" });
-    if (canReply) items.push({ id:"sep" }, { id:"reply", label:"Reply", hint:"" });
+    if (canReply) items.push({ id:"sep" }, { id:"reply", label:"Quote", hint:"" });
     return items;
   }
 
@@ -6793,6 +6810,7 @@
     if (action === "reply" && replyTo) {
       if (threadEditTargets.has(roomAttachmentChat.key)) endThreadEdit(roomAttachmentChat.key);
       threadReplyTargets.set(roomAttachmentChat.key, replyTo);
+      threadReplyKinds.set(roomAttachmentChat.key, "quote");
       renderThreadDetail();
     }
   }
@@ -7431,7 +7449,7 @@
     return { recent, lastSender };
   }
   function syncRelayAnyoneTip() {
-    const visible = (wideLayoutActive() ? wideSideTab() === "relays" : activeView === "relays") && !peeking && !requestInboxOpen
+    const visible = (wideLayoutActive() ? wideSideTab() === "relays" : activeView === "relays") && !peeking
       && payload.account?.paired !== false && !cardEl.classList.contains("signup");
     relaysIntroEl.hidden = !visible;
     relaysLayoutEl.hidden = !visible;
@@ -7465,7 +7483,7 @@
   function canonicalChatFingerprint(chat) {
     return JSON.stringify((chat?.items || []).map((item) => [
       item.relayId, item.updatedAt, item.deletedAt, item.editedAt,
-      item.threadId, item.inReplyToRelayId, item.inReplyToTopicPost ? item.inReplyToTopicPost.postId : "", item.state,
+      item.threadId, item.inReplyToRelayId, item.replyKind, item.inReplyToTopicPost ? item.inReplyToTopicPost.postId : "", item.state,
       (item.attachments || []).map((file) => [file.id, file.bytes]),
     ]));
   }
@@ -8100,6 +8118,7 @@
     if (source === "sent") expandedSentId = id;
     else expandedRelayId = id;
     const selectedProvider = provider === "codex" ? "codex" : "claude";
+    setProtoPref(BANNER_HOST_PREF, selectedProvider); // a banner's Open follows the app last used
     if (sessionPickerState
       && String(sessionPickerState.id) === String(id)
       && sessionPickerState.provider === selectedProvider) {
@@ -8390,11 +8409,15 @@
     // leak into a group's avatar roster. Quiet saved groups belong in Chat but
     // not in the correspondence index, so Relays keeps only active rooms.
     const { rooms } = chatSections();
-    // A stranger's first message waits in Relays › Requests, not here.
+    // A stranger's first message sits in the list like any other, locked
+    // (Shane, 2026-10-28: the Requests page hid a new user's first Relay from
+    // them). A blocked sender, or one whose relays were all deleted, is gone.
     const known = knownAddresses();
+    const ignored = ignoredRequestKeys();
     return rooms
-      .filter((room) => (room.hasActivity !== false || slackChannelRoomListed(room)) && !isRequestRoom(room, known))
-      .map((room) => ({ ...room, latestAt: room.latestAt || (room.latest && room.latest.at) || "" }));
+      .filter((room) => room.hasActivity !== false || slackChannelRoomListed(room))
+      .map((room) => ({ ...room, latestAt: room.latestAt || (room.latest && room.latest.at) || "", requestRoom: isRequestRoom(room, known) }))
+      .filter((room) => !room.requestRoom || (!ignored.has(roomAddress(room)) && requestRoomMessages(room).length > 0));
   }
   // Inbox has Chats · Tasks · Relays, with Received · Sent on the two item lists.
   // Both preferences are scoped to the signed-in account on this device.
@@ -8405,8 +8428,8 @@
   const relaysFilterEl = document.getElementById("relaysFilter");
   const RELAYS_LAYOUTS = ["chats", "received", "sent"];
   const RELAYS_FILTERS = ["relays", "tasks"];
-  // Inbox pages (dev-gated, 2026-10-09): Chats and, to its right, Relays and
-  // Tasks as two pages moved by two fingers. With the gate on, the Chats ·
+  // Inbox pages (2026-10-09, every account since 2026-10-10): Chats and, to
+  // its right, Relays and Tasks as two pages moved by two fingers. With them on, the Chats ·
   // Tasks · Relays rows step aside and the Inbox is Chats. See inbox-pages.js.
   const inboxPages = window.RelayInboxPages.create({
     cardEl, scrollEl,
@@ -8415,7 +8438,7 @@
     isTaskRow, taskIsOver, relayRowHtml, sentRowsHtml, esc, wireTaskCards,
     revealHoverRow, foldHoverRow, renderRelays, openReader,
     taskDone: (id) => submitTaskClose(id, "done", renderRelays),
-    peeking: () => peeking, activeView: () => activeView, requestInboxOpen: () => requestInboxOpen,
+    peeking: () => peeking, activeView: () => activeView, lockedSenders: () => requestAddresses(),
     wideLayoutActive, wideSideTab,
     showInbox: () => { activeView = "relays"; commitNavigation(); },
     readerId: () => (activeView === "reader" ? readerId : null),
@@ -8677,9 +8700,8 @@
 
   function renderRelays() {
     syncRelaysLayout();
-    if (requestInboxAccount !== signupAccountKey()) { requestInboxOpen = false; requestInboxError = ""; requestInboxAccount = signupAccountKey(); relayAnyoneTip.reset(); }
+    if (requestRowsAccount !== signupAccountKey()) { requestRowsAccount = signupAccountKey(); requestRowErrors.clear(); relayAnyoneTip.reset(); }
     syncRelayAnyoneTip();
-    if (requestInboxOpen && !peeking) { renderRequestsPane(); return; }
     // WhatsApp chronology: a room's preview is the newest correspondence in
     // either direction. `threadMessages` already normalizes staged inbound and
     // live Sent rows, deduplicates group fan-out siblings, and keeps optimistic
@@ -8695,14 +8717,9 @@
       // still main's old row with a "Preview / Start task" menu — furniture the
       // redesign deleted). Unread only, newest first; a tap opens the relay the
       // way tapping it anywhere else does: the conversation, then the reader.
-      // A stranger's first message waits in Relays › Requests rather than in
-      // the list, but it ARRIVED, and the banner is the arrival: without its
-      // row here the banner was a dark card with the lockup and an ✕ and
-      // nothing else (David, a guest's reply through a share link, 2026-09-17).
-      const requests = requestRooms()
-        .filter((room) => room.hasActivity !== false && room.unreadCount > 0)
-        .map((room) => ({ ...room, latestAt: room.latestAt || (room.latest && room.latest.at) || "", requestRoom: true }));
-      const unread = bannerIdentityRows(identityRows, allRows).concat(requests)
+      // A stranger's first message arrives here like any other, locked, with
+      // the same Add contact the list row offers.
+      const unread = bannerIdentityRows(identityRows, allRows)
         .sort((a, b) => new Date(b.latestAt || 0) - new Date(a.latestAt || 0));
       // A reply just sent from the banner is showing its "You:" line; the
       // acknowledgement that follows would empty this list under it. The row
@@ -8730,7 +8747,7 @@
       relaysListEl.innerHTML = nextNotifHtml;
       peekListHtml = nextNotifHtml;
       wireBannerComposers(carriedDrafts);
-      for (const el of relaysListEl.querySelectorAll(".relay-arrival")) {
+      for (const el of relaysListEl.querySelectorAll(".relay-arrival:not(.request-row)")) {
         el.addEventListener("click", () => {
           openFull(); // a banner tap brings the real pill up first
           const morphFromList = prepareReaderMorph(activeView, { motion:"forward" });
@@ -8748,29 +8765,17 @@
           e.stopPropagation();
           const id = b.getAttribute("data-banner-copy");
           const message = readerRow(id) || relayById(id) || { id };
+          const label = b.dataset.label || (b.dataset.label = b.textContent);
           try {
             await navigator.clipboard.writeText(pullSentenceFor(message));
             b.textContent = "Copied";
-            setTimeout(() => { if (b.isConnected) b.textContent = "Copy for your agent"; }, 1400);
+            setTimeout(() => { if (b.isConnected) b.textContent = label; }, 1400);
           } catch { b.textContent = "Could not copy"; }
         });
       }
-      // The pane's own three actions, from the banner: the entry is the same
-      // {room, message} pair the Requests pane hands them.
+      // A new sender's row answers here exactly as it does in the list.
       wireMessageSideMenus(relaysListEl);
-      for (const b of relaysListEl.querySelectorAll("[data-banner-request]")) {
-        b.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const id = b.getAttribute("data-id");
-          const entry = requestEntries().find((candidate) => candidate.message.id === id);
-          if (!entry) return;
-          const action = b.getAttribute("data-banner-request");
-          b.closest("[popover]")?.hidePopover();
-          if (action === "delete") void deleteRequestEntries([entry]);
-          else if (action === "block") confirmRequestAction("block", [entry], b);
-          else void acceptRequestEntry(entry);
-        });
-      }
+      wireRequestRows(relaysListEl);
       for (const b of relaysListEl.querySelectorAll("[data-banner-open]")) {
         b.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -8792,13 +8797,13 @@
       sizePeek();
       return;
     }
-    // Both layouts share Requests and the teaching card. Only the list changes;
-    // its render window counts conversations or individual received items.
-    const requestCount = requestEntries().length;
-    const listRows = relaysLayout === "received" ? receivedRelayRows(allRows, identityRows).filter(relaysFilterKeeps)
+    // Both layouts share the teaching card. Only the list changes; its render
+    // window counts conversations or individual received items. A new sender's
+    // relays stay out of Received: there they would be read without Add contact.
+    const listRows = relaysLayout === "received" ? receivedRelayRows(allRows, identityRows.filter((room) => !room.requestRoom)).filter(relaysFilterKeeps)
       : relaysLayout === "sent" ? (payload.sent || []).filter(relaysFilterKeeps)
       : identityRows;
-    relaysEmptyEl.classList.toggle("gone", listRows.length > 0 || requestCount > 0);
+    relaysEmptyEl.classList.toggle("gone", listRows.length > 0);
     const filterWord = relaysFilter === "tasks" ? "tasks" : relaysFilter === "relays" ? "relays" : "relays";
     relaysEmptyEl.querySelector(".t1").textContent = relaysLayout === "received" ? `No received ${filterWord} yet` : relaysLayout === "sent" ? `No sent ${filterWord} yet` : "No relays yet";
     relaysEmptyEl.querySelector(".t2").textContent = relaysLayout === "received"
@@ -8807,11 +8812,6 @@
     const visible = listRows.slice(0, renderedThreadCount + RENDER_WINDOW);
     // Identical markup means NO DOM write (main's guard, kept): a 4s poll that
     // rebuilds the list destroys open menus and their handlers, and flickers.
-    const nextSummaryHtml = requestSummaryHtml(requestCount);
-    if (relaysRequestsSummaryEl.innerHTML !== nextSummaryHtml) {
-      relaysRequestsSummaryEl.innerHTML = nextSummaryHtml;
-      document.getElementById("requestsEntry")?.addEventListener("click", openRequestInbox);
-    }
     const groupedTasks = relaysLayout === "received" && relaysFilter === "tasks";
     const nextListHtml = relaysLayout === "received"
       ? groupedTasks ? receivedTaskGroupsHtml(listRows) : visible.map((row) => relayRowHtml(row, new Set(), { received:true })).join("")
@@ -8849,7 +8849,9 @@
         stagger = Math.min(stagger + 70, 700);
       }
     }
-    for (const el of relaysListEl.querySelectorAll(".relay-arrival")) {
+    wireMessageSideMenus(relaysListEl);
+    wireRequestRows(relaysListEl);
+    for (const el of relaysListEl.querySelectorAll(".relay-arrival:not(.request-row)")) {
       el.addEventListener("click", () => {
         // One tap, straight into the conversation (Sven's standing call).
         startRoomViewTransition(() => {
@@ -8927,6 +8929,8 @@
     const messages = [];
     if (terms.join(" ").length >= 2) {
       for (const room of rooms) {
+        // A new sender's words stay locked until they are added.
+        if (room.requestRoom) continue;
         for (const message of room.msgs || []) {
           if (message.deletedAt) continue;
           const title = searchableText(message.title);
@@ -9319,56 +9323,139 @@
   // person talking; its only verb is the reply composer under the row.
   function bannerVerbsHtml(row) {
     if (!row || row.direction === "out" || !String(row.id || "").startsWith("relay_")) return "";
-    const request = requestRoomOf(row);
-    if (request) return requestBannerVerbsHtml(row, request);
+    // One action set per kind (Shane, 2026-10-19): a text is answered with the
+    // reply box alone; a Task is handed to an agent, so Copy is its only verb;
+    // a relay offers Open in the one app the person is likeliest using, then
+    // Copy. The app is named in the button's title, not its label.
     if (row.textLike) return "";
-    const verbs = [{ label:"Copy for your agent", attrs:`data-banner-copy="${esc(row.id)}"` }];
-    for (const host of agentAppHosts()) {
-      const app = host === "codex" ? "Codex" : "Claude Code";
-      if (!agentOpensInApp(app)) continue;
-      verbs.push({ label:`Open in ${app}`, attrs:`data-banner-open="${esc(row.id)}" data-host="${host}"` });
-    }
-    if (!verbs.length) return "";
+    const copy = { label:"Copy", attrs:`data-banner-copy="${esc(row.id)}"` };
+    const host = bannerIsTask(row) ? "" : bannerAgentHost();
+    const verbs = host
+      ? [{ label:"Open", attrs:`data-banner-open="${esc(row.id)}" data-host="${host}" title="Open in ${host === "codex" ? "Codex" : "Claude Code"}"` }, copy]
+      : [copy];
     return `<span class="rk-actions" data-stop="1">${verbs.map((verb, index) =>
       `<button class="act-btn ${index === 0 ? "accept" : "decline"}" type="button" ${verb.attrs}>${verb.label}</button>`).join("")}</span>`;
   }
-  // The room a banner row belongs to when it is a Request (a sender outside
-  // Contacts with no reply from here yet), else null.
-  function requestRoomOf(row) {
-    return requestRooms().find((room) => (room.msgs || []).some((message) => message.id === row.id)) || null;
+  // The agent app a banner's Open goes to: the one the person last brought to
+  // the front, then the one this pill last opened a relay in, then whichever
+  // is running, then the first switched on. Only apps a relay can open in.
+  const BANNER_HOST_PREF = "proto.bannerAgentHost.v1";
+  function bannerAgentHost() {
+    const hosts = agentAppHosts().filter((host) => agentOpensInApp(host === "codex" ? "Codex" : "Claude Code"));
+    if (!hosts.length) return "";
+    const seen = payload.ui?.agentHosts || {};
+    const running = hosts.filter((host) => seen[host] === true);
+    const order = [running.includes(seen.last) ? seen.last : "", protoPref(BANNER_HOST_PREF, ""), ...running, ...hosts];
+    return order.find((host) => hosts.includes(host)) || "";
   }
-  function isShareGuestRoom(room) {
-    return roomAddress(room).endsWith("@guests.sendrelays.com");
+  // A NEW SENDER'S ROW (Shane, 2026-10-28). Someone outside your Contacts who
+  // writes first lands in the inbox like anyone else, counted and bannered,
+  // but locked: their name, their address, what kind of thing they sent, and
+  // Add contact. Their words, title included, show only once they are added
+  // (no Copy for your agent either: that hands the words over). Delete and
+  // Block sit under ⋯, so spam goes without being read. The list, the banner
+  // and search all draw this one row; search draws it without the verbs.
+  function requestRoomMessages(room) {
+    return (room.msgs || []).filter((message) => message.direction === "in" && !message.deletedAt);
   }
-  // A Request's verbs are what its row offers under ⋯ in Relays › Requests:
-  // Add to Contacts, Delete relay, Block sender… (David, 2026-09-17), on one
-  // line, so the banner keeps its size. A share-link guest has no address to
-  // add and their words are not handed to the agent from here, so their two
-  // are Delete relay and Block sender…. A stranger with a real address keeps
-  // Copy and Add to Contacts, with the rest under the same ⋯ — unless what
-  // arrived is a text, which has nothing for an agent: then Add to Contacts
-  // leads.
-  function requestBannerVerbsHtml(row, room) {
-    if (!row || row.direction === "out" || !String(row.id || "").startsWith("relay_")) return "";
-    const id = esc(row.id);
-    const item = (action, label, cls = "act-btn decline danger") => `<button class="${cls}" type="button" data-banner-request="${action}" data-id="${id}">${label}</button>`;
-    if (isShareGuestRoom(room)) {
-      return `<span class="rk-actions" data-stop="1">${item("delete", "Delete relay")}${item("block", "Block sender…")}</span>`;
-    }
-    const lead = row.textLike
-      ? item("accept", "Add to Contacts", "act-btn accept")
-      : `<button class="act-btn accept" type="button" data-banner-copy="${id}">Copy for your agent</button>${item("accept", "Add to Contacts", "act-btn decline")}`;
-    return `<span class="rk-actions" data-stop="1">${lead}<button class="act-btn decline banner-more" type="button" data-message-more aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="banner-request-menu-${id}">⋯</button></span>
-      <div class="th-message-menu" id="banner-request-menu-${id}" popover="auto" role="menu" aria-label="Request actions">
-        <button type="button" role="menuitem" class="danger" data-banner-request="delete" data-id="${id}">Delete relay</button>
-        <button type="button" role="menuitem" class="danger" data-banner-request="block" data-id="${id}">Block sender…</button>
+  function requestRowSentLine(room) {
+    const received = requestRoomMessages(room);
+    if (received.length > 1) return `Sent you ${received.length.toLocaleString()} relays`;
+    const only = received[0];
+    return only && bannerIsTask(only) ? "Sent you a task" : only?.textLike ? "Sent you a message" : "Sent you a relay";
+  }
+  const LOCK_ICON = `<svg class="request-lock" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
+  function requestRowHtml(identity, show = null) {
+    const name = identity.name || roomAddress(identity);
+    const address = roomAddress(identity);
+    const key = esc(address);
+    const menuId = `request-menu-${esc(address.replace(/[^\w-]/g, "_"))}`;
+    const busy = requestRowBusy.has(address);
+    const error = requestRowErrors.get(address) || "";
+    const verbs = show ? "" : `<span class="rk-actions request-acts" data-stop="1">
+            <button class="act-btn accept" type="button" data-request-add="${key}"${busy ? " disabled" : ""}>Add contact</button>
+            <button class="act-btn decline banner-more" type="button" data-message-more aria-label="More actions for ${esc(name)}" aria-haspopup="menu" aria-expanded="false" aria-controls="${menuId}"${busy ? " disabled" : ""}>⋯</button>
+          </span>
+          <div class="th-message-menu" id="${menuId}" popover="auto" role="menu" aria-label="Actions for ${esc(name)}">
+            <button type="button" role="menuitem" class="danger" data-request-delete="${key}">${requestRoomMessages(identity).length > 1 ? "Delete relays" : "Delete relay"}</button>
+            <button type="button" role="menuitem" class="danger" data-request-block="${key}">Block sender…</button>
+          </div>`;
+    return `
+      <div class="relay-row relay-arrival request-row${identity.unreadCount ? " unread" : ""}" data-thread="${esc(identity.chatId || identity.threadId || "")}" data-party="${esc(name)}" data-request-room="${key}"${show?.attrs ? ` ${show.attrs}` : ""}>
+        <span class="avatar" style="--av-h:${avatarHue(name)}" aria-hidden="true">${esc(avatarInitials(name))}</span>
+        <span class="rk-body">
+          <span class="th-top">
+            <span class="th-party">${show?.nameHtml ?? esc(name)}</span>
+            <span class="th-time">${esc(timeAgo(show?.at || identity.latestAt))}</span>
+          </span>
+          ${address && address !== name ? `<span class="request-address">${esc(address)} · not in your contacts</span>` : `<span class="request-address">Not in your contacts</span>`}
+          <span class="rk-line"><span class="request-sent">${LOCK_ICON}${esc(requestRowSentLine(identity))}<span class="request-hint" aria-live="polite"></span></span>${identity.unreadCount > 1 && !show ? `<span class="th-count">${identity.unreadCount}</span>` : ""}</span>
+          ${error ? `<span class="request-error" role="alert">${esc(error)}</span>` : ""}
+          ${verbs}
+        </span>
       </div>`;
+  }
+  let requestRowsAccount = "";
+  const requestRowBusy = new Set();
+  const requestRowErrors = new Map();
+  function requestRoomByAddress(address) {
+    return requestRooms().find((room) => roomAddress(room) === address) || null;
+  }
+  // Tapping the row itself (not Add contact) says what opens it.
+  function nudgeRequestRow(address) {
+    const row = [...document.querySelectorAll(".request-row[data-request-room]")].find((el) => el.dataset.requestRoom === address);
+    if (!row) return;
+    row.scrollIntoView({ block:"nearest", behavior:REDUCED ? "auto" : "smooth" });
+    const hint = row.querySelector(".request-hint");
+    if (hint) hint.textContent = " · add them to read it";
+    row.classList.remove("nudged");
+    void row.offsetWidth;
+    row.classList.add("nudged");
+    row.querySelector("[data-request-add]")?.focus({ preventScroll:true });
+  }
+  // Somewhere tried to open a new sender's conversation (search, a banner, a
+  // remembered selection): take the person to their locked row instead.
+  function showLockedRequest(room) {
+    if (peeking) openFull();
+    if (chatSearch.open) closeChatSearch();
+    if (activeView !== "relays") { activeView = "relays"; commitNavigation(); }
+    if (relaysLayout !== "chats") { relaysLayout = "chats"; renderRelays(); }
+    requestAnimationFrame(() => nudgeRequestRow(roomAddress(room)));
+  }
+  function wireRequestRows(container) {
+    for (const row of container.querySelectorAll(".request-row[data-request-room]")) {
+      row.addEventListener("click", () => {
+        const room = requestRoomByAddress(row.dataset.requestRoom);
+        if (!room) return;
+        if (peeking) showLockedRequest(room);
+        else nudgeRequestRow(row.dataset.requestRoom);
+      });
+    }
+    for (const [attr, act] of [["requestAdd", acceptRequestRoom], ["requestDelete", deleteRequestRoom], ["requestBlock", confirmBlockRequest]]) {
+      const selector = `[data-${attr.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}]`;
+      for (const button of container.querySelectorAll(selector)) {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const room = requestRoomByAddress(button.dataset[attr]);
+          if (!room) return;
+          const trigger = button.closest(".request-row")?.querySelector("[data-message-more]") || button;
+          void act(room, trigger);
+        });
+      }
+    }
   }
   // The identity row's message is a room projection: its Task flag is `request`
   // (the room bubble's own chip predicate), not relayNotificationKind. Fall back
   // to the relay row for a raw row.
   function bannerIsTask(row) {
     return Boolean(row && (row.request || isTaskRow(relayById(row.id)) || isTaskRow(row)));
+  }
+  // Every Relay banner says what arrived (Shane, 2026-10-19): a Task, a Relay
+  // or a Text, the same chip each, because each kind has its own actions.
+  // Slack rows are not Relays and wear none.
+  function bannerKindChipHtml(row) {
+    if (!row || !String(row.id || "").startsWith("relay_")) return "";
+    return `<span class="kchip">${bannerIsTask(row) ? "Task" : row.textLike ? "Text" : "Relay"}</span>`;
   }
   // THE BANNER'S REPLY (David, 2026-09-17): the room's own composer, there from
   // the start. A one-line answer to Shane should not need the room — so the
@@ -9384,6 +9471,9 @@
   function bannerComposerHtml(identity, row, inThread = false) {
     if (!peeking || !identity || identity.requestRoom || identity.provider === "slack") return "";
     if (!row || !String(row.id || "").startsWith("relay_")) return "";
+    // Only a text is answered from the banner; a relay or a Task is opened or
+    // handed to an agent, and a reply to one is written in the room.
+    if (!row.textLike) return "";
     const recipient = bannerReplyRecipient(identity, row);
     if (!recipient) return "";
     const placeholder = inThread ? "Reply in thread…" : identity.isGroup
@@ -9504,7 +9594,8 @@
     try {
       res = await window.relay.sendReply({
         text, recipient, files, idempotencyKey, agentMentions,
-        ...(inReplyToRelayId ? { inReplyToRelayId } : {}),
+        // The banner's reply answers in the newest message's thread.
+        ...(inReplyToRelayId ? { inReplyToRelayId, replyKind: "thread" } : {}),
         chat: {
           threadId: (inReplyToRelayId && row?.threadId) || identity.threadId || "",
           party: identity.name || "",
@@ -9804,6 +9895,7 @@
   // `show` lets search paint the same row with its hit highlighted: nameHtml,
   // lineHtml (the whole second line), at (the time shown), attrs, noCount.
   function relayIdentityRowHtml(identity, show = null) {
+    if (identity.requestRoom) return requestRowHtml(identity, show);
     const mentionRows = peeking && !show && identity.groupId ? threadMessages({ includeSlack:false })
       .filter((message) => message.groupId === identity.groupId && message.direction === "in" && message.unread && message.recipientMentioned && !message.deletedAt)
       .sort((a,b) => new Date(b.at)-new Date(a.at)) : [];
@@ -9848,11 +9940,10 @@
         <span class="rk-body">
           <span class="th-top">
             <span class="th-party${mention ? " mention-arrival-label" : ""}">${show?.nameHtml ?? esc(mention ? `${String(mention.party || "Someone").split(" ")[0]} mentioned you in ${name}` : name)}</span>
-            ${peeking && row.direction !== "out" && bannerIsTask(row) ? `<span class="kchip">Task</span>` : ""}
-            ${peeking && identity.requestRoom ? `<span class="kchip request">Request</span>` : ""}
+            ${peeking && row.direction !== "out" ? bannerKindChipHtml(row) : ""}
             <span class="th-time">${show?.at ? esc(timeAgo(show.at)) : quietRoom ? "" : esc(timeAgo(identity.latestAt))}</span>
           </span>
-          <span class="rk-line"><span class="th-title">${show?.lineHtml ?? `${senderPrefix}${esc(gist)}`}</span>${identity.unreadCount && !show?.noCount ? `<span class="th-count">${identity.unreadCount}</span>` : ""}</span>
+          <span class="rk-line"><span class="th-title">${show?.lineHtml ?? `${senderPrefix}${esc(gist)}`}</span>${identity.unreadCount && !show?.noCount && !(peeking && identity.unreadCount === 1) ? `<span class="th-count">${identity.unreadCount}</span>` : ""}</span>
           ${peeking ? bannerVerbsHtml(row) : ""}
           ${peeking ? bannerComposerHtml(identity, row, inThread) : ""}
         </span>
@@ -10262,6 +10353,11 @@
   // readable in one glance. Longer letters keep title + preview and their tap
   // is the reader (no in-between). 4000 was tried and read as a wall.
   const INLINE_BODY_MAX = 550;
+  // A full-screen Relay card's text column is about twice the pill's width,
+  // so the same eight-ish lines hold about twice the letter. Past that the
+  // card shows the start of the body, faded, rather than one preview line
+  // beside a rail many lines tall.
+  const WIDE_INLINE_BODY_MAX = 1100;
   // Provider availability and presentation surface are different facts. A
   // CLI-only install is a usable provider and opens in Terminal; when both the
   // CLI and desktop app exist, Desktop is the default unless the user changes it.
@@ -12995,6 +13091,7 @@
         taskRosterCounts: sentTwin?.taskRosterCounts || item.taskRosterCounts || null,
         type: item.type || sentTwin?.type || null,
         inReplyToRelayId: item.inReplyToRelayId || sentTwin?.inReplyToRelayId || null,
+        replyKind: item.replyKind || sentTwin?.replyKind || null,
         attachments: item.attachments || [],
         // Canonical chat hydration is the only remaining copy of an older
         // message once the bounded Inbox/Sent caches roll past it. Preserve
@@ -13060,6 +13157,7 @@
       taskRosterCounts: sent.taskRosterCounts || null,
       type: sent.type || null,
       inReplyToRelayId: sent.inReplyToRelayId || null,
+      replyKind: sent.replyKind || null,
       // The expanded reader uses this projection, not the conversation's
       // attachment cargo. Preserve the sent copy's exact file identities.
       attachments: Array.isArray(sent.attachments) ? sent.attachments : [],
@@ -13431,6 +13529,7 @@
     threadEditTargets.set(stateKey, String(id));
     messageDeleteConfirmIds.delete(String(id));
     threadReplyTargets.delete(stateKey);
+    threadReplyKinds.delete(stateKey);
     const words = String(message.body || message.title || "");
     threadComposerDrafts.set(stateKey, words);
     renderThreadDetail();
@@ -13502,6 +13601,7 @@
       b.addEventListener("click", (e) => {
         e.stopPropagation();
         threadReplyTargets.delete(stateKey);
+    threadReplyKinds.delete(stateKey);
         renderThreadDetail();
         document.getElementById("thQrInput")?.focus();
       });
@@ -13691,6 +13791,12 @@
     roomScrollEl.scrollTop += currentOffset - (Number(saved.anchorOffset) || 0);
   }
   function openReader(id, source, picker = null) {
+    // A new sender's relay is read only after Add contact.
+    const lockedSender = String(relayById(id)?.senderEmail || "").trim().toLowerCase();
+    if (lockedSender && requestAddresses().has(lockedSender)) {
+      const lockedRoom = requestRoomByAddress(lockedSender);
+      if (lockedRoom) { showLockedRequest(lockedRoom); return; }
+    }
     // A notification banner remains `peeking` even after the user moves into
     // Tasks. A lingering peek can suppress reader sizing and paint the full
     // reader into the 400x118 banner window. The click explicitly asks for the
@@ -14504,13 +14610,15 @@
           chatTypingController.stop();
           const idempotencyKey = `reader_${r.id}_${Date.now()}`;
           // Inside a Relay's thread a reply may quote one reply; otherwise it
-          // answers the Relay.
+          // answers the Relay, in its thread (a room without threads shows
+          // that as a quote of the Relay).
           const quotedId = String(readerQuoteTargets.get(String(r.id)) || "");
           const replyToId = quotedId || r.id;
+          const replyKind = quotedId ? "quote" : "thread";
           optimisticChatReplies.set(idempotencyKey, {
             ...replyChat,
             id:`optimistic:${idempotencyKey}`, relayId:"",
-            inReplyToRelayId:replyToId, explicitReply:true,
+            inReplyToRelayId:replyToId, replyKind,
             direction:"out", seen:false, seenAt:null,
             title:text || (files.length === 1 ? String(files[0].name || "1 file") : `${files.length} files`), body:text,
             at:new Date().toISOString(), unread:false,
@@ -14525,6 +14633,7 @@
             text,
             agentMentions: agentMentionSpans(text),
             inReplyToRelayId: replyToId,
+            replyKind,
             files,
             idempotencyKey,
             chat: replyChat,
@@ -15262,95 +15371,45 @@
     const ignored = ignoredRequestKeys();
     return chatSections("relay").people.filter((room) => isRequestRoom(room, known) && !ignored.has(roomAddress(room)));
   }
-  let requestInboxOpen = false;
-  let requestInboxLimit = 50;
-  let requestInboxError = "";
-  let requestInboxBusy = false;
-  let requestInboxAccount = "";
-  function requestEntries() {
-    const seen = new Set();
-    return requestRooms().flatMap((room) => (room.msgs || [])
-      .filter((message) => message.direction === "in" && !message.deletedAt && !seen.has(message.id) && seen.add(message.id))
-      .map((message) => ({ room, message })))
-      .sort((a, b) => new Date(b.message.at || 0) - new Date(a.message.at || 0));
-  }
-  function openRequestInbox() {
-    requestInboxAccount = signupAccountKey();
-    requestInboxOpen = true;
-    requestInboxLimit = 50;
-    requestInboxError = "";
-    activeView = "relays";
-    commitNavigation();
-    scrollEl.scrollTop = 0;
-  }
-  function requestSummaryHtml(count) {
-    return count ? `<button class="requests-entry" type="button" id="requestsEntry">
-      <svg class="requests-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
-      <span>Requests</span><span class="requests-count">${count.toLocaleString()}</span><span class="requests-chevron" aria-hidden="true">›</span></button>` : "";
-  }
-  function renderRequestsPane() {
-    relaysIntroEl.hidden = true;
-    relayAnyoneTip.setVisible(false);
-    if (requestInboxBusy) return;
-    const entries = requestEntries();
-    relaysEmptyEl.classList.add("gone");
-    hasMoreThreads = false;
-    const next = `<div class="requests-head"><button class="th-back" type="button" id="requestsBack" aria-label="Back to Relays">‹</button><strong>Requests</strong><span class="requests-count">${entries.length.toLocaleString()}</span><button class="requests-delete-all" type="button" id="requestsDeleteAll"${entries.length ? "" : " disabled"}>Delete all</button></div>
-      <div class="requests-note">Relays from senders outside your Contacts</div>
-      ${requestInboxError ? `<div class="requests-error" role="alert">${esc(requestInboxError)}</div>` : ""}
-      ${entries.slice(0, requestInboxLimit).map(({room, message}, index) => {
-        const name = room.name || roomAddress(room);
-        return `<div class="request-inbox-row" data-request-id="${esc(message.id)}">
-          <button class="th-item${message.unread ? " unread" : ""}" type="button" data-request-open="${index}">
-            <span class="avatar" style="--av-h:${avatarHue(name)}" aria-hidden="true">${esc(avatarInitials(name))}</span>
-            <span class="rk-body"><span class="th-top"><span class="th-party">${esc(name)}</span><span class="th-time">${esc(timeAgo(message.at))}</span></span><span class="th-title">${esc(relayListGist(message.title || message.body || "Message", 90))}</span></span>
-          </button>
-          <button class="request-inbox-more" type="button" data-message-more aria-label="Actions for ${esc(name)}: ${esc(message.title || "Relay")}" aria-haspopup="menu" aria-expanded="false" aria-controls="request-menu-${index}">⋯</button>
-          <div class="th-message-menu" id="request-menu-${index}" popover="auto" role="menu" aria-label="Request actions">
-            <button type="button" role="menuitem" data-request-accept="${index}">Add to Contacts</button>
-            <button type="button" role="menuitem" class="danger" data-request-delete="${index}">Delete relay</button>
-            <button type="button" role="menuitem" class="danger" data-request-block="${index}">Block sender…</button>
-          </div></div>`;
-      }).join("")}
-      ${entries.length > requestInboxLimit ? '<button class="todo-load-more" type="button" id="requestsMore">Load more</button>' : ""}
-      ${entries.length ? "" : '<div class="cv-empty">No requests. Someone new writing to you shows up here first.</div>'}`;
-    if (relaysListEl.innerHTML === next) return;
-    relaysListEl.innerHTML = next;
-    document.getElementById("requestsBack").onclick = () => { requestInboxOpen = false; renderRelays(); scrollEl.scrollTop = 0; document.getElementById("requestsEntry")?.focus(); };
-    document.getElementById("requestsMore")?.addEventListener("click", () => { requestInboxLimit += 50; renderRequestsPane(); });
-    document.getElementById("requestsDeleteAll").onclick = (event) => confirmRequestAction("delete-all", entries, event.currentTarget);
-    wireMessageSideMenus(relaysListEl);
-    for (const button of relaysListEl.querySelectorAll("[data-request-open]")) button.onclick = () => {
-      const {room} = entries[Number(button.dataset.requestOpen)];
-      startRoomViewTransition(() => openThreadDetail(room.chatId || room.threadId, room.name, "relays", {expanded:true}), {motion:"forward"});
-    };
-    for (const action of ["delete", "block", "accept"]) {
-      for (const button of relaysListEl.querySelectorAll(`[data-request-${action}]`)) button.addEventListener("click", () => {
-        const entry = entries[Number(button.getAttribute(`data-request-${action}`))];
-        const trigger = button.closest(".request-inbox-row").querySelector("[data-message-more]");
-        button.closest("[popover]").hidePopover();
-        if (action === "delete") void deleteRequestEntries([entry]);
-        else if (action === "block") confirmRequestAction("block", [entry], trigger);
-        else void acceptRequestEntry(entry);
-      });
-    }
-  }
-  async function deleteRequestEntries(entries) {
-    if (requestInboxBusy) return;
+  // Add contact is what opens a new sender's words: their row turns into an
+  // ordinary conversation and the conversation opens.
+  async function acceptRequestRoom(room) {
     const account = signupAccountKey();
-    if (!account) return;
-    requestInboxBusy = true;
-    for (const button of relaysListEl.querySelectorAll("button")) button.disabled = true;
-    const bulkButton = document.getElementById("requestsDeleteAll");
-    if (bulkButton) bulkButton.textContent = "Deleting…";
-    requestInboxError = "";
+    const address = roomAddress(room);
+    if (!account || requestRowBusy.has(address)) return;
+    requestRowBusy.add(address);
+    requestRowErrors.delete(address);
+    renderAll();
+    let res;
+    try {
+      res = await contactWriteResult(window.relay.contactSave({contactId:"", name:room.name || address, emails:[address], email:address}), "Could not add to Contacts.");
+    } finally {
+      requestRowBusy.delete(address);
+    }
+    if (account !== signupAccountKey()) return;
+    if (!res.ok) { requestRowErrors.set(address, res.error || "Could not add to Contacts. Try again."); renderAll(); return; }
+    if (Array.isArray(res.contacts)) contactsList = res.contacts;
+    else if (res.contact) contactsList = [...contactsList.filter((c) => contactKey(c) !== contactKey(res.contact)), res.contact];
+    renderAll();
+    const open = () => openThreadDetail(room.chatId || room.threadId, room.name || address);
+    if (peeking) { openFull(); open(); }
+    else startRoomViewTransition(open, { motion:"forward" });
+  }
+  // Delete takes every relay this sender sent you to Recently Deleted, and
+  // with them their row.
+  async function deleteRequestRoom(room) {
+    const account = signupAccountKey();
+    const address = roomAddress(room);
+    if (!account || requestRowBusy.has(address)) return;
+    requestRowBusy.add(address);
+    requestRowErrors.delete(address);
+    renderAll();
     let failures = 0;
     try {
-      for (const {room, message} of entries) {
+      for (const message of requestRoomMessages(room)) {
         if (account !== signupAccountKey()) return;
-        // Snapshot the intended IDs, but do not delete a message whose sender
-        // was accepted while a long bulk operation was running.
-        if (!isRequestRoom(room, knownAddresses())) continue;
+        // Do not delete a message whose sender was added meanwhile.
+        if (!isRequestRoom(room, knownAddresses())) break;
         try {
           const result = await window.relay.deleteRelay(message.id);
           if (account !== signupAccountKey()) return;
@@ -15359,30 +15418,29 @@
         } catch { failures += 1; }
       }
     } finally {
-      requestInboxBusy = false;
+      requestRowBusy.delete(address);
       if (account === signupAccountKey()) {
-        requestInboxError = failures ? `${failures} ${failures === 1 ? "relay could" : "relays could"} not be deleted. Try again.` : "";
+        if (failures) requestRowErrors.set(address, `${failures} ${failures === 1 ? "relay" : "relays"} could not be deleted. Try again.`);
         renderAll();
       }
     }
   }
-  function confirmRequestAction(action, entries, trigger) {
-    if (!entries.length || requestInboxBusy) return;
+  function confirmBlockRequest(room, trigger) {
     const account = signupAccountKey();
-    const blocking = action === "block";
-    const {room, message} = entries[0];
-    const current = showPeopleDialog(`<h2 id="peopleDialogTitle">${blocking ? `Block ${esc(room.name || roomAddress(room))}?` : `Delete all ${entries.length.toLocaleString()} requests?`}</h2>
-      <p>${blocking ? "You won’t be able to message each other or connect through invite links. You can unblock them in You › Blocked people." : "These relays will move to Recently Deleted for 30 days. Your other conversations will stay."}</p>
-      <div class="people-dialog-error" role="alert"></div><div class="people-dialog-actions"><button type="button" data-dialog-close>Cancel</button><button type="button" class="danger" data-request-confirm>${blocking ? "Block sender" : "Delete all"}</button></div>`, trigger);
+    const address = roomAddress(room);
+    const message = requestRoomMessages(room)[0];
+    if (!message || requestRowBusy.has(address)) return;
+    const current = showPeopleDialog(`<h2 id="peopleDialogTitle">Block ${esc(room.name || address)}?</h2>
+      <p>You won’t be able to message each other or connect through invite links. You can unblock them in You › Blocked people.</p>
+      <div class="people-dialog-error" role="alert"></div><div class="people-dialog-actions"><button type="button" data-dialog-close>Cancel</button><button type="button" class="danger" data-request-confirm>Block sender</button></div>`, trigger);
     peopleDialog.querySelector("[data-request-confirm]").onclick = async (event) => {
       if (!current() || account !== signupAccountKey() || event.currentTarget.disabled) return;
       event.currentTarget.disabled = true;
-      if (!blocking) { closePeopleDialog(); await deleteRequestEntries(entries); return; }
       try {
         const result = await window.relay.blockRequest(message.id);
         if (account !== signupAccountKey()) return;
         if (result?.blocked !== true) throw new Error("Could not block sender.");
-        ignoreRequest(roomAddress(room));
+        ignoreRequest(address);
         closePeopleDialog(); renderAll();
       } catch {
         if (!current()) return;
@@ -15390,16 +15448,6 @@
         peopleDialog.querySelector("[data-request-confirm]").disabled = false;
       }
     };
-  }
-  async function acceptRequestEntry({room}) {
-    const account = signupAccountKey();
-    const address = roomAddress(room);
-    const res = await contactWriteResult(window.relay.contactSave({contactId:"", name:room.name || address, emails:[address], email:address}), "Could not add to Contacts.");
-    if (account !== signupAccountKey()) return;
-    if (!res.ok) requestInboxError = res.error;
-    else if (Array.isArray(res.contacts)) contactsList = res.contacts;
-    else if (res.contact) contactsList = [...contactsList.filter((c) => contactKey(c) !== contactKey(res.contact)), res.contact];
-    renderAll();
   }
 
   // ---- one list: search, Groups, People ----
@@ -16973,6 +17021,7 @@
   const optimisticReadIds = new Set(); // a polling payload cannot resurrect a read while persistence waits
   const threadComposerDrafts = new Map(); // threadId -> text; survives live DOM replacement
   const threadReplyTargets = new Map(); // visible room/thread id -> exact Relay id being answered
+  const threadReplyKinds = new Map(); // visible room/thread id -> "quote" | "thread": what the pick meant
   // ---- Editing and deleting your own text, on WhatsApp's rules ----
   // A text can be edited for 15 minutes after it was sent and deleted for
   // everyone for 2 days; past that the verb is simply not offered (David,
@@ -17166,10 +17215,9 @@
         groupSendId: String(entry.groupSendId || ""),
         threadId: String(entry.threadId || chat.threadId || ""),
         inReplyToRelayId: String(entry.inReplyToRelayId || ""),
-        // Current pill senders set inReplyToRelayId only after an explicit
-        // reader/reply-button gesture. Keep that presentation while the
-        // durable outbox row stands in for the canonical Relay.
-        explicitReply: Boolean(entry.inReplyToRelayId),
+        // The verb the message was sent with rides on the queue entry, so the
+        // durable outbox row reads as the canonical Relay will.
+        replyKind: entry.inReplyToRelayId ? String(entry.replyKind || "") : "",
         direction: "out",
         seen: false,
         seenAt: null,
@@ -17997,6 +18045,7 @@
           ? [{ name:sentRecipient(sentTwin), seen:sentIsRead(sentTwin), readAt:sentTwin.readAt || "" }]
           : [],
         inReplyToRelayId: r.inReplyToRelayId || "",
+        replyKind: r.replyKind || "",
         inReplyToTopicPost: r.inReplyToTopicPost || null,
         addressRecipient: r.recipientGroupId ? { groupId:r.recipientGroupId } : (r.senderEmail ? { email:r.senderEmail } : null),
         title: textLike ? String(r.forHuman || subj) : subj, party: relaySender(r), at: r.createdAt || r.updatedAt,
@@ -18078,6 +18127,7 @@
         delivered: s.groupSendId ? groupDelivered.get(s.groupSendId) === true : sentIsDelivered(s),
         agentOpened: !s.groupSendId && sentIsAcknowledged(s),
         inReplyToRelayId: s.inReplyToRelayId || "",
+        replyKind: s.replyKind || "",
         inReplyToTopicPost: s.inReplyToTopicPost || null,
         // A share-link id is a room address, not a posting gate. The server
         // recognises its synthetic mailbox only for owned-agent invocations and
@@ -18190,6 +18240,7 @@
           chatId: chat.chatId,
           threadId: item.threadId || id,
           inReplyToRelayId: item.inReplyToRelayId || "",
+          replyKind: item.replyKind || "",
           inReplyToTopicPost: item.inReplyToTopicPost || null,
           direction: mine ? "out" : "in",
           addressRecipient: { chatId:chat.chatId },
@@ -18243,7 +18294,7 @@
       msgs.push({
         id, relayId:id, threadId:String(reply.threadId || reply.inReplyToRelayId), direction:"in",
         seen:false, seenAt:null, delivered:false, agentOpened:false, readReceipts:[],
-        inReplyToRelayId:String(reply.inReplyToRelayId), inReplyToTopicPost:null,
+        inReplyToRelayId:String(reply.inReplyToRelayId), replyKind:"thread", inReplyToTopicPost:null,
         addressRecipient: email ? { email } : null,
         title: body || "Message", party:String(reply.senderName || "Slack member"), at:reply.createdAt,
         partyKey: email ? `email:${email}` : `name:${String(reply.senderName || "").trim().toLowerCase()}`,
@@ -18275,6 +18326,7 @@
           id, threadId: item.threadId || id, direction: "in",
           seen: false, seenAt: null, delivered: false, agentOpened: false, readReceipts: [],
           inReplyToRelayId: item.inReplyToRelayId || "",
+          replyKind: item.replyKind || "",
           inReplyToTopicPost: item.inReplyToTopicPost || null,
           addressRecipient: item.recipientGroupId ? { groupId:item.recipientGroupId } : (senderEmail ? { email:senderEmail } : null),
           title: textLike ? String(item.forHuman || subj) : subj, party: senderName, at: item.createdAt || item.updatedAt,
@@ -18803,6 +18855,7 @@
         chatId:String(chat.chatId),
         threadId:String(item?.threadId || id || `direct-chat:${chat.chatId}`),
         inReplyToRelayId:String(item?.inReplyToRelayId || ""),
+        replyKind:String(item?.replyKind || ""),
         inReplyToTopicPost:item?.inReplyToTopicPost || null,
         direction:selfRelayDirection(mine, address === String(payload.account?.email || "").trim().toLowerCase(), textLike),
         seen:mine && (item?.readReceipts || []).some((receipt) => receipt && receipt.seen),
@@ -19752,52 +19805,22 @@
     }
     wireSessionPickerRows(scope);
   }
-  // Before 0.1.290, inReplyToRelayId doubled as a default reply-chain key: the
-  // room composer anchored every ordinary message to the newest one even when
-  // the human picked no target. Suppressing adjacent parents kept that legacy
-  // history from looking like a chain of selected quotes. Since 0.1.290,
-  // ordinary room sends are addressed to the room and only the reader or the
-  // explicit reply button sets inReplyToRelayId. Those gestures must keep their
-  // visible reference even when the selected Relay is immediately above.
-  function defaultReplyAnchorMap(msgs) {
-    const ordered = [...(msgs || [])].sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
-    const byId = new Map();
-    for (let i = 0; i < ordered.length; i += 1) {
-      const anchors = new Set();
-      for (let j = i - 1; j >= 0; j -= 1) {
-        const candidate = ordered[j];
-        if (j === i - 1) anchors.add(String(candidate.id || ""));
-        if (!candidate.request) { anchors.add(String(candidate.id || "")); break; }
-      }
-      byId.set(String(ordered[i].id || ""), anchors);
-    }
-    return byId;
-  }
-  function versionAtLeast(raw, minimum) {
-    const value = String(raw || "").match(/^(\d+)\.(\d+)\.(\d+)/);
-    if (!value) return false;
-    const actual = value.slice(1).map(Number);
-    const expected = String(minimum || "").split(".").slice(0, 3).map(Number);
-    while (expected.length < 3) expected.push(0);
-    for (let i = 0; i < 3; i += 1) {
-      if (actual[i] !== expected[i]) return actual[i] > expected[i];
-    }
-    return true;
-  }
-  function messageHasExplicitReplyGesture(message) {
-    if (message?.explicitReply === true) return true;
-    const source = message?.source;
-    return source?.host === "relay-preview" && versionAtLeast(source.clientVersion, "0.1.290");
+  // What the sender meant by a message's reply link (packages/shared
+  // reply-threads.ts): "thread" is Reply in thread, "quote" is Quote, "" is a
+  // link that only keys the thread (an agent's follow-up, a Task event, a
+  // message older than the field) and draws nothing. The sender says; this
+  // pill used to guess from the sending app and its version, in a copy that
+  // drifted from the shared one (Shane, 2026-10-19).
+  function replyKindOf(message) {
+    const kind = String(message?.replyKind || "");
+    return message?.inReplyToRelayId && (kind === "thread" || kind === "quote") ? kind : "";
   }
   // ---- reply threads (developers on dev, Shane 2026-10-01) ----------------
-  // A typed reply someone chose to make folds into a thread under the message
-  // it answers instead of joining the room. Nothing on the wire changes: the
-  // reply link (inReplyToRelayId) is the thread. What folds is exactly what
-  // shows a reply quote today — a deliberate gesture, or a parent that is not
-  // the default anchor older clients set on every send. A reply to a reply
-  // joins the same thread (one level, the Slack shape); inside a thread a
-  // reply is a quote. A full Relay sent as a reply, a Task and its events and
-  // an owned agent's work keep their place in the room.
+  // A Reply in thread folds under the message it answers instead of joining
+  // the room, one level deep (the Slack shape); a Quote stays where it was
+  // written, and follows its parent into a thread only when the parent is in
+  // one. A full Relay sent as a reply, a Task and its events and an owned
+  // agent's work keep their place in the room.
   function replyThreadsEnabled(room) {
     return payload.features?.replyThreads === true && !(room && room.provider === "slack");
   }
@@ -19810,14 +19833,7 @@
         if (siblingId && !byId.has(siblingId)) byId.set(siblingId, message);
       }
     }
-    const defaults = defaultReplyAnchorMap(list);
-    const deliberateParent = (message) => {
-      const parentId = String(message?.inReplyToRelayId || "");
-      if (!parentId) return null;
-      const anchors = defaults.get(String(message.id || ""));
-      if (!messageHasExplicitReplyGesture(message) && anchors && anchors.has(parentId)) return null;
-      return byId.get(parentId) || null;
-    };
+    const replyParent = (message) => replyKindOf(message) ? byId.get(String(message.inReplyToRelayId || "")) || null : null;
     const agentWork = (message) => Boolean(message && (message.ownedAgent || message.agentInvocation));
     const folds = (message) => Boolean(message && message.textLike && !message.request
       && !agentWork(message) && !message.inReplyToTopicPost
@@ -19838,9 +19854,12 @@
           const caller = byId.get(String(message.inReplyToRelayId || ""));
           key = caller ? keyFor(caller, depth + 1) : null;
         } else if (folds(message)) {
-          const parent = deliberateParent(message);
+          const parent = replyParent(message);
           if (parent && !parent.request && parent !== message) {
-            key = keyFor(parent, depth + 1) || (agentWork(parent) ? null : String(parent.id || ""));
+            // Reply in thread opens the parent's thread when it has none yet;
+            // a Quote only follows its parent into a thread the parent is in.
+            key = keyFor(parent, depth + 1)
+              || (replyKindOf(message) === "thread" && !agentWork(parent) ? String(parent.id || "") : null);
           }
         }
       }
@@ -20362,6 +20381,7 @@
       return recipient && (recipient.email || recipient.contactId || recipient.relayUserId || recipient.groupId || recipient.chatId);
     });
     const replyTargetId = String(threadReplyTargets.get(threadStateKey) || "");
+    const replyTargetKind = replyTargetId ? String(threadReplyKinds.get(threadStateKey) || "quote") : "";
     const replyTarget = replyTargetId ? messageById.get(replyTargetId) : null;
     const replyPreviewAuthor = (message) => message && message.direction === "out" ? "You" : String((message && message.party) || "Someone");
     const replyPreviewCopy = (message) => relayListGist(String((message && (message.title || message.body)) || "Message").replace(/\s+/g, " "), 120);
@@ -20380,7 +20400,6 @@
     // so once, beside its name, and its messages carry no Slack labels (David,
     // 2026-10-07).
     const providerBylineHtml = () => "";
-    const defaultReplyAnchorIds = defaultReplyAnchorMap(roomMsgsBeforeFold);
     const replyThreadRepliesFor = (message) => roomReplyThreads && !focusedReplyRoot
       ? roomReplyThreads.groups.get(String(message?.id || "")) || []
       : [];
@@ -20446,12 +20465,14 @@
       }
       const parentId = String((message && message.inReplyToRelayId) || "");
       if (!parentId) return "";
-      const defaults = defaultReplyAnchorIds.get(String((message && message.id) || ""));
-      if (!messageHasExplicitReplyGesture(message) && defaults && defaults.has(parentId)) return "";
+      // A Quote always wears its card. A Reply in thread wears one only where
+      // threads are off, so the link still shows there; with threads on, its
+      // place under the parent says it.
+      const kind = replyKindOf(message);
+      if (!kind || (kind === "thread" && roomReplyThreads)) return "";
       const parent = messageById.get(parentId);
-      // Outside the loaded room, we cannot tell a deliberate reply from the
-      // default anchor, and the default is overwhelmingly the case — so a
-      // placeholder here is noise on old messages, not context. Say nothing.
+      // Outside the loaded room there is nothing to quote; a placeholder is
+      // noise on old messages, not context. Say nothing.
       if (!parent) return "";
       // Inside a thread every reply answers the message at its top; only a
       // quote of another reply needs saying.
@@ -20463,8 +20484,8 @@
     };
     const composerReplyTargetHtml = replyTargetId
       ? replyTarget
-        ? `<div class="th-reply-target"><div class="th-reply-target-who">Replying to ${esc(replyPreviewAuthor(replyTarget))}</div><div class="th-reply-target-copy">${esc(replyPreviewCopy(replyTarget))}</div><button type="button" class="th-reply-target-close" data-reply-cancel="1" aria-label="Cancel specific reply">×</button></div>`
-        : `<div class="th-reply-target missing"><div class="th-reply-target-who">Replying to an unavailable Relay</div><div class="th-reply-target-copy">The original is no longer in this room.</div><button type="button" class="th-reply-target-close" data-reply-cancel="1" aria-label="Cancel specific reply">×</button></div>`
+        ? `<div class="th-reply-target"><div class="th-reply-target-who">${replyTargetKind === "quote" ? "Quoting" : "Replying to"} ${esc(replyPreviewAuthor(replyTarget))}</div><div class="th-reply-target-copy">${esc(replyPreviewCopy(replyTarget))}</div><button type="button" class="th-reply-target-close" data-reply-cancel="1" aria-label="Cancel ${replyTargetKind === "quote" ? "quote" : "specific reply"}">×</button></div>`
+        : `<div class="th-reply-target missing"><div class="th-reply-target-who">${replyTargetKind === "quote" ? "Quoting" : "Replying to"} an unavailable Relay</div><div class="th-reply-target-copy">The original is no longer in this room.</div><button type="button" class="th-reply-target-close" data-reply-cancel="1" aria-label="Cancel ${replyTargetKind === "quote" ? "quote" : "specific reply"}">×</button></div>`
       : "";
     // Human chat composes only a human reply. Agent hand-offs belong to the
     // exact Relay rows above, where Codex and Claude Code are both explicit.
@@ -20567,10 +20588,21 @@
       if (m.ownedAgent) {
         messageActionBits.push(`<button type="button" class="th-reply-ghost" data-open-agent-work="${esc(m.id)}" data-stop="1">Open Work</button>`);
       } else if (!m.request && !groupPostingBlocked) {
-        // With reply threads, Reply in the room opens the message's thread;
-        // inside a thread it quotes, since threads do not nest.
-        const replyLabel = roomReplyThreads && !focusedReplyRoot ? "reply in thread" : "reply";
-        messageActionBits.push(`<button type="button" class="th-reply-ghost" data-reply-to="${esc(m.id)}" data-stop="1">${replyLabel}</button>`);
+        // Two verbs, not one "reply" (Shane, 2026-10-19). Reply in thread
+        // opens the message's thread where threads are on; in a Slack room it
+        // answers in that message's Slack thread. Quote keeps the words here
+        // with a quote card; inside a thread it is the only verb, and never
+        // for the message the thread hangs from.
+        const inThread = Boolean(focusedReplyRoot || slackFocusedThreadId);
+        if (roomReplyThreads && !inThread) {
+          messageActionBits.push(`<button type="button" class="th-reply-ghost" data-reply-thread="${esc(m.id)}" data-stop="1">reply in thread</button>`);
+        } else if (chatRoom && chatRoom.provider === "slack" && !inThread) {
+          messageActionBits.push(`<button type="button" class="th-reply-ghost" data-reply-thread="${esc(m.id)}" data-stop="1">reply in thread</button>`);
+        }
+        const threadTop = (focusedReplyRoot && m === focusedReplyRoot) || (slackFocusedThreadId && String(m.id || "") === slackFocusedThreadId);
+        if (!(chatRoom && chatRoom.provider === "slack") && !threadTop) {
+          messageActionBits.push(`<button type="button" class="th-reply-ghost" data-reply-quote="${esc(m.id)}" data-stop="1">quote</button>`);
+        }
       }
       // WhatsApp's windows: Edit for 15 minutes, Delete for everyone for 2 days.
       // Outside them the verb is not offered; confirmation happens on the
@@ -20598,7 +20630,7 @@
       <div class="th-run${mine ? " mine" : ""}" data-chat-key="${esc(renderKey)}:run"><span class="th-party ${partyColorClass(who, mine)}">${esc(who)}</span>${m.linkReply && !mine ? globalThis.RelayLinkChats?.viaHtml() || "" : ""}${m.origin === "slack" && !slackMessagesVisible() ? '<span class="th-run-via"><img src="slackMark.png" alt="" />in Slack</span>' : ""}</div>`;
       const open = expandedMsgIds.has(m.id);
       const inlineBody = !textLike && !m.request && !open
-        && !!m.body && String(m.body).length <= INLINE_BODY_MAX;
+        && !!m.body && String(m.body).length <= (cardsWide ? WIDE_INLINE_BODY_MAX : INLINE_BODY_MAX);
       const aggregates = (!REACTIONS_ENABLED || m.request || m.deletedAt || attachmentOnly) ? [] : ((m.reactions && m.reactions.aggregates) || []);
       const badges = aggregates.length ? `<div class="rx-badges" data-stop="1">${aggregates.map((reaction) =>
         reactionBadgeHtml(m.id, reaction, canReact)
@@ -20687,7 +20719,8 @@
             ? '<span class="agent-working-indicator" aria-hidden="true"><span class="agent-working-dot"></span><span class="agent-working-dot"></span><span class="agent-working-dot"></span></span>'
             : taskEvent ? (taskEvent.bare ? "" : linkify(taskEvent.note, m.groupId || thread.groupId)) : `${m.request ? taskChipHtml(m) : ""}${tombstone ? esc(tombstone) : textLike ? linkify(m.title, m.groupId || thread.groupId) : esc((!open && !inlineBody && clippedTitleBody(m.title, m.body)) || m.title)}${textLike ? "" : `<span class="th-more">${open ? "‹" : "›"}</span>`}`}</span>${textLike ? `${chatTimestampHtml(m.at, "th-blk-time", clockLabel)}</div>` : ""}
 
-          ${!textLike && !open && !inlineBody && m.preview ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
+          ${!textLike && !open && !inlineBody && relayWide && m.body ? `<div class="th-body rl-clip" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
+          ${!textLike && !open && !inlineBody && m.preview && !(relayWide && m.body) ? `<span class="th-preview">${esc(m.preview)}</span>` : ""}
           ${!textLike && !open && inlineBody ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
           ${!textLike && open ? `<div class="th-body" data-stop="0">${readerParagraphs(m.body)}</div>` : ""}
           ${allowHtml}
@@ -21082,6 +21115,11 @@
         const newest = (thread.msgs || [])[thread.msgs.length - 1];
         const selectedReplyTargetId = String(threadReplyTargets.get(threadStateKey) || "");
         const selectedReplyTarget = selectedReplyTargetId ? messageById.get(selectedReplyTargetId) : null;
+        // What the link means: a picked message carries the verb it was picked
+        // with; a send inside a thread with nothing picked answers the thread.
+        const replyKind = selectedReplyTargetId
+          ? String(threadReplyKinds.get(threadStateKey) || "quote")
+          : (focusedSlackParent || focusedReplyRoot) ? "thread" : "";
         // An empty saved group is already an addressable room. It has no
         // message from which to inherit an address, so the room itself is the
         // anchor for its first send.
@@ -21190,7 +21228,7 @@
           relayId: "",
           threadId: sendAnchor.threadId || thread.threadId,
           inReplyToRelayId: inReplyToRelayId || "",
-          explicitReply: Boolean(inReplyToRelayId),
+          replyKind: inReplyToRelayId ? replyKind : "",
           direction: "out",
           seen: false,
           seenAt: null,
@@ -21252,7 +21290,7 @@
         let res;
         try {
           res = await window.relay.sendReply({
-            text, recipient, ...(inReplyToRelayId ? { inReplyToRelayId } : {}), files, idempotencyKey, agentMentions,
+            text, recipient, ...(inReplyToRelayId ? { inReplyToRelayId, ...(replyKind ? { replyKind } : {}) } : {}), files, idempotencyKey, agentMentions,
             // The room the queue is speaking into, so a bubble rebuilt from the
             // queue after a restart knows which conversation it belongs to.
             chat: {
@@ -21305,6 +21343,7 @@
         acceptOutboxReceipt(res, idempotencyKey);
         threadComposerDrafts.delete(threadStateKey);
         threadReplyTargets.delete(threadStateKey);
+        threadReplyKinds.delete(threadStateKey);
         threadReplyAttemptKeys.delete(threadStateKey);
         chatReplySending.delete(threadStateKey);
         thReplySending = false;
@@ -21327,25 +21366,40 @@
         settleThreadComposerEntryFocus(threadComposerEntryFocus);
       }
     }
-    for (const b of newControls.querySelectorAll("[data-reply-to]")) {
+    // Quote and Reply in thread both put the message under the composer; the
+    // kind rides with it so the send and its banner say which (Shane,
+    // 2026-10-19). A reply and an edit cannot both own the composer; the
+    // reply wins.
+    const pickReplyTarget = (id, kind) => {
+      if (threadEditTargets.has(threadStateKey)) endThreadEdit(threadStateKey);
+      threadReplyTargets.set(threadStateKey, id);
+      threadReplyKinds.set(threadStateKey, kind);
+      renderThreadDetail();
+      const box = document.getElementById("thQrInput");
+      if (box) { box.focus(); box.scrollIntoView({ block: "nearest" }); }
+    };
+    for (const b of newControls.querySelectorAll("[data-reply-quote]")) {
       b.addEventListener("click", (e) => {
         e.stopPropagation();
-        const id = String(b.getAttribute("data-reply-to") || "");
+        const id = String(b.getAttribute("data-reply-quote") || "");
+        if (id) pickReplyTarget(id, "quote");
+      });
+    }
+    for (const b of newControls.querySelectorAll("[data-reply-thread]")) {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = String(b.getAttribute("data-reply-thread") || "");
         if (!id) return;
-        // Reply in the room opens the message's thread: a Relay's in its
-        // reader, a text's as the room's subview. A Task keeps its quote.
+        // Where threads are on, Reply in thread opens the message's thread: a
+        // Relay's in its reader, a text's as the room's subview. In a Slack
+        // room the composer answers in that message's Slack thread.
         const threadTarget = roomReplyThreads && !focusedReplyRoot ? messageById.get(id) : null;
         if (threadTarget && !threadTarget.request && !threadTarget.ownedAgent) {
           if (threadTarget.textLike) openReplyThread(String(threadTarget.id));
           else openRelayThreadInReader(String(threadTarget.id), threadTarget.direction === "out" ? "sent" : "threads", { focus:true });
           return;
         }
-        // A reply and an edit cannot both own the composer; the reply wins.
-        if (threadEditTargets.has(threadStateKey)) endThreadEdit(threadStateKey);
-        threadReplyTargets.set(threadStateKey, id);
-        renderThreadDetail();
-        const box = document.getElementById("thQrInput");
-        if (box) { box.focus(); box.scrollIntoView({ block: "nearest" }); }
+        pickReplyTarget(id, "thread");
       });
     }
     // The two acts left on a message the server refused. Retry puts it back in
@@ -21578,6 +21632,12 @@
     return source === "chat" || source === "relays" || source === "slack" || source === "contacts";
   }
   function openThreadDetail(threadId, partyHint = "", source = "relays", options = {}) {
+    // A new sender's conversation opens only through Add contact. A chat you
+    // are starting with a new address has nothing from them, and opens.
+    if (isConversationRoomSource(source)) {
+      const lockedRoom = chatRoomForThread(threadId, "relay");
+      if (lockedRoom && isRequestRoom(lockedRoom) && requestRoomMessages(lockedRoom).length) { showLockedRequest(lockedRoom); return; }
+    }
     const returningFromReader = activeView === "reader";
     sessionPickerState = null;
     if (activeView === "relays" && source === "relays" && scrollEl) relaysListScrollTop = scrollEl.scrollTop;
@@ -24674,17 +24734,103 @@
   // screen watches the server's list of connections, ticks the keys off when
   // Claude appears in it, and Claude's chat opens on its own.
   let connectorJustConnected = 0;
-  function claudeKeysHtml(done) {
+  function claudeKeysHtml(done, work) {
     const tick = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.3l2.3 2.2L8.5 2.6"/></svg>';
     const key = (word) => `Click <span class="su-key">${word}</span>`;
+    // A work account's Owner already added Relay: it waits in Claude's list.
+    if (work) {
+      const rows = [`Find <b>Relay</b>, marked Custom`, `${key("Connect")} beside it`, `On Relay’s page, click <span class="su-key">Allow</span>`]
+        .map((body, i) => `<div class="su-keys-row"><span class="su-keys-n">${i + 1}${tick}</span><span>${body}</span></div>`);
+      return `<div class="su-keys${done ? " done" : ""}" role="img" aria-label="In Claude's connectors: find Relay, click Connect, then click Allow on Relay's page">${rows.join("")}</div>`;
+    }
     const rows = [key("Continue"), `Scroll down <span class="su-wheel" aria-hidden="true"></span>`, key("Add"), key("Connect"), key("Allow")]
       .map((body, i) => `<div class="su-keys-row${i === 1 ? " su-keys-scroll" : ""}"><span class="su-keys-n">${i + 1}${tick}</span>${body}</div>`);
     return `<div class="su-keys${done ? " done" : ""}" role="img" aria-label="In Claude: click Continue, scroll down, click Add, click Connect, then click Allow">${rows.join("")}</div>`;
   }
+  // A WORK CLAUDE ACCOUNT (2026-10-28). On Team and Enterprise plans only an
+  // Owner can add a custom connector, so Claude's add dialog fails for anyone
+  // else. Claude asks which account first; a work account sends its Owner
+  // Relay's admin page, says when Relay was added (Relay can't see a Claude
+  // organization's settings), then connects from Claude's own list.
+  let claudeAdminLinkCopied = false;
+  async function setOnboardingClaudeAccount(kind) {
+    onboardingAgentBusy = true; onboardingAgentNote = ""; claudeAdminLinkCopied = false; renderSignup();
+    try { const snapshot = await onboardingAgentCall("onboardingClaudeAccount", kind); payload.ui = { ...payload.ui, onboardingAgent: snapshot }; }
+    catch { onboardingAgentNote = "Relay couldn’t save that. Try again."; }
+    finally { onboardingAgentBusy = false; signupBodyEl.dataset.firstRelaySignature = ""; renderSignup(); }
+  }
+  async function setOnboardingClaudeAdminAdded(added) {
+    onboardingAgentBusy = true; onboardingAgentNote = ""; renderSignup();
+    try { const snapshot = await onboardingAgentCall("onboardingClaudeAdminAdded", added); payload.ui = { ...payload.ui, onboardingAgent: snapshot }; }
+    catch { onboardingAgentNote = "Relay couldn’t save that. Try again."; }
+    finally { onboardingAgentBusy = false; signupBodyEl.dataset.firstRelaySignature = ""; renderSignup(); }
+  }
+  function renderClaudeAccount(agent, option) {
+    const connector = agent.connector || {};
+    // Claude may already have Relay: the first check skips this question.
+    if (!connector.checked) startOnboardingAgentPoll(); else stopOnboardingAgentPoll();
+    const signature = JSON.stringify(["claude-account", onboardingAgentBusy, onboardingAgentNote]);
+    if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-claude-account")) return;
+    signupBodyEl.dataset.firstRelaySignature = signature;
+    signupBodyEl.innerHTML = `<div class="su-first-relay su-agent-screen su-claude-account"><p class="su-step">Your next step</p><h1 class="su-title">Which Claude account?</h1>
+      <p class="su-copy">A work account needs its Claude admin to add Relay first.</p>
+      <div class="su-agents" role="list">${onboardingAgentRow({ ...option, name: "Personal" }, "Free, Pro or Max plan", 'data-claude-account="personal"')}
+      ${onboardingAgentRow({ ...option, name: "Work" }, "Team or Enterprise plan", 'data-claude-account="work"')}</div>
+      <button class="su-link su-agent-back" type="button" data-agent-reset>Choose a different AI</button>
+      ${onboardingAgentNote ? `<p class="su-error" role="alert">${esc(onboardingAgentNote)}</p>` : ""}</div>`;
+    signupBodyEl.querySelectorAll("[data-claude-account]").forEach((button) => button.addEventListener("click", () => setOnboardingClaudeAccount(button.dataset.claudeAccount)));
+    signupBodyEl.querySelector("[data-agent-reset]")?.addEventListener("click", resetOnboardingAgent);
+  }
+  function renderClaudeAskAdmin(agent) {
+    const connector = agent.connector || {};
+    if (!connector.checked) startOnboardingAgentPoll(); else stopOnboardingAgentPoll();
+    const link = agent.claudeAdminUrl || "https://sendrelays.com/connect/claude/admin";
+    const signature = JSON.stringify(["claude-admin", link, claudeAdminLinkCopied, onboardingAgentBusy, onboardingAgentNote]);
+    if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-claude-admin")) return;
+    signupBodyEl.dataset.firstRelaySignature = signature;
+    const tick = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.3l2.3 2.2L8.5 2.6"/></svg>';
+    const busy = onboardingAgentBusy ? " disabled" : "";
+    // Once the link is copied, the next thing to do is wait for the admin, so the
+    // button that says they're done becomes the main one.
+    const actions = claudeAdminLinkCopied
+      ? `<button class="su-primary" type="button" data-claude-admin-added${busy}>My admin added Relay</button>`
+      : `<button class="su-primary" type="button" data-claude-admin-copy${busy}>Copy link</button>`;
+    // An Owner setting up their own Relay opens the same steps for themselves.
+    const status = onboardingAgentNote ? esc(onboardingAgentNote)
+      : claudeAdminLinkCopied ? "Send it to your Claude admin. Come back here once they’ve added Relay."
+      : `<button class="su-link" type="button" data-claude-admin-self>Are you the admin? Open the steps</button>`;
+    signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect su-claude-admin"><div class="su-step">Your next step</div>
+      <h1 class="su-title">Ask your admin<br>to add Relay.</h1>
+      <p class="su-copy">On a work account, only an Owner can add Relay to Claude. Send them this link. It shows them how, in about a minute.</p>
+      <div class="su-first-message su-link-box${claudeAdminLinkCopied ? " copied" : ""}"><span>${esc(link).replace(/\//g, "/<wbr>")}</span>${claudeAdminLinkCopied ? `<b role="status">${tick}Copied</b>` : ""}</div>
+      <div class="su-claude-tail"><div class="su-form su-agent-actions">${actions}</div>
+      <div class="su-agent-quiet">${claudeAdminLinkCopied
+        ? `<button class="su-link" type="button" data-claude-admin-copy>Copy again</button>`
+        : `<button class="su-link" type="button" data-claude-admin-added>Already added</button>`}<span aria-hidden="true">·</span><button class="su-link" type="button" data-claude-personal>Personal account</button></div>
+      <div class="desktop-prompt-wait" role="status">${status}</div></div></div>`;
+    signupBodyEl.querySelectorAll("[data-claude-admin-copy]").forEach((button) => button.addEventListener("click", async () => {
+      onboardingAgentNote = "";
+      try { await onboardingAgentCall("onboardingCopyClaudeAdminLink"); claudeAdminLinkCopied = true; }
+      catch { onboardingAgentNote = "Relay couldn’t copy it. Try again."; }
+      signupBodyEl.dataset.firstRelaySignature = ""; renderSignup();
+    }));
+    signupBodyEl.querySelectorAll("[data-claude-admin-added]").forEach((button) => button.addEventListener("click", () => setOnboardingClaudeAdminAdded(true)));
+    signupBodyEl.querySelector("[data-claude-admin-self]")?.addEventListener("click", async () => {
+      try { await onboardingAgentCall("onboardingOpenClaudeAdminPage"); onboardingAgentNote = "The steps are open in your browser. Come back here when Relay is added."; }
+      catch { onboardingAgentNote = "Relay couldn’t open the page. Copy the link instead."; }
+      signupBodyEl.dataset.firstRelaySignature = ""; renderSignup();
+    });
+    signupBodyEl.querySelector("[data-claude-personal]")?.addEventListener("click", () => setOnboardingClaudeAccount("personal"));
+  }
   function renderClaudeConnect(agent, option) {
     const connector = agent.connector || {};
     const celebrating = connectorJustConnected > Date.now();
-    const signature = JSON.stringify(["claude", connector.started, connector.connected, connector.checked, connector.error, onboardingAgentBusy, onboardingAgentNote, celebrating]);
+    if (!connector.connected && !celebrating) {
+      if (!agent.claudeAccount) { renderClaudeAccount(agent, option); return; }
+      if (agent.claudeAccount === "work" && !agent.claudeAdminAdded) { renderClaudeAskAdmin(agent); return; }
+    }
+    const work = agent.claudeAccount === "work";
+    const signature = JSON.stringify(["claude", work, connector.started, connector.connected, connector.checked, connector.error, onboardingAgentBusy, onboardingAgentNote, celebrating]);
     if (signupBodyEl.dataset.firstRelaySignature === signature && signupBodyEl.querySelector(".su-claude-connect")) return;
     signupBodyEl.dataset.firstRelaySignature = signature;
     // Asks the server while this screen is up: once at first (Claude may
@@ -24693,7 +24839,15 @@
     const already = connector.connected && !celebrating;
     const title = already ? `${onboardingAgentTitleName(agent)}<br>has Relay.` : `Add Relay to<br>${onboardingAgentTitleName(agent)}.`;
     const copy = already ? "Start a chat and Claude takes it from there."
+      : work ? (connector.started ? "Claude’s connectors are open there. Now:" : "It opens on Claude’s connectors. Then:")
       : connector.started ? "Relay is filled in there. Now:" : "It opens with Relay filled in. Then:";
+    // Work: Relay isn't in Claude's list until the Owner adds it, so the way
+    // back is to ask again. Personal: a work account's add dialog fails, so
+    // that is the way across.
+    // Personal keeps one way across before Open; after it, "Already in Claude?" takes the slot.
+    const accountLink = work
+      ? `<button class="su-link" type="button" data-claude-not-listed>Not in Claude’s list?</button><span aria-hidden="true">·</span>`
+      : connector.started ? "" : `<button class="su-link" type="button" data-claude-work>Work account?</button><span aria-hidden="true">·</span>`;
     // Once Claude is open the person is there, so the way back steps down to secondary.
     const primary = already
       ? `<button class="su-primary" type="button" data-claude-start${onboardingAgentBusy ? " disabled" : ""}>Start in Claude</button>`
@@ -24705,12 +24859,14 @@
     signupBodyEl.innerHTML = `<div class="su-local-prompt su-agent-screen su-claude-connect"><div class="su-step">Your next step</div>
       <h1 class="su-title">${title}</h1>
       <p class="su-copy">${copy}</p>
-      ${already ? "" : claudeKeysHtml(celebrating)}
+      ${already ? "" : claudeKeysHtml(celebrating, work)}
       <div class="su-claude-tail">${celebrating ? `<p class="su-claude-done" role="status">Claude is connected.</p>` : `<div class="su-form su-agent-actions">${primary}</div>
-      <div class="su-agent-quiet">${connector.started && !already ? `<button class="su-link" type="button" data-claude-reconnect>Already in Claude?</button><span aria-hidden="true">·</span>` : ""}<button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>
+      <div class="su-agent-quiet">${already ? "" : accountLink}${connector.started && !already && !work ? `<button class="su-link" type="button" data-claude-reconnect>Already in Claude?</button><span aria-hidden="true">·</span>` : ""}<button class="su-link" type="button" data-agent-reset>Choose a different AI</button></div>
       <div class="desktop-prompt-wait" role="status">${status}</div>`}</div></div>`;
     signupBodyEl.querySelector("[data-claude-connect]")?.addEventListener("click", connectOnboardingClaude);
     signupBodyEl.querySelector("[data-claude-start]")?.addEventListener("click", openOnboardingAgent);
+    signupBodyEl.querySelector("[data-claude-work]")?.addEventListener("click", () => setOnboardingClaudeAccount("work"));
+    signupBodyEl.querySelector("[data-claude-not-listed]")?.addEventListener("click", () => setOnboardingClaudeAdminAdded(false));
     // Claude refuses to add Relay twice ("A connector with this URL already
     // exists"). When Relay's side was turned off, the fix is Connect on the
     // one already in Claude: its list opens, and the handoff still signs in.
@@ -25554,7 +25710,6 @@
         if (view !== lit) { if (threadsSource !== "slack") threadsSource = view === "chat" ? "chat" : threadsCameFrom; syncTabs(); return; }
         // second tap on the lit tab: fall through and navigate to its list
       }
-      if (view === "relays" && requestInboxOpen) { requestInboxOpen = false; requestInboxError = ""; if (view === activeView) { renderRelays(); scrollEl.scrollTop = 0; return; } }
       if (view === activeView) {
         if (blockedPeoplePage && blockedPeopleView() === view) closeBlockedPeople();
         else if (view === "settings" && setupPageOpen) closeSetupPage();
@@ -25570,10 +25725,6 @@
   // what that list last had open there, so Inbox → Topics → Inbox comes back
   // to the same chat. The lit tab only takes its list back to the top.
   function wideTabHop(view) {
-    if (view === "relays" && requestInboxOpen) {
-      requestInboxOpen = false; requestInboxError = "";
-      if (wideSideTab() === "relays") { renderRelays(); wideSideListEl.scrollTop = 0; return; }
-    }
     const target = view === "chat" ? "relays" : view;
     if (target === wideSideTab()) {
       if (blockedPeoplePage && blockedPeopleView() === view) closeBlockedPeople();
@@ -25729,6 +25880,11 @@
     // The background service could not be put back by this pill: the one
     // state worth a sentence. "repairing" and a successful repair stay quiet.
     serviceStoppedNoteEl?.classList.toggle("gone", payload.service?.daemon !== "stopped");
+    if (networkNoteEl) {
+      const note = NETWORK_NOTES[payload.network?.state] || "";
+      if (networkNoteEl.textContent !== note) networkNoteEl.textContent = note;
+      networkNoteEl.classList.toggle("gone", !note);
+    }
     // Relays badge/count reflect only the items that show in the Relays tab
     // (the clean split keeps task_request / share_approval out of this count).
     // ONE unread is ONE number. Relays and Chat were counting the same arrivals
@@ -25739,8 +25895,10 @@
       .map((item) => [String(item.relayId || item.id || ""), item])
       .filter(([id]) => Boolean(id)));
     const viewerEmail = String(payload.account?.email || "").trim().toLowerCase();
-    // A request is not unread mail: it waits in the single Requests row.
-    const quiet = requestAddresses();
+    // A new sender's relay counts like any other (it is locked, not hidden);
+    // only a sender you blocked stays out of the number.
+    const blocked = ignoredRequestKeys();
+    const quiet = new Set([...requestAddresses()].filter((address) => blocked.has(address)));
     const relayUnreadIds = new Set(
       (payload.relays || [])
         .filter((r) => r.unread

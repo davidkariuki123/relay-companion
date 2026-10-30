@@ -86,7 +86,7 @@ contextBridge.exposeInMainWorld("relay", {
   ack: (id) => ipcRenderer.send("relay:ack", id),
   ackMany: (ids) => ipcRenderer.invoke("relay:ackMany", Array.isArray(ids) ? ids : []),
   chatReadActivity: () => ipcRenderer.send("relay:chatReadActivity"),
-  // A REAL send: {text, inReplyToRelayId?, recipient?, files:[{path}|{name,contentBase64,contentType}]}
+  // A REAL send: {text, inReplyToRelayId?, replyKind?: "quote"|"thread", recipient?, files:[{path}|{name,contentBase64,contentType}]}
   // Answers as soon as the message is committed to this device's outbox, not
   // when the server has it — the composer never waits on the network.
   sendReply: (payload) => ipcRenderer.invoke("relay:sendReply", payload),
@@ -268,6 +268,10 @@ contextBridge.exposeInMainWorld("relay", {
   onboardingPickIdea: (userId, ideaId) => ipcRenderer.invoke("relay:onboardingPickIdea", String(userId || ""), String(ideaId || "")),
   onboardingFocusAgent: (userId) => ipcRenderer.invoke("relay:onboardingFocusAgent", String(userId || "")),
   onboardingConnectClaude: (userId) => ipcRenderer.invoke("relay:onboardingConnectClaude", String(userId || "")),
+  onboardingClaudeAccount: (userId, kind) => ipcRenderer.invoke("relay:onboardingClaudeAccount", String(userId || ""), String(kind || "")),
+  onboardingClaudeAdminAdded: (userId, added) => ipcRenderer.invoke("relay:onboardingClaudeAdminAdded", String(userId || ""), added === true),
+  onboardingCopyClaudeAdminLink: (userId) => ipcRenderer.invoke("relay:onboardingCopyClaudeAdminLink", String(userId || "")),
+  onboardingOpenClaudeAdminPage: (userId) => ipcRenderer.invoke("relay:onboardingOpenClaudeAdminPage", String(userId || "")),
   onboardingConnectChatGptApp: (userId) => ipcRenderer.invoke("relay:onboardingConnectChatGptApp", String(userId || "")),
   // SETUP (2026-10-07): every AI's connection, and the verbs to connect them.
   setupSnapshot: (userId, options = {}) => ipcRenderer.invoke("relay:setupSnapshot", String(userId || ""), { force: options?.force === true }),

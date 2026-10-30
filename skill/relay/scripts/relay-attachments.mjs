@@ -99,6 +99,7 @@ export async function prepareOrdinaryRelayAttachments(args = {}, { baseDir = pro
       bytes: file.bytes,
       sha256: file.sha256,
       contentBase64: file.body.toString("base64"),
+      ...(file.revises ? { revises: file.revises } : {}),
     })),
   ];
 }
@@ -180,6 +181,7 @@ async function readLocalAttachmentSpecs(specs, trustedLocalRoot = "", baseDir = 
       bytes: body.length,
       sha256,
       body,
+      ...(typeof spec.revises === "string" && spec.revises.trim() ? { revises: spec.revises.trim() } : {}),
     });
   }
   return out;
